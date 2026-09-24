@@ -28,12 +28,4 @@ describe('Quantity', () => {
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr().type).toBe('Validation');
   });
-
-  it('checks whether it fits within available stock', () => {
-    const quantity = Quantity.create(5)._unsafeUnwrap();
-
-    expect(quantity.isAtMost(10)).toBe(true);
-    expect(quantity.isAtMost(5)).toBe(true);
-    expect(quantity.isAtMost(4)).toBe(false);
-  });
 });

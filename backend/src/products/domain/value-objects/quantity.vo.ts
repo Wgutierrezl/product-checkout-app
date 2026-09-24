@@ -18,8 +18,4 @@ export class Quantity {
   get value(): number {
     return this.amount;
   }
-
-  isAtMost(stock: number): boolean {
-    return this.amount <= stock;
-  }
 }
