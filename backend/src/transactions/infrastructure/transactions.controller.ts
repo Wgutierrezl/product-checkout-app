@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
-import { ApiBadGatewayResponse, ApiBadRequestResponse, ApiConflictResponse, ApiCreatedResponse, ApiNotFoundResponse, ApiOkResponse, ApiParam, ApiTags } from '@nestjs/swagger';
+import { ApiBadGatewayResponse, ApiBadRequestResponse, ApiConflictResponse, ApiCreatedResponse, ApiNotFoundResponse, ApiOkResponse, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 
 import { CreateTransactionUseCase } from '../application/create-transaction.use-case';
@@ -19,6 +19,11 @@ export class TransactionsController {
   ) {}
 
   @Post()
+  @ApiOperation({
+    summary:
+      'Create a checkout transaction. Price is always computed server-side; the gateway is called ' +
+      'synchronously with the server-computed amount.',
+  })
   @ApiCreatedResponse({
     type: TransactionResponseDto,
     description:
@@ -26,6 +31,7 @@ export class TransactionsController {
       'idempotencyKey again returns the original transaction unchanged and ' +
       'never calls the gateway a second time.',
   })
+  @ApiBadRequestResponse({ description: 'Validation failed (missing/invalid field, or an unknown extra field)' })
   @ApiNotFoundResponse({ description: 'Product not found' })
   @ApiConflictResponse({ description: 'Insufficient stock' })
   @ApiBadGatewayResponse({ description: 'Payment gateway unreachable or timed out' })
@@ -51,6 +57,9 @@ export class TransactionsController {
   }
 
   @Get(':id')
+  @ApiOperation({
+    summary: 'Get a transaction by id, self-healing a stale PENDING status via a lazy poll of the gateway.',
+  })
   @ApiParam({ name: 'id', description: 'Transaction id (UUID v4)' })
   @ApiOkResponse({
     type: TransactionResponseDto,
@@ -58,6 +67,7 @@ export class TransactionsController {
       'A stale PENDING transaction is refreshed against the payment gateway before responding ' +
       '(lazy poll). The delivery is embedded once the transaction is APPROVED.',
   })
+  @ApiBadRequestResponse({ description: 'Malformed id (not a UUID v4)' })
   @ApiNotFoundResponse({ description: 'Transaction not found' })
   async getById(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
@@ -85,6 +95,9 @@ export class TransactionsController {
   @Post('webhook')
   @SkipThrottle()
   @HttpCode(200)
+  @ApiOperation({
+    summary: 'Payment gateway webhook. Checksum-verified server-side; never rate-limited.',
+  })
   @ApiOkResponse({
     description:
       'Always 200 for a checksum-valid payload, including unknown or already-final transactions (idempotent).',
