@@ -78,10 +78,14 @@ describe('PaymentForm', () => {
       expect(screen.queryByRole('img', { name: 'Mastercard' })).not.toBeInTheDocument();
     });
 
-    it('masks the CVC input (type=password)', () => {
+    it('masks the CVC visually via CSS rather than type=password (avoids password-manager storage)', () => {
       renderForm();
 
-      expect(screen.getByLabelText(/cvc/i)).toHaveAttribute('type', 'password');
+      const cvcInput = screen.getByLabelText(/cvc/i);
+      expect(cvcInput).toHaveAttribute('type', 'text');
+      expect(cvcInput).toHaveAttribute('inputMode', 'numeric');
+      expect(cvcInput).toHaveAttribute('autoComplete', 'cc-csc');
+      expect(cvcInput).toHaveClass('maskedInput');
     });
   });
 

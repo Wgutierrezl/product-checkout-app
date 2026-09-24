@@ -282,8 +282,8 @@ export function PaymentForm({
                   ref={(el) => {
                     fieldRefs.current.cvc = el ?? undefined;
                   }}
-                  className={styles.input}
-                  type="password"
+                  className={styles.maskedInput}
+                  type="text"
                   inputMode="numeric"
                   autoComplete="cc-csc"
                   maxLength={3}

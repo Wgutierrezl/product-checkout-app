@@ -42,6 +42,18 @@
   outline-offset: 1px;
 }
 
+/*
+ * CVC masking via CSS rather than type="password": password managers may
+ * offer to save/autofill a password-type field, which a CVC must never be.
+ * -webkit-text-security is WebKit/Blink-only (Firefox has no equivalent);
+ * on browsers without it the CVC is shown in plain text, an accepted
+ * degradation over risking password-manager storage of a card security code.
+ */
+.maskedInput {
+  composes: input;
+  -webkit-text-security: disc;
+}
+
 .cardNumberRow {
   display: flex;
   align-items: center;
