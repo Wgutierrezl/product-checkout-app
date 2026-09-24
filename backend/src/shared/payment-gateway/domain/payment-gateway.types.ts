@@ -46,4 +46,12 @@ export interface CreateCardTransactionInput {
 export interface GatewayTransactionResult {
   gatewayTransactionId: string;
   status: GatewayTransactionStatus;
+  /**
+   * Populated best-effort whenever the upstream response includes them
+   * (e.g. `GET /transactions/:id`) — used by `HandleWebhookUseCase` as the
+   * authoritative amount/currency when a webhook payload's own fields
+   * aren't covered by its checksum (`signature.properties`).
+   */
+  amountInCents?: number;
+  currency?: string;
 }

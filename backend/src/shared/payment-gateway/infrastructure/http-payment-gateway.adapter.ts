@@ -31,6 +31,8 @@ interface GatewayTransactionResponse {
   data: {
     id: string;
     status: GatewayTransactionStatus;
+    amount_in_cents?: number;
+    currency?: string;
   };
 }
 
@@ -78,8 +80,18 @@ function isGatewayTransactionResponse(value: unknown): value is GatewayTransacti
   if (!isRecord(value) || !isRecord(value.data)) {
     return false;
   }
+  const { id, status, amount_in_cents: amountInCents, currency } = value.data;
 
-  return typeof value.data.id === 'string' && isGatewayTransactionStatus(value.data.status);
+  if (typeof id !== 'string' || !isGatewayTransactionStatus(status)) {
+    return false;
+  }
+  if (amountInCents !== undefined && typeof amountInCents !== 'number') {
+    return false;
+  }
+  if (currency !== undefined && typeof currency !== 'string') {
+    return false;
+  }
+  return true;
 }
 
 function isGatewayTransactionListItem(value: unknown): value is { id: string; status: GatewayTransactionStatus } {
@@ -171,11 +183,24 @@ export class HttpPaymentGatewayAdapter implements PaymentGatewayPort {
       { method: 'GET', headers: { Authorization: `Bearer ${this.config.privateKey}` } },
     )
       .andThen((body) => this.validate(body, isGatewayTransactionListResponse, 'transaction list'))
-      .map((response) => (response.data.length > 0 ? this.toGatewayResult({ data: response.data[0] }) : null));
+      .map((response) => {
+        if (response.data.length > 1) {
+          this.logger.warn(
+            `Gateway returned multiple transactions for one reference lookup (reference=${reference}), ` +
+              'expected at most one. Using the first match.',
+          );
+        }
+        return response.data.length > 0 ? this.toGatewayResult({ data: response.data[0] }) : null;
+      });
   }
 
   private toGatewayResult(response: GatewayTransactionResponse): GatewayTransactionResult {
-    return { gatewayTransactionId: response.data.id, status: response.data.status };
+    return {
+      gatewayTransactionId: response.data.id,
+      status: response.data.status,
+      amountInCents: response.data.amount_in_cents,
+      currency: response.data.currency,
+    };
   }
 
   /**

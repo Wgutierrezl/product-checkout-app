@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 
 import { ValidationError } from '../../shared/errors/domain-error';
+import { PAYMENT_GATEWAY_PORT, PaymentGatewayPort } from '../../shared/payment-gateway/domain/payment-gateway.port';
 import { verifyWebhookChecksum, WebhookEventPayload } from '../../shared/payment-gateway/domain/webhook-checksum';
 import {
   parseWebhookTransactionEvent,
@@ -15,6 +16,14 @@ export const EVENTS_SECRET = Symbol('EVENTS_SECRET');
 
 /** This whole system is COP-only — see design ADR-6. */
 const TRANSACTION_CURRENCY = 'COP';
+
+const AMOUNT_PROPERTY_PATH = 'transaction.amount_in_cents';
+const CURRENCY_PROPERTY_PATH = 'transaction.currency';
+
+interface VerifiedAmount {
+  amountInCents?: number;
+  currency?: string;
+}
 
 /**
  * Handles `POST /transactions/webhook`. Verifies the checksum first — an
@@ -31,6 +40,7 @@ export class HandleWebhookUseCase {
   constructor(
     @Inject(TRANSACTION_REPOSITORY_PORT) private readonly transactions: TransactionRepositoryPort,
     private readonly settleTransaction: SettleTransactionUseCase,
+    @Inject(PAYMENT_GATEWAY_PORT) private readonly gateway: PaymentGatewayPort,
     @Inject(EVENTS_SECRET) private readonly eventsSecret: string,
   ) {}
 
@@ -49,34 +59,79 @@ export class HandleWebhookUseCase {
         return okAsync(null);
       }
 
-      if (!this.amountMatches(event, tx)) {
-        this.logger.error(
-          `Webhook amount/currency mismatch — refusing to settle: transactionId=${tx.id} ` +
-            `reference=${tx.reference} storedAmountCents=${tx.totalAmount.valueInCents} ` +
-            `eventAmountCents=${event.amountInCents} eventCurrency=${event.currency}`,
-        );
-        return okAsync(null);
-      }
+      return this.resolveVerifiedAmount(payload, event)
+        .andThen((verified) => {
+          if (!this.amountMatches(verified, tx)) {
+            this.logger.error(
+              `Webhook amount/currency mismatch — refusing to settle: transactionId=${tx.id} ` +
+                `reference=${tx.reference} storedAmountCents=${tx.totalAmount.valueInCents} ` +
+                `verifiedAmountCents=${verified.amountInCents} verifiedCurrency=${verified.currency}`,
+            );
+            return okAsync(null);
+          }
 
-      return this.settleTransaction.execute({
-        transactionId: tx.id,
-        gatewayStatus: event.status,
-        gatewayTransactionId: event.gatewayTransactionId,
-      });
+          return this.settleTransaction.execute({
+            transactionId: tx.id,
+            gatewayStatus: event.status,
+            gatewayTransactionId: event.gatewayTransactionId,
+          });
+        })
+        .orElse((error) => {
+          this.logger.error(
+            `Failed to verify webhook amount via gateway fallback — refusing to settle: transactionId=${tx.id} ` +
+              `reference=${tx.reference}: ${error.message}`,
+          );
+          return okAsync(null);
+        });
     });
   }
 
   /**
-   * A mismatch means the webhook event doesn't describe the transaction it
-   * claims to — refuse to settle rather than trust it. Missing fields are
-   * NOT a mismatch: not every event type is guaranteed to carry an amount,
-   * and this check only runs when there is something concrete to compare.
+   * `signature.properties` is the checksum's tamper-evident contract — a
+   * field NOT listed there is NOT covered by `verifyWebhookChecksum`, even
+   * if it's present in `data.transaction`. Trust `amount_in_cents`/`currency`
+   * straight from the event ONLY when each is actually signed; otherwise
+   * fetch the authoritative value from the gateway directly by id (a single
+   * `getTransaction` call covers whichever of the two needs it) instead of
+   * trusting an unsigned, tamperable payload field.
    */
-  private amountMatches(event: WebhookTransactionEvent, tx: Transaction): boolean {
-    if (event.amountInCents !== undefined && event.amountInCents !== tx.totalAmount.valueInCents) {
+  private resolveVerifiedAmount(
+    payload: WebhookEventPayload,
+    event: WebhookTransactionEvent,
+  ): AppResultAsync<VerifiedAmount> {
+    const signedProperties = payload.signature.properties;
+    const amountSigned = signedProperties.includes(AMOUNT_PROPERTY_PATH);
+    const currencySigned = signedProperties.includes(CURRENCY_PROPERTY_PATH);
+    const amountNeedsFallback = event.amountInCents !== undefined && !amountSigned;
+    const currencyNeedsFallback = event.currency !== undefined && !currencySigned;
+
+    if (!amountNeedsFallback && !currencyNeedsFallback) {
+      return okAsync({ amountInCents: event.amountInCents, currency: event.currency });
+    }
+
+    this.logger.warn(
+      `Webhook amount/currency not covered by the checksum (signature.properties) — fetching the ` +
+        `authoritative value from the gateway instead: gatewayTransactionId=${event.gatewayTransactionId}`,
+    );
+
+    return this.gateway.getTransaction(event.gatewayTransactionId).map((result) => ({
+      amountInCents: amountNeedsFallback ? result.amountInCents : event.amountInCents,
+      currency: currencyNeedsFallback ? result.currency : event.currency,
+    }));
+  }
+
+  /**
+   * A mismatch means the (now-verified) amount/currency don't describe the
+   * transaction they claim to — refuse to settle rather than trust it.
+   * Missing fields are NOT a mismatch: not every event/gateway response is
+   * guaranteed to carry an amount, and this check only runs when there is
+   * something concrete to compare.
+   */
+  private amountMatches(verified: VerifiedAmount, tx: Transaction): boolean {
+    if (verified.amountInCents !== undefined && verified.amountInCents !== tx.totalAmount.valueInCents) {
       return false;
     }
-    if (event.currency !== undefined && event.currency !== TRANSACTION_CURRENCY) {
+    if (verified.currency !== undefined && verified.currency !== TRANSACTION_CURRENCY) {
       return false;
     }
     return true;

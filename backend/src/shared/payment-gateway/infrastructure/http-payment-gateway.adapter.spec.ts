@@ -299,6 +299,52 @@ describe('HttpPaymentGatewayAdapter', () => {
       expect(init.headers).toMatchObject({ Authorization: 'Bearer prv_test_fake' });
     });
 
+    it('also maps amount_in_cents/currency when the upstream body includes them', async () => {
+      global.fetch = jest
+        .fn()
+        .mockResolvedValue(
+          jsonResponse({ data: { id: 'gw-tx-1', status: 'APPROVED', amount_in_cents: 16_040_000, currency: 'COP' } }),
+        ) as unknown as typeof fetch;
+      const adapter = buildAdapter();
+
+      const result = await adapter.getTransaction('gw-tx-1');
+
+      expect(result._unsafeUnwrap()).toEqual({
+        gatewayTransactionId: 'gw-tx-1',
+        status: 'APPROVED',
+        amountInCents: 16_040_000,
+        currency: 'COP',
+      });
+    });
+
+    it('maps a response with a wrong-typed amount_in_cents to PaymentGatewayError (does not throw)', async () => {
+      global.fetch = jest
+        .fn()
+        .mockResolvedValue(
+          jsonResponse({ data: { id: 'gw-tx-1', status: 'APPROVED', amount_in_cents: 'not-a-number' } }),
+        ) as unknown as typeof fetch;
+      const adapter = buildAdapter();
+
+      const result = await adapter.getTransaction('gw-tx-1');
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('PaymentGatewayError');
+    });
+
+    it('maps a response with a wrong-typed currency to PaymentGatewayError (does not throw)', async () => {
+      global.fetch = jest
+        .fn()
+        .mockResolvedValue(
+          jsonResponse({ data: { id: 'gw-tx-1', status: 'APPROVED', currency: 123 } }),
+        ) as unknown as typeof fetch;
+      const adapter = buildAdapter();
+
+      const result = await adapter.getTransaction('gw-tx-1');
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('PaymentGatewayError');
+    });
+
     it('maps an HTTP failure to PaymentGatewayError', async () => {
       global.fetch = jest.fn().mockResolvedValue(jsonResponse({}, false, 404)) as unknown as typeof fetch;
       const adapter = buildAdapter();
@@ -359,6 +405,23 @@ describe('HttpPaymentGatewayAdapter', () => {
 
       expect(result.isOk()).toBe(true);
       expect(result._unsafeUnwrap()).toBeNull();
+    });
+
+    it('logs a warning and uses the first match when the gateway returns more than one transaction for one reference', async () => {
+      global.fetch = jest
+        .fn()
+        .mockResolvedValue(
+          jsonResponse({ data: [{ id: 'gw-tx-1', status: 'APPROVED' }, { id: 'gw-tx-2', status: 'PENDING' }], meta: {} }),
+        ) as unknown as typeof fetch;
+      const warnSpy = jest.spyOn(require('@nestjs/common').Logger.prototype, 'warn').mockImplementation();
+      const adapter = buildAdapter();
+
+      const result = await adapter.getTransactionByReference('REF-1');
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toEqual({ gatewayTransactionId: 'gw-tx-1', status: 'APPROVED' });
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('REF-1'));
+      warnSpy.mockRestore();
     });
 
     it('maps an HTTP failure to PaymentGatewayError', async () => {
