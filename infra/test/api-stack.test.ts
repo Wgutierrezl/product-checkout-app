@@ -1,8 +1,15 @@
+import * as path from 'node:path';
+
 import { App } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 
 import { ApiStack } from '../lib/api-stack';
 import { DataStack } from '../lib/data-stack';
+
+// A tiny placeholder directory, NOT the real backend build — keeps these
+// unit tests independent of `backend/dist-lambda` existing on disk. Real
+// deploys/synth use the actual build (see bin/app.ts's ensureLambdaAssetBuilt).
+const FIXTURE_LAMBDA_ASSET_PATH = path.join(__dirname, 'fixtures/lambda-asset');
 
 function synthApiStack(): Template {
   const app = new App();
@@ -16,6 +23,7 @@ function synthApiStack(): Template {
     deliveriesTable: dataStack.deliveriesTable,
     transactionsTable: dataStack.transactionsTable,
     webStackDomain: 'd123456abcdef.cloudfront.net',
+    lambdaAssetPath: FIXTURE_LAMBDA_ASSET_PATH,
   });
   return Template.fromStack(apiStack);
 }

@@ -1,5 +1,3 @@
-import * as path from 'node:path';
-
 import { CfnOutput, Duration, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
 import { HttpApi } from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
@@ -20,6 +18,14 @@ export interface ApiStackProps extends StackProps {
   readonly transactionsTable: ITable;
   /** CloudFront distribution domain from `WebStack`, used for CORS. */
   readonly webStackDomain: string;
+  /**
+   * Local directory `Code.fromAsset` zips as the Lambda deployment package.
+   * Callers own how it's produced: `bin/app.ts` points at the real
+   * `backend/dist-lambda` build (see its `ensureLambdaAssetBuilt`), while
+   * unit tests point at a tiny fixture directory so `infra`'s test suite
+   * never depends on a backend build existing on disk.
+   */
+  readonly lambdaAssetPath: string;
 }
 
 /**
@@ -48,7 +54,7 @@ export class ApiStack extends Stack {
       memorySize: 1024,
       timeout: Duration.seconds(15),
       handler: 'dist/src/lambda.handler',
-      code: Code.fromAsset(path.join(__dirname, '../../backend/dist-lambda')),
+      code: Code.fromAsset(props.lambdaAssetPath),
       logGroup,
       environment: {
         CORS_ALLOWED_ORIGINS: `https://${props.webStackDomain}`,
