@@ -1,4 +1,6 @@
-export type GatewayTransactionStatus = 'PENDING' | 'APPROVED' | 'DECLINED' | 'VOIDED' | 'ERROR';
+export const GATEWAY_TRANSACTION_STATUSES = ['PENDING', 'APPROVED', 'DECLINED', 'VOIDED', 'ERROR'] as const;
+
+export type GatewayTransactionStatus = (typeof GATEWAY_TRANSACTION_STATUSES)[number];
 
 export interface AcceptanceTokenInfo {
   token: string;

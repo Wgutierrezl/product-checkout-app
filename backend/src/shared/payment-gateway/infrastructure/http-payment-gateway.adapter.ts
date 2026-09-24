@@ -11,6 +11,7 @@ import {
   CreateCardTransactionInput,
   GatewayTransactionResult,
   GatewayTransactionStatus,
+  GATEWAY_TRANSACTION_STATUSES,
 } from '../domain/payment-gateway.types';
 
 interface AcceptanceTokenInfoShape {
@@ -31,14 +32,6 @@ interface GatewayTransactionResponse {
     status: GatewayTransactionStatus;
   };
 }
-
-const KNOWN_GATEWAY_STATUSES: readonly string[] = [
-  'PENDING',
-  'APPROVED',
-  'DECLINED',
-  'VOIDED',
-  'ERROR',
-];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -64,7 +57,7 @@ function isMerchantAcceptanceResponse(value: unknown): value is MerchantAcceptan
 }
 
 function isGatewayTransactionStatus(value: unknown): value is GatewayTransactionStatus {
-  return typeof value === 'string' && KNOWN_GATEWAY_STATUSES.includes(value);
+  return typeof value === 'string' && (GATEWAY_TRANSACTION_STATUSES as readonly string[]).includes(value);
 }
 
 function isGatewayTransactionResponse(value: unknown): value is GatewayTransactionResponse {
