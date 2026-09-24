@@ -155,7 +155,7 @@ catalog.
   refreshed in the narrow window between clicking Pay and observing the response,
   `checkout.submitAttempted` (itself persisted) is checked exactly once, at boot, against that
   endpoint — resolved-on-boot only, deliberately never re-triggered by a live, current-session Pay
-  click (that race, and the bug it caused, is documented in the TDD Cycle Evidence log — see
+  click (that race was one of the bugs found in the live end-to-end run — see
   [Testing](#testing)).
 
 ## Accessibility
