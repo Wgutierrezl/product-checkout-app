@@ -72,4 +72,20 @@ describe('validateEnv', () => {
 
     expect(result.PORT).toBe(Number(port));
   });
+
+  it('defaults PAYMENT_GATEWAY_TIMEOUT_MS to 8000ms', () => {
+    const result = validateEnv(requiredEnv);
+
+    expect(result.PAYMENT_GATEWAY_TIMEOUT_MS).toBe(8000);
+  });
+
+  it('applies an explicit PAYMENT_GATEWAY_TIMEOUT_MS override', () => {
+    const result = validateEnv({ ...requiredEnv, PAYMENT_GATEWAY_TIMEOUT_MS: '5000' });
+
+    expect(result.PAYMENT_GATEWAY_TIMEOUT_MS).toBe(5000);
+  });
+
+  it('rejects a non-positive PAYMENT_GATEWAY_TIMEOUT_MS', () => {
+    expect(() => validateEnv({ ...requiredEnv, PAYMENT_GATEWAY_TIMEOUT_MS: '0' })).toThrow();
+  });
 });

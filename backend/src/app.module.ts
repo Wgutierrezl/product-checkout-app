@@ -6,10 +6,12 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { CustomersModule } from './customers/customers.module';
 import { DeliveriesModule } from './deliveries/deliveries.module';
 import { HealthController } from './health/health.controller';
+import { PaymentAcceptanceModule } from './payment-acceptance/payment-acceptance.module';
 import { ProductsModule } from './products/products.module';
 import type { AppConfig } from './shared/config/configuration';
 import { AppConfigModule } from './shared/config/config.module';
 import { DynamoModule } from './shared/infrastructure/dynamo/dynamo.module';
+import { PaymentGatewayModule } from './shared/payment-gateway/payment-gateway.module';
 import { SystemClockAdapter } from './shared/infrastructure/clock/system-clock.adapter';
 import { UuidIdGeneratorAdapter } from './shared/infrastructure/id/uuid-id-generator.adapter';
 import { CLOCK_PORT } from './shared/ports/clock.port';
@@ -26,9 +28,11 @@ import { ID_GENERATOR_PORT } from './shared/ports/id-generator.port';
       },
     }),
     DynamoModule,
+    PaymentGatewayModule,
     ProductsModule,
     CustomersModule,
     DeliveriesModule,
+    PaymentAcceptanceModule,
   ],
   controllers: [HealthController],
   providers: [

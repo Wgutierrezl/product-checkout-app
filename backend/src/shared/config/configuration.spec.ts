@@ -29,6 +29,7 @@ describe('configuration', () => {
         privateKey: env.PAYMENT_GATEWAY_PRIVATE_KEY,
         integritySecret: env.PAYMENT_GATEWAY_INTEGRITY_SECRET,
         eventsSecret: env.PAYMENT_GATEWAY_EVENTS_SECRET,
+        timeoutMs: env.PAYMENT_GATEWAY_TIMEOUT_MS,
       },
       aws: {
         region: env.AWS_REGION,
@@ -65,6 +66,38 @@ describe('configuration', () => {
     expect(config.port).toBe(4000);
     expect(config.fees.baseFeeCents).toBe(111);
     expect(config.lazyPollThresholdMs).toBe(5000);
+  });
+
+  it('carries a PAYMENT_GATEWAY_TIMEOUT_MS override straight through', () => {
+    const env = buildEnv({ PAYMENT_GATEWAY_TIMEOUT_MS: '5000' });
+
+    const config = configuration(env);
+
+    expect(config.paymentGateway.timeoutMs).toBe(5000);
+  });
+
+  it('strips a single trailing slash from PAYMENT_GATEWAY_URL', () => {
+    const env = buildEnv({ PAYMENT_GATEWAY_URL: 'https://sandbox.payment-gateway.test/' });
+
+    const config = configuration(env);
+
+    expect(config.paymentGateway.url).toBe('https://sandbox.payment-gateway.test');
+  });
+
+  it('strips multiple trailing slashes from PAYMENT_GATEWAY_URL', () => {
+    const env = buildEnv({ PAYMENT_GATEWAY_URL: 'https://sandbox.payment-gateway.test///' });
+
+    const config = configuration(env);
+
+    expect(config.paymentGateway.url).toBe('https://sandbox.payment-gateway.test');
+  });
+
+  it('leaves a PAYMENT_GATEWAY_URL without a trailing slash unchanged', () => {
+    const env = buildEnv({ PAYMENT_GATEWAY_URL: 'https://sandbox.payment-gateway.test/v1' });
+
+    const config = configuration(env);
+
+    expect(config.paymentGateway.url).toBe('https://sandbox.payment-gateway.test/v1');
   });
 
   it('defaults to validating process.env when called without an explicit EnvironmentVariables instance', () => {

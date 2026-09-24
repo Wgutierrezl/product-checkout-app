@@ -9,6 +9,7 @@ export interface AppConfig {
     privateKey: string;
     integritySecret: string;
     eventsSecret: string;
+    timeoutMs: number;
   };
   aws: {
     region: string;
@@ -41,11 +42,12 @@ export default function configuration(
     nodeEnv: env.NODE_ENV,
     port: env.PORT,
     paymentGateway: {
-      url: env.PAYMENT_GATEWAY_URL,
+      url: env.PAYMENT_GATEWAY_URL.replace(/\/+$/, ''),
       publicKey: env.PAYMENT_GATEWAY_PUBLIC_KEY,
       privateKey: env.PAYMENT_GATEWAY_PRIVATE_KEY,
       integritySecret: env.PAYMENT_GATEWAY_INTEGRITY_SECRET,
       eventsSecret: env.PAYMENT_GATEWAY_EVENTS_SECRET,
+      timeoutMs: env.PAYMENT_GATEWAY_TIMEOUT_MS,
     },
     aws: {
       region: env.AWS_REGION,
