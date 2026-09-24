@@ -21,14 +21,24 @@ describe('DeliveriesController', () => {
       expect(result).toEqual({
         id: 'delivery-1',
         transactionId: 'txn-1',
-        customerId: 'cust-1',
-        address: 'Cra 7 # 71-21',
+        address: 'Cra ***',
         city: 'Bogotá',
         region: 'Cundinamarca',
         postalCode: '110231',
         status: 'CREATED',
         createdAt: '2026-09-23T00:00:00.000Z',
       });
+    });
+
+    it('does not include customerId in the response (PII minimization)', async () => {
+      const getDelivery = {
+        execute: () => okAsync(buildDelivery()),
+      } as unknown as GetDeliveryUseCase;
+      const controller = new DeliveriesController(getDelivery);
+
+      const result = await controller.getById('delivery-1');
+
+      expect(result).not.toHaveProperty('customerId');
     });
 
     it('omits postalCode when the delivery has none', async () => {
