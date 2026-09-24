@@ -67,9 +67,9 @@ jobs:
           # a gateway origin that WebStack's CSP connect-src then blocks
           # client-side (silent failure, checkout breaks despite CI being
           # green). See infra/README.md.
-          PAYMENT_GATEWAY_URL: ${{ vars.PAYMENT_GATEWAY_URL }}
+          PAYMENT_GATEWAY_URL: ${{ secrets.PAYMENT_GATEWAY_URL }}
           PAYMENT_GATEWAY_PUBLIC_KEY: ${{ vars.PAYMENT_GATEWAY_PUBLIC_KEY }}
-          PAYMENT_GATEWAY_SANDBOX_ORIGIN: ${{ vars.PAYMENT_GATEWAY_URL }}
+          PAYMENT_GATEWAY_SANDBOX_ORIGIN: ${{ secrets.PAYMENT_GATEWAY_URL }}
 
       # DYNAMO_ENDPOINT intentionally unset — targets real AWS. The script
       # (backend/scripts/seed-products.ts) skips CreateTable in that mode:
@@ -97,7 +97,7 @@ jobs:
           npm run build
         env:
           VITE_API_URL: ${{ steps.outputs.outputs.api_url }}
-          VITE_PAYMENT_GATEWAY_URL: ${{ vars.PAYMENT_GATEWAY_URL }}
+          VITE_PAYMENT_GATEWAY_URL: ${{ secrets.PAYMENT_GATEWAY_URL }}
           VITE_PAYMENT_GATEWAY_PUBLIC_KEY: ${{ vars.PAYMENT_GATEWAY_PUBLIC_KEY }}
 
       # Vite fingerprints hashed asset filenames — safe to cache for a year.

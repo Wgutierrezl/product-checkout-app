@@ -142,12 +142,15 @@ redeploy needed, the Lambda re-reads on its next cold start.
 # Variables (visible in the repo UI/API, not secret)
 gh variable set AWS_DEPLOY_ROLE_ARN --body "arn:aws:iam::<ACCOUNT_ID>:role/checkout-deploy"
 gh variable set AWS_REGION --body "<REGION>"
-gh variable set PAYMENT_GATEWAY_URL --body "<sandbox base URL>"
 gh variable set PAYMENT_GATEWAY_PUBLIC_KEY --body "<public key>"
+
+# Secret: not sensitive by itself, but stored as a secret so GitHub masks it
+# in the (public) Actions logs of this repository.
+gh secret set PAYMENT_GATEWAY_URL --body "<sandbox base URL>"
 ```
 
 **`PAYMENT_GATEWAY_URL` is a single source of truth** — `deploy.yml` reuses
-this ONE variable for three different consumers:
+this ONE value for three different consumers:
 1. The Lambda's `PAYMENT_GATEWAY_URL` env var (backend calls the gateway).
 2. `WebStack`'s CSP `connect-src`, as `PAYMENT_GATEWAY_SANDBOX_ORIGIN`
    (browser is allowed to connect to the gateway directly for
@@ -162,11 +165,11 @@ check and only break in production.
 
 No `PAYMENT_GATEWAY_SANDBOX_ORIGIN` or `VITE_PAYMENT_GATEWAY_URL` variable
 needs to be set separately — `deploy.yml` derives both from
-`vars.PAYMENT_GATEWAY_URL` directly.
+`secrets.PAYMENT_GATEWAY_URL` directly. `WebStack` reduces it to its origin
+for the CSP, because a CSP source with a path only matches that exact path.
 
-No secrets (as opposed to variables) are needed in GitHub — the 3 payment
-gateway secrets live in SSM (step 3), fetched by the Lambda at cold start,
-never by CI/CD.
+The 3 real payment gateway secrets are **not** stored in GitHub — they live
+in SSM (step 3) and are fetched by the Lambda at cold start, never by CI/CD.
 
 ## Teardown (reverse of deploy order)
 
