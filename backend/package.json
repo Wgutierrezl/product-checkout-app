@@ -10,7 +10,8 @@
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "seed": "ts-node scripts/seed-products.ts"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1139.0",
