@@ -22,6 +22,7 @@ export interface UpdateGatewayResultInput {
   gatewayTransactionId?: string;
   status: TransactionStatus;
   lastGatewayCheckAt?: string;
+  updatedAt: string;
 }
 
 export interface TransactionRepositoryPort {
