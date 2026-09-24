@@ -16,9 +16,15 @@ export function nextPollDelayMs(attemptNumber: number): number {
   return Math.min(attemptNumber * POLL_INITIAL_DELAY_MS, POLL_MAX_DELAY_MS);
 }
 
-/** Milliseconds left in the 60s polling window; never negative. */
+/**
+ * Milliseconds left in the 60s polling window; never negative. Clamps a
+ * `pollStartedAt` in the future (clock skew, or corrupted/tampered
+ * persisted data) to `now`, so a future timestamp can never grant MORE
+ * than the full budget.
+ */
 export function remainingPollBudgetMs(pollStartedAt: number, now: number): number {
-  return Math.max(0, POLL_MAX_DURATION_MS - (now - pollStartedAt));
+  const effectiveStart = Math.min(pollStartedAt, now);
+  return Math.max(0, POLL_MAX_DURATION_MS - (now - effectiveStart));
 }
 
 const FINAL_STATUSES: readonly TransactionStatus[] = ['APPROVED', 'DECLINED', 'VOIDED', 'ERROR'];

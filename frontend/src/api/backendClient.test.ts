@@ -294,5 +294,27 @@ describe('backendClient', () => {
 
       await expect(fetchTransaction('missing')).rejects.toBeInstanceOf(BackendApiError);
     });
+
+    it('aborts the underlying fetch when an external signal is aborted (e.g. polling was cancelled)', async () => {
+      const externalController = new AbortController();
+      let capturedInternalSignal: AbortSignal | undefined;
+      fetchMock.mockImplementation(
+        (_url: string, init?: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            capturedInternalSignal = init?.signal ?? undefined;
+            init?.signal?.addEventListener('abort', () => {
+              const abortError = new Error('The operation was aborted');
+              abortError.name = 'AbortError';
+              reject(abortError);
+            });
+          }),
+      );
+
+      const pending = fetchTransaction('t1', { signal: externalController.signal });
+      const assertion = expect(pending).rejects.toMatchObject({ status: 0, name: 'BackendApiError' });
+      externalController.abort();
+      await assertion;
+      expect(capturedInternalSignal?.aborted).toBe(true);
+    });
   });
 });

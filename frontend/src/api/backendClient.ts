@@ -50,6 +50,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
+  // An external signal (e.g. a poll loop that was cancelled) aborts our OWN
+  // controller too, so the underlying fetch is cancelled for either reason
+  // through a single code path below.
+  const externalSignal = init?.signal;
+  const onExternalAbort = () => controller.abort();
+  externalSignal?.addEventListener('abort', onExternalAbort);
+
   let response: Response;
   try {
     response = await fetch(`${apiUrl}${path}`, {
@@ -65,6 +72,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new BackendApiError(reason, NETWORK_ERROR_STATUS);
   } finally {
     clearTimeout(timeout);
+    externalSignal?.removeEventListener('abort', onExternalAbort);
   }
 
   const body = await parseJsonBody(response);
@@ -91,6 +99,6 @@ export function createTransaction(input: CreateTransactionInput): Promise<Transa
   });
 }
 
-export function fetchTransaction(id: string): Promise<Transaction> {
-  return request<Transaction>(`/transactions/${id}`, { method: 'GET' });
+export function fetchTransaction(id: string, options?: { signal?: AbortSignal }): Promise<Transaction> {
+  return request<Transaction>(`/transactions/${id}`, { method: 'GET', signal: options?.signal });
 }

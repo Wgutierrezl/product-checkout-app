@@ -34,6 +34,10 @@ describe('remainingPollBudgetMs (60s cap from pollStartedAt)', () => {
   it('never goes negative once the budget is exceeded', () => {
     expect(remainingPollBudgetMs(0, 90_000)).toBe(0);
   });
+
+  it('clamps a pollStartedAt in the future (e.g. clock skew) to "now", never granting more than the full budget', () => {
+    expect(remainingPollBudgetMs(90_000, 0)).toBe(POLL_MAX_DURATION_MS);
+  });
 });
 
 describe('isFinalTransactionStatus', () => {
