@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { DynamoDBDocumentClient, GetCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
 import { Result, ResultAsync } from 'neverthrow';
 
@@ -38,6 +38,8 @@ function toProduct(item: ProductItem): AppResult<Product> {
 
 @Injectable()
 export class DynamoProductRepository implements ProductRepositoryPort {
+  private readonly logger = new Logger(DynamoProductRepository.name);
+
   constructor(
     @Inject(DYNAMO_DOCUMENT_CLIENT) private readonly client: DynamoDBDocumentClient,
   ) {}
@@ -46,11 +48,29 @@ export class DynamoProductRepository implements ProductRepositoryPort {
     return ResultAsync.fromPromise(
       this.scanAllItems(),
       (error) => new UnexpectedError(`Failed to scan products: ${(error as Error).message}`),
-    ).andThen((items) =>
-      Result.combine(items.map((item) => toProduct(item))).asyncMap((products) =>
-        Promise.resolve(products),
-      ),
-    );
+    ).map((items) => this.mapValidProducts(items));
+  }
+
+  /**
+   * A single malformed item (e.g. corrupted price/stock data) must not take
+   * down the whole catalog listing. Skip it and log a warning with only its
+   * id — never the raw item contents, which could contain corrupt/unexpected
+   * data — and keep returning every other valid product.
+   */
+  private mapValidProducts(items: ProductItem[]): Product[] {
+    const products: Product[] = [];
+
+    for (const item of items) {
+      const mapped = toProduct(item);
+
+      if (mapped.isOk()) {
+        products.push(mapped.value);
+      } else {
+        this.logger.warn(`Skipping malformed product item: ${item.productId}`);
+      }
+    }
+
+    return products;
   }
 
   private async scanAllItems(): Promise<ProductItem[]> {

@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { DynamoDBDocumentClient, GetCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
 import { mockClient } from 'aws-sdk-client-mock';
 
@@ -122,6 +123,41 @@ describe('DynamoProductRepository', () => {
       const products = result._unsafeUnwrap();
       expect(products).toHaveLength(1);
       expect(products[0].stock.value).toBe(0);
+    });
+
+    it('skips a malformed item and logs a warning, still returning the valid ones', async () => {
+      const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+      ddbMock.on(ScanCommand).resolves({
+        Items: [
+          {
+            productId: 'prod-good',
+            name: 'Wireless Headphones',
+            description: 'Noise-cancelling over-ear headphones',
+            priceCents: 150_000,
+            stock: 10,
+            imageUrl: 'https://images.example.com/headphones.webp',
+          },
+          {
+            productId: 'prod-bad',
+            name: 'Corrupt Product',
+            description: 'Has a negative price',
+            priceCents: -1,
+            stock: 10,
+            imageUrl: 'https://images.example.com/broken.webp',
+          },
+        ],
+      });
+      const repository = new DynamoProductRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.findAll();
+
+      expect(result.isOk()).toBe(true);
+      const products = result._unsafeUnwrap();
+      expect(products).toHaveLength(1);
+      expect(products[0].id).toBe('prod-good');
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('prod-bad'));
+
+      warnSpy.mockRestore();
     });
   });
 
