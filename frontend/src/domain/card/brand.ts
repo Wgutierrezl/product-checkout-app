@@ -7,7 +7,11 @@ export type CardBrand = 'visa' | 'mastercard' | 'unknown';
 export function detectCardBrand(cardNumber: string): CardBrand {
   const digitsOnly = cardNumber.replace(/\s+/g, '');
 
-  if (/^4\d*/.test(digitsOnly) && digitsOnly.length >= 6) {
+  if (!/^\d+$/.test(digitsOnly)) {
+    return 'unknown';
+  }
+
+  if (/^4/.test(digitsOnly) && digitsOnly.length >= 6) {
     return 'visa';
   }
 

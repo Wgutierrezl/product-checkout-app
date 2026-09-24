@@ -20,4 +20,12 @@ describe('detectCardBrand', () => {
   it('returns unknown for a blank or too-short number', () => {
     expect(detectCardBrand('41')).toBe('unknown');
   });
+
+  it('returns unknown when the value contains letters, even starting with 4', () => {
+    expect(detectCardBrand('4abcde')).toBe('unknown');
+  });
+
+  it('returns unknown for dash-separated input', () => {
+    expect(detectCardBrand('4111-1111-1111-1111')).toBe('unknown');
+  });
 });
