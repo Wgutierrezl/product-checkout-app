@@ -8,10 +8,13 @@ import express from 'express';
 
 import { AppModule } from './app.module';
 import { applyGlobalConfig } from './shared/bootstrap';
+import { loadSecretsFromSsm } from './shared/config/ssm-bootstrap';
 
 let cachedHandler: Handler;
 
 async function bootstrapServer(): Promise<Handler> {
+  await loadSecretsFromSsm();
+
   const expressApp = express();
   const app = await NestFactory.create(AppModule, new ExpressAdapter(expressApp));
   applyGlobalConfig(app);

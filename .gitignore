@@ -3,6 +3,7 @@ node_modules/
 
 # Builds
 dist/
+dist-lambda/
 build/
 coverage/
 openapi.json

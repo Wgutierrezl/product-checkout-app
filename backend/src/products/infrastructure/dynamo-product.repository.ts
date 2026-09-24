@@ -4,13 +4,14 @@ import { Result, ResultAsync } from 'neverthrow';
 
 import { UnexpectedError, NotFoundError } from '../../shared/errors/domain-error';
 import { AppResult, AppResultAsync, errAsync, okAsync } from '../../shared/result/result.types';
+import { resolveTableName } from '../../shared/config/resolve-table-name';
 import { DYNAMO_DOCUMENT_CLIENT } from '../../shared/infrastructure/dynamo/dynamo-client.provider';
 import { Product } from '../domain/product.entity';
 import { ProductRepositoryPort } from '../domain/product.repository.port';
 import { Money } from '../domain/value-objects/money.vo';
 import { Stock } from '../domain/value-objects/stock.vo';
 
-export const PRODUCTS_TABLE_NAME = 'Products';
+export const PRODUCTS_TABLE_NAME = resolveTableName(process.env.PRODUCTS_TABLE_NAME, 'Products');
 
 interface ProductItem {
   productId: string;

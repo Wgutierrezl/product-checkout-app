@@ -4,11 +4,12 @@ import { ResultAsync } from 'neverthrow';
 
 import { NotFoundError, UnexpectedError } from '../../shared/errors/domain-error';
 import { AppResult, AppResultAsync, errAsync, okAsync } from '../../shared/result/result.types';
+import { resolveTableName } from '../../shared/config/resolve-table-name';
 import { DYNAMO_DOCUMENT_CLIENT } from '../../shared/infrastructure/dynamo/dynamo-client.provider';
 import { Delivery } from '../domain/delivery.entity';
 import { DeliveryRepositoryPort } from '../domain/delivery.repository.port';
 
-export const DELIVERIES_TABLE_NAME = 'Deliveries';
+export const DELIVERIES_TABLE_NAME = resolveTableName(process.env.DELIVERIES_TABLE_NAME, 'Deliveries');
 export const DELIVERIES_TRANSACTION_ID_INDEX_NAME = 'TransactionIdIndex';
 
 interface DeliveryItem {

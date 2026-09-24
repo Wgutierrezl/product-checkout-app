@@ -12,11 +12,13 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
+    "package:lambda": "rm -rf dist-lambda && nest build && mkdir -p dist-lambda/dist && cp -r dist/* dist-lambda/dist/ && cp package.json package-lock.json dist-lambda/ && cd dist-lambda && npm ci --omit=dev",
     "seed": "ts-node scripts/seed-products.ts",
     "swagger:export": "ts-node scripts/export-openapi.ts"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1139.0",
+    "@aws-sdk/client-ssm": "^3.1139.0",
     "@aws-sdk/lib-dynamodb": "^3.1139.0",
     "@codegenie/serverless-express": "^5.0.0",
     "@nestjs/common": "^11.2.6",
