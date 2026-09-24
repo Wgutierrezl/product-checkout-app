@@ -78,6 +78,25 @@ describe('ApiStack', () => {
     expect(envVars).toHaveProperty('SSM_PARAM_PREFIX', '/checkout/gateway');
   });
 
+  it('sets PAYMENT_GATEWAY_URL and PAYMENT_GATEWAY_PUBLIC_KEY — non-secret backend config', () => {
+    const template = synthApiStack();
+
+    const resources = template.findResources('AWS::Lambda::Function');
+    const [, fn] = Object.entries(resources)[0];
+    const envVars: Record<string, unknown> = fn.Properties.Environment.Variables;
+
+    // Backend's env.validation.ts requires both at boot (validateSync fails
+    // fast otherwise). Neither is a secret — the private key/integrity
+    // secret/events secret come from SSM at cold start instead (see
+    // ssm-bootstrap.ts) — so these are safe to set as plain env vars.
+    expect(envVars).toHaveProperty('PAYMENT_GATEWAY_URL');
+    expect(typeof envVars.PAYMENT_GATEWAY_URL).toBe('string');
+    expect((envVars.PAYMENT_GATEWAY_URL as string).length).toBeGreaterThan(0);
+    expect(envVars).toHaveProperty('PAYMENT_GATEWAY_PUBLIC_KEY');
+    expect(typeof envVars.PAYMENT_GATEWAY_PUBLIC_KEY).toBe('string');
+    expect((envVars.PAYMENT_GATEWAY_PUBLIC_KEY as string).length).toBeGreaterThan(0);
+  });
+
   it('scopes ssm:GetParameter to exactly the 3 gateway SecureString param ARNs — no wildcard resource', () => {
     const template = synthApiStack();
 
