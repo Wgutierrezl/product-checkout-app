@@ -43,6 +43,7 @@ describe('resumeInFlightPayment', () => {
       transactionReceived({
         id: KEY,
         status: 'PENDING',
+        reference: 'REF-1',
         amounts: { productAmount: 300_000, baseFee: 250_000, deliveryFee: 800_000, total: 1_350_000, currency: 'COP' },
       }),
     );

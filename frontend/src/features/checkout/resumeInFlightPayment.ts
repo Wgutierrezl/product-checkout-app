@@ -52,12 +52,11 @@ export async function resumeInFlightPayment({ idempotencyKey, dispatch }: Resume
   try {
     const transaction = await fetchTransaction(idempotencyKey);
 
-    // NOTE: once transactionSlice gains a `reference` field (RESULT-step
-    // work), thread `transaction.reference` through here too.
     dispatch(
       transactionReceived({
         id: transaction.id,
         status: transaction.status,
+        reference: transaction.reference,
         amounts: {
           productAmount: transaction.productAmount,
           baseFee: transaction.baseFee,
