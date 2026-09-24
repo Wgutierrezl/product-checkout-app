@@ -5,11 +5,12 @@ import { ResultAsync } from 'neverthrow';
 
 import { UnexpectedError, NotFoundError } from '../../shared/errors/domain-error';
 import { AppResult, AppResultAsync, errAsync, okAsync } from '../../shared/result/result.types';
+import { resolveTableName } from '../../shared/config/resolve-table-name';
 import { DYNAMO_DOCUMENT_CLIENT } from '../../shared/infrastructure/dynamo/dynamo-client.provider';
 import { Customer } from '../domain/customer.entity';
 import { CustomerRepositoryPort } from '../domain/customer.repository.port';
 
-export const CUSTOMERS_TABLE_NAME = 'Customers';
+export const CUSTOMERS_TABLE_NAME = resolveTableName(process.env.CUSTOMERS_TABLE_NAME, 'Customers');
 export const CUSTOMERS_EMAIL_INDEX_NAME = 'EmailIndex';
 
 interface CustomerItem {

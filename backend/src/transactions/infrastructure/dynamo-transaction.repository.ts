@@ -14,6 +14,7 @@ import { DELIVERIES_TABLE_NAME } from '../../deliveries/infrastructure/dynamo-de
 import { PRODUCTS_TABLE_NAME } from '../../products/infrastructure/dynamo-product.repository';
 import { Money } from '../../products/domain/value-objects/money.vo';
 import { Quantity } from '../../products/domain/value-objects/quantity.vo';
+import { resolveTableName } from '../../shared/config/resolve-table-name';
 import { NotFoundError, UnexpectedError } from '../../shared/errors/domain-error';
 import { AppResult, AppResultAsync, errAsync, okAsync } from '../../shared/result/result.types';
 import { DYNAMO_DOCUMENT_CLIENT } from '../../shared/infrastructure/dynamo/dynamo-client.provider';
@@ -27,7 +28,10 @@ import {
   UpdateGatewayResultInput,
 } from '../domain/transaction.repository.port';
 
-export const TRANSACTIONS_TABLE_NAME = 'Transactions';
+export const TRANSACTIONS_TABLE_NAME = resolveTableName(
+  process.env.TRANSACTIONS_TABLE_NAME,
+  'Transactions',
+);
 export const TRANSACTIONS_REFERENCE_INDEX_NAME = 'ReferenceIndex';
 export const TRANSACTIONS_GATEWAY_TX_INDEX_NAME = 'GatewayTxIndex';
 
