@@ -1,9 +1,9 @@
 # Product Checkout App
 
 A mobile-first single-page checkout: pick a product, pay by credit card through a payment
-gateway (sandbox), track the payment to a final status. Five steps, one screen: **catalog →
-product details → card payment → order summary → result**. No accounts, no router — a guest can
-buy a product and see it delivered end to end.
+gateway (sandbox), and follow the payment to its final status. Five steps: **product page →
+credit card & delivery info → summary → final status → product page (stock updated)**. Guest
+checkout — no accounts — and the progress survives a page refresh.
 
 Monorepo, three packages:
 
@@ -61,7 +61,7 @@ flowchart TB
 
     Browser -->|HTTPS, loads SPA| CF
     CF -->|origin, OAC| S3
-    Browser -->|tokenize card, get acceptance tokens| Gateway
+    Browser -->|tokenize card (public key)| Gateway
     Browser -->|HTTPS + CSP connect-src| HttpApi
     HttpApi --> Lambda
     Lambda -->|create/settle transaction| Gateway
@@ -128,6 +128,10 @@ sequenceDiagram
     end
     SPA-->>U: Final status (APPROVED / DECLINED / ERROR)
 ```
+
+The sandbox is a shared account where our webhook URL can't be registered, so in practice the
+lazy poll is what settles transactions; the webhook endpoint is implemented and tested for a
+real merchant setup.
 
 A retried `POST /transactions` with the same `idempotencyKey` lands on the same row and never
 charges the gateway twice. All three settlement paths (synchronous result, webhook, lazy poll)
@@ -209,8 +213,8 @@ place (mapped loosely to OWASP concerns):
 | Concern | Control |
 |---|---|
 | Sensitive data exposure | Card PAN/CVC never reach this backend or any storage — tokenized directly in the browser against the payment gateway; only a single-use token crosses our API |
-| Secrets management | Gateway secrets live in SSM Parameter Store as `SecureString`, fetched by the Lambda at cold start — never a plain env var, never in source control |
-| Broken access control | Least-privilege IAM: the Lambda can only read/write the 4 checkout tables (+ `TransactWriteItems`) and `GetParameter`/`kms:Decrypt` on exactly the 3 gateway secrets |
+| Secrets management | Gateway secrets live in SSM Parameter Store as `SecureString`, fetched by the Lambda at cold start — never configured as Lambda environment variables, never in source control |
+| Broken access control | Least-privilege IAM: the Lambda can only read/write the 4 checkout tables (+ `TransactWriteItems`) and `ssm:GetParameters` on exactly the 3 gateway secrets, with `kms:Decrypt` limited to calls made through SSM |
 | Credential exposure in CI/CD | Deploys authenticate via GitHub OIDC (`aws-actions/configure-aws-credentials`) — no long-lived AWS keys stored anywhere |
 | Transport security | HTTPS everywhere: CloudFront redirects HTTP→HTTPS; the API is only ever called over HTTPS |
 | Security misconfiguration | CloudFront response-headers policy (HSTS, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`) and a strict Content-Security-Policy; `helmet()` on the API |
@@ -279,9 +283,9 @@ and only needs to run once per AWS account/region.
   hexagonal repository ports, which keeps the code reviewable.
 - **AWS CDK over Terraform** — same language (TypeScript) as the backend, so stack code and
   application code share tooling, types, and CI; no separate HCL toolchain to maintain.
-- **SSM Parameter Store over Secrets Manager** — the 3 gateway secrets are simple strings with
-  no rotation automation needed for this stack's scope; `SecureString` parameters cover that at
-  a fraction of Secrets Manager's per-secret monthly cost.
+- **SSM Parameter Store over Secrets Manager** — both encrypt with KMS and are governed by IAM;
+  Secrets Manager's real advantage is automatic rotation, which can't apply to keys issued by a
+  third-party gateway. `SecureString` parameters give the same protection at no cost.
 - **Idempotency key = transaction id** — a client-generated UUID v4 doubles as the DynamoDB
   partition key, so a retried request naturally lands on the same row with no separate
   idempotency table or lookup.
