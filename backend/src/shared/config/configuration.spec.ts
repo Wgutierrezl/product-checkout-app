@@ -1,79 +1,82 @@
+import { EnvironmentVariables, validateEnv } from './env.validation';
 import configuration from './configuration';
 
-const ENV_KEYS = [
-  'NODE_ENV',
-  'PORT',
-  'PAYMENT_GATEWAY_URL',
-  'PAYMENT_GATEWAY_PUBLIC_KEY',
-  'PAYMENT_GATEWAY_PRIVATE_KEY',
-  'PAYMENT_GATEWAY_INTEGRITY_SECRET',
-  'PAYMENT_GATEWAY_EVENTS_SECRET',
-  'CORS_ALLOWED_ORIGINS',
-  'AWS_REGION',
-  'DYNAMO_ENDPOINT',
-  'BASE_FEE_CENTS',
-  'DELIVERY_FEE_CENTS',
-  'LAZY_POLL_THRESHOLD_MS',
-  'THROTTLE_TTL',
-  'THROTTLE_LIMIT',
-] as const;
+const requiredEnv = {
+  PAYMENT_GATEWAY_URL: 'https://sandbox.payment-gateway.test',
+  PAYMENT_GATEWAY_PUBLIC_KEY: 'pub_123',
+  PAYMENT_GATEWAY_PRIVATE_KEY: 'prv_123',
+  PAYMENT_GATEWAY_INTEGRITY_SECRET: 'integrity_123',
+  PAYMENT_GATEWAY_EVENTS_SECRET: 'events_123',
+  CORS_ALLOWED_ORIGINS: 'http://localhost:5173, http://localhost:3001',
+};
+
+function buildEnv(overrides: Record<string, unknown> = {}): EnvironmentVariables {
+  return validateEnv({ ...requiredEnv, ...overrides });
+}
 
 describe('configuration', () => {
-  const originalEnv = { ...process.env };
+  it('maps every field of the validated EnvironmentVariables into the nested AppConfig shape', () => {
+    const env = buildEnv();
 
-  afterEach(() => {
-    for (const key of ENV_KEYS) delete process.env[key];
-    Object.assign(process.env, originalEnv);
+    const config = configuration(env);
+
+    expect(config).toEqual({
+      nodeEnv: env.NODE_ENV,
+      port: env.PORT,
+      paymentGateway: {
+        url: env.PAYMENT_GATEWAY_URL,
+        publicKey: env.PAYMENT_GATEWAY_PUBLIC_KEY,
+        privateKey: env.PAYMENT_GATEWAY_PRIVATE_KEY,
+        integritySecret: env.PAYMENT_GATEWAY_INTEGRITY_SECRET,
+        eventsSecret: env.PAYMENT_GATEWAY_EVENTS_SECRET,
+      },
+      aws: {
+        region: env.AWS_REGION,
+        dynamoEndpoint: env.DYNAMO_ENDPOINT,
+      },
+      fees: {
+        baseFeeCents: env.BASE_FEE_CENTS,
+        deliveryFeeCents: env.DELIVERY_FEE_CENTS,
+      },
+      lazyPollThresholdMs: env.LAZY_POLL_THRESHOLD_MS,
+      cors: {
+        allowedOrigins: ['http://localhost:5173', 'http://localhost:3001'],
+      },
+      throttle: {
+        ttl: env.THROTTLE_TTL,
+        limit: env.THROTTLE_LIMIT,
+      },
+    });
   });
 
-  it('maps required env vars and applies defaults for optional ones', () => {
-    process.env.PAYMENT_GATEWAY_URL = 'https://sandbox.payment-gateway.test';
-    process.env.PAYMENT_GATEWAY_PUBLIC_KEY = 'pub_123';
-    process.env.PAYMENT_GATEWAY_PRIVATE_KEY = 'prv_123';
-    process.env.PAYMENT_GATEWAY_INTEGRITY_SECRET = 'integrity_123';
-    process.env.PAYMENT_GATEWAY_EVENTS_SECRET = 'events_123';
-    process.env.CORS_ALLOWED_ORIGINS = 'http://localhost:5173, http://localhost:3001';
+  it('splits, trims and drops empty entries from CORS_ALLOWED_ORIGINS', () => {
+    const env = buildEnv({ CORS_ALLOWED_ORIGINS: 'http://a.test, http://b.test ,,' });
 
-    const config = configuration();
+    const config = configuration(env);
 
-    expect(config.paymentGateway.url).toBe('https://sandbox.payment-gateway.test');
-    expect(config.fees.baseFeeCents).toBe(250_000);
-    expect(config.fees.deliveryFeeCents).toBe(800_000);
-    expect(config.cors.allowedOrigins).toEqual([
-      'http://localhost:5173',
-      'http://localhost:3001',
-    ]);
+    expect(config.cors.allowedOrigins).toEqual(['http://a.test', 'http://b.test']);
   });
 
-  it('parses numeric overrides from the environment', () => {
-    process.env.PAYMENT_GATEWAY_URL = 'https://sandbox.payment-gateway.test';
-    process.env.PAYMENT_GATEWAY_PUBLIC_KEY = 'pub_123';
-    process.env.PAYMENT_GATEWAY_PRIVATE_KEY = 'prv_123';
-    process.env.PAYMENT_GATEWAY_INTEGRITY_SECRET = 'integrity_123';
-    process.env.PAYMENT_GATEWAY_EVENTS_SECRET = 'events_123';
-    process.env.CORS_ALLOWED_ORIGINS = 'http://localhost:5173';
-    process.env.BASE_FEE_CENTS = '111';
-    process.env.LAZY_POLL_THRESHOLD_MS = '5000';
+  it('carries numeric overrides straight through from the validated env (no re-defaulting)', () => {
+    const env = buildEnv({ PORT: '4000', BASE_FEE_CENTS: '111', LAZY_POLL_THRESHOLD_MS: '5000' });
 
-    const config = configuration();
+    const config = configuration(env);
 
+    expect(config.port).toBe(4000);
     expect(config.fees.baseFeeCents).toBe(111);
     expect(config.lazyPollThresholdMs).toBe(5000);
   });
 
-  it('falls back to safe defaults when nothing is set in the environment', () => {
+  it('defaults to validating process.env when called without an explicit EnvironmentVariables instance', () => {
+    const originalEnv = { ...process.env };
     delete process.env.NODE_ENV;
+    Object.assign(process.env, requiredEnv);
 
     const config = configuration();
 
+    expect(config.paymentGateway.url).toBe(requiredEnv.PAYMENT_GATEWAY_URL);
     expect(config.nodeEnv).toBe('development');
-    expect(config.paymentGateway).toEqual({
-      url: '',
-      publicKey: '',
-      privateKey: '',
-      integritySecret: '',
-      eventsSecret: '',
-    });
-    expect(config.cors.allowedOrigins).toEqual([]);
+
+    process.env = originalEnv;
   });
 });

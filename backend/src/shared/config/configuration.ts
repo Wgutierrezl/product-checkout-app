@@ -1,3 +1,5 @@
+import { EnvironmentVariables, validateEnv } from './env.validation';
+
 export interface AppConfig {
   nodeEnv: string;
   port: number;
@@ -26,37 +28,42 @@ export interface AppConfig {
   };
 }
 
-export default function configuration(): AppConfig {
-  const env = process.env;
-
+/**
+ * Reshapes an already-validated `EnvironmentVariables` instance into the nested
+ * `AppConfig` structure the rest of the app depends on. `env.validation.ts` is the
+ * single source of truth for defaults and validation rules — this function must
+ * NOT re-implement or loosen any of them, only map fields.
+ */
+export default function configuration(
+  env: EnvironmentVariables = validateEnv(process.env),
+): AppConfig {
   return {
-    nodeEnv: env.NODE_ENV ?? 'development',
-    port: Number(env.PORT ?? 3000),
+    nodeEnv: env.NODE_ENV,
+    port: env.PORT,
     paymentGateway: {
-      url: env.PAYMENT_GATEWAY_URL ?? '',
-      publicKey: env.PAYMENT_GATEWAY_PUBLIC_KEY ?? '',
-      privateKey: env.PAYMENT_GATEWAY_PRIVATE_KEY ?? '',
-      integritySecret: env.PAYMENT_GATEWAY_INTEGRITY_SECRET ?? '',
-      eventsSecret: env.PAYMENT_GATEWAY_EVENTS_SECRET ?? '',
+      url: env.PAYMENT_GATEWAY_URL,
+      publicKey: env.PAYMENT_GATEWAY_PUBLIC_KEY,
+      privateKey: env.PAYMENT_GATEWAY_PRIVATE_KEY,
+      integritySecret: env.PAYMENT_GATEWAY_INTEGRITY_SECRET,
+      eventsSecret: env.PAYMENT_GATEWAY_EVENTS_SECRET,
     },
     aws: {
-      region: env.AWS_REGION ?? 'us-east-1',
+      region: env.AWS_REGION,
       dynamoEndpoint: env.DYNAMO_ENDPOINT,
     },
     fees: {
-      baseFeeCents: Number(env.BASE_FEE_CENTS ?? 250_000),
-      deliveryFeeCents: Number(env.DELIVERY_FEE_CENTS ?? 800_000),
+      baseFeeCents: env.BASE_FEE_CENTS,
+      deliveryFeeCents: env.DELIVERY_FEE_CENTS,
     },
-    lazyPollThresholdMs: Number(env.LAZY_POLL_THRESHOLD_MS ?? 3000),
+    lazyPollThresholdMs: env.LAZY_POLL_THRESHOLD_MS,
     cors: {
-      allowedOrigins: (env.CORS_ALLOWED_ORIGINS ?? '')
-        .split(',')
+      allowedOrigins: env.CORS_ALLOWED_ORIGINS.split(',')
         .map((origin) => origin.trim())
         .filter(Boolean),
     },
     throttle: {
-      ttl: Number(env.THROTTLE_TTL ?? 60),
-      limit: Number(env.THROTTLE_LIMIT ?? 10),
+      ttl: env.THROTTLE_TTL,
+      limit: env.THROTTLE_LIMIT,
     },
   };
 }
