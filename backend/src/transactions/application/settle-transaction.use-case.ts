@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 
 import { GatewayTransactionStatus } from '../../shared/payment-gateway/domain/payment-gateway.types';
 import { CLOCK_PORT, ClockPort } from '../../shared/ports/clock.port';
@@ -30,6 +30,8 @@ export interface SettleTransactionInput {
  */
 @Injectable()
 export class SettleTransactionUseCase {
+  private readonly logger = new Logger(SettleTransactionUseCase.name);
+
   constructor(
     @Inject(TRANSACTION_REPOSITORY_PORT) private readonly transactions: TransactionRepositoryPort,
     @Inject(ID_GENERATOR_PORT) private readonly ids: IdGeneratorPort,
@@ -41,6 +43,15 @@ export class SettleTransactionUseCase {
       if (tx.status !== 'PENDING') {
         // Already final — either settled by a concurrent caller (race loser)
         // or a stale/duplicate event arriving after the fact. Idempotent no-op.
+        // A DIFFERENT incoming status than the one already stored is worth a
+        // warning (e.g. APPROVED then later VOIDED) — it never changes
+        // anything here, but it's a signal worth a human's attention.
+        if (input.gatewayStatus !== 'PENDING' && input.gatewayStatus !== tx.status) {
+          this.logger.warn(
+            `Received a conflicting status for an already-final transaction: transactionId=${tx.id} ` +
+              `currentStatus=${tx.status} incomingStatus=${input.gatewayStatus} — ignoring (idempotent no-op).`,
+          );
+        }
         return okAsync(tx);
       }
 

@@ -20,6 +20,7 @@ export interface AppConfig {
     deliveryFeeCents: number;
   };
   lazyPollThresholdMs: number;
+  reconciliationWindowMs: number;
   cors: {
     allowedOrigins: string[];
   };
@@ -58,6 +59,7 @@ export default function configuration(
       deliveryFeeCents: env.DELIVERY_FEE_CENTS,
     },
     lazyPollThresholdMs: env.LAZY_POLL_THRESHOLD_MS,
+    reconciliationWindowMs: env.RECONCILIATION_WINDOW_MS,
     cors: {
       allowedOrigins: env.CORS_ALLOWED_ORIGINS.split(',')
         .map((origin) => origin.trim())

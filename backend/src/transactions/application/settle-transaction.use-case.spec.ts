@@ -77,6 +77,32 @@ describe('SettleTransactionUseCase', () => {
       expect(result._unsafeUnwrap()).toEqual(tx);
       expect(transactions.settleApprovedCalls).toHaveLength(0);
     });
+
+    it('logs a warning when an already-APPROVED transaction receives a conflicting terminal status (e.g. VOIDED)', async () => {
+      const tx = buildTransaction({ id: 'tx-1', status: 'APPROVED', gatewayTransactionId: 'gw-1' });
+      const transactions = new FakeTransactionRepository([tx]);
+      const warnSpy = jest.spyOn(require('@nestjs/common').Logger.prototype, 'warn').mockImplementation();
+      const useCase = buildUseCase({ transactions });
+
+      await useCase.execute({ transactionId: 'tx-1', gatewayStatus: 'VOIDED', gatewayTransactionId: 'gw-1' });
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('tx-1'));
+      expect(warnSpy.mock.calls[0][0]).toContain('APPROVED');
+      expect(warnSpy.mock.calls[0][0]).toContain('VOIDED');
+      warnSpy.mockRestore();
+    });
+
+    it('does NOT log a warning when a repeated identical status arrives for an already-final transaction', async () => {
+      const tx = buildTransaction({ id: 'tx-1', status: 'APPROVED', gatewayTransactionId: 'gw-1' });
+      const transactions = new FakeTransactionRepository([tx]);
+      const warnSpy = jest.spyOn(require('@nestjs/common').Logger.prototype, 'warn').mockImplementation();
+      const useCase = buildUseCase({ transactions });
+
+      await useCase.execute({ transactionId: 'tx-1', gatewayStatus: 'APPROVED', gatewayTransactionId: 'gw-1' });
+
+      expect(warnSpy).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
   });
 
   describe('non-approved (DECLINED/VOIDED/ERROR)', () => {

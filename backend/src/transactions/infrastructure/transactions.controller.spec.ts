@@ -59,7 +59,9 @@ describe('TransactionsController', () => {
   describe('create', () => {
     it('returns the mapped transaction DTO with an amounts breakdown', async () => {
       const transaction = buildTransaction({ status: 'APPROVED', gatewayTransactionId: 'gw-1' });
-      const createTransaction = { execute: () => okAsync(transaction) } as unknown as CreateTransactionUseCase;
+      const createTransaction = {
+        execute: () => okAsync({ transaction, delivery: null }),
+      } as unknown as CreateTransactionUseCase;
       const controller = buildController({ createTransaction });
 
       const result = await controller.create(validCreateBody());
@@ -74,6 +76,20 @@ describe('TransactionsController', () => {
         total: 1_350_000,
         currency: 'COP',
       });
+    });
+
+    it('embeds the delivery when the synchronous result is APPROVED', async () => {
+      const transaction = buildTransaction({ status: 'APPROVED', gatewayTransactionId: 'gw-1' });
+      const delivery = buildDelivery({ transactionId: transaction.id });
+      const createTransaction = {
+        execute: () => okAsync({ transaction, delivery }),
+      } as unknown as CreateTransactionUseCase;
+      const controller = buildController({ createTransaction });
+
+      const result = await controller.create(validCreateBody());
+
+      expect(result.delivery).toBeDefined();
+      expect(result.delivery?.id).toBe(delivery.id);
     });
 
     it('throws the DomainError when the use case fails', async () => {
@@ -160,7 +176,7 @@ describe('TransactionsController', () => {
       const moduleRef = await Test.createTestingModule({
         controllers: [TransactionsController],
         providers: [
-          { provide: CreateTransactionUseCase, useValue: { execute: () => okAsync(buildTransaction()) } },
+          { provide: CreateTransactionUseCase, useValue: { execute: () => okAsync({ transaction: buildTransaction(), delivery: null }) } },
           {
             provide: GetTransactionUseCase,
             useValue: { execute: () => okAsync({ transaction: buildTransaction(), delivery: null }) },

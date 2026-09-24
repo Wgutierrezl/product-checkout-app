@@ -7,7 +7,7 @@ import { ProductsModule } from '../products/products.module';
 import type { AppConfig } from '../shared/config/configuration';
 import { CreateTransactionUseCase, FEES_CONFIG, INTEGRITY_SECRET } from './application/create-transaction.use-case';
 import { EVENTS_SECRET, HandleWebhookUseCase } from './application/handle-webhook.use-case';
-import { GetTransactionUseCase, LAZY_POLL_THRESHOLD_MS } from './application/get-transaction.use-case';
+import { GetTransactionUseCase, LAZY_POLL_THRESHOLD_MS, RECONCILIATION_WINDOW_MS } from './application/get-transaction.use-case';
 import { SettleTransactionUseCase } from './application/settle-transaction.use-case';
 import { TRANSACTION_REPOSITORY_PORT } from './domain/transaction.repository.port';
 import { DynamoTransactionRepository } from './infrastructure/dynamo-transaction.repository';
@@ -51,6 +51,11 @@ import { TransactionsController } from './infrastructure/transactions.controller
       provide: LAZY_POLL_THRESHOLD_MS,
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => configService.getOrThrow<number>('lazyPollThresholdMs'),
+    },
+    {
+      provide: RECONCILIATION_WINDOW_MS,
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => configService.getOrThrow<number>('reconciliationWindowMs'),
     },
   ],
 })

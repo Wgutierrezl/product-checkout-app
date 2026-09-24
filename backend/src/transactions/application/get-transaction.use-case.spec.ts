@@ -22,11 +22,20 @@ class FixedIdGenerator implements IdGeneratorPort {
   }
 }
 
+type GatewayOutcome =
+  | { ok: true; value: GatewayTransactionResult }
+  | { ok: false; error: PaymentGatewayError };
+
 class RecordingGatewayPort implements PaymentGatewayPort {
   public getTransactionCallCount = 0;
+  public getTransactionByReferenceCallCount = 0;
 
   constructor(
-    private readonly result: { ok: true; value: GatewayTransactionResult } | { ok: false; error: PaymentGatewayError },
+    private readonly result: GatewayOutcome,
+    private readonly byReferenceResult: { ok: true; value: GatewayTransactionResult | null } | { ok: false; error: PaymentGatewayError } = {
+      ok: true,
+      value: null,
+    },
   ) {}
 
   getAcceptanceTokens(): never {
@@ -41,16 +50,23 @@ class RecordingGatewayPort implements PaymentGatewayPort {
     this.getTransactionCallCount += 1;
     return this.result.ok ? okAsync(this.result.value) : errAsync(this.result.error);
   }
+
+  getTransactionByReference(): AppResultAsync<GatewayTransactionResult | null> {
+    this.getTransactionByReferenceCallCount += 1;
+    return this.byReferenceResult.ok ? okAsync(this.byReferenceResult.value) : errAsync(this.byReferenceResult.error);
+  }
 }
 
 const NOW_ISO = '2026-09-24T00:00:10.000Z'; // 10s after createdAt below
 const LAZY_POLL_THRESHOLD_MS = 3000;
+const RECONCILIATION_WINDOW_MS = 600_000; // 10 minutes
 
 function buildUseCase(options: {
   transactions: FakeTransactionRepository;
   deliveries?: FakeDeliveryRepository;
   gateway: PaymentGatewayPort;
   clock?: ClockPort;
+  reconciliationWindowMs?: number;
 }) {
   const clock = options.clock ?? buildFakeClock(NOW_ISO);
   const settleTransaction = new SettleTransactionUseCase(options.transactions, new FixedIdGenerator(), clock);
@@ -62,6 +78,7 @@ function buildUseCase(options: {
     settleTransaction,
     clock,
     LAZY_POLL_THRESHOLD_MS,
+    options.reconciliationWindowMs ?? RECONCILIATION_WINDOW_MS,
   );
 }
 
@@ -105,21 +122,96 @@ describe('GetTransactionUseCase', () => {
     expect(gateway.getTransactionCallCount).toBe(0);
   });
 
-  it('does not poll a stale PENDING transaction that has no gatewayTransactionId yet', async () => {
-    const tx = buildTransaction({
-      id: 'tx-1',
-      status: 'PENDING',
-      gatewayTransactionId: undefined,
-      createdAt: '2026-09-24T00:00:00.000Z',
+  describe('poll-by-reference (stale PENDING with no gatewayTransactionId yet — an ambiguous synchronous charge failure)', () => {
+    function buildOrphanedTx(overrides: Partial<ReturnType<typeof buildTransaction>> = {}) {
+      return buildTransaction({
+        id: 'tx-1',
+        reference: 'REF-tx-1',
+        status: 'PENDING',
+        gatewayTransactionId: undefined,
+        createdAt: '2026-09-24T00:00:00.000Z', // 10s ago, threshold is 3s -> stale
+        ...overrides,
+      });
+    }
+
+    it('does not poll by id (no gatewayTransactionId to poll with)', async () => {
+      const tx = buildOrphanedTx();
+      const transactions = new FakeTransactionRepository([tx]);
+      const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } });
+      const useCase = buildUseCase({ transactions, gateway });
+
+      await useCase.execute('tx-1');
+
+      expect(gateway.getTransactionCallCount).toBe(0);
     });
-    const transactions = new FakeTransactionRepository([tx]);
-    const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } });
-    const useCase = buildUseCase({ transactions, gateway });
 
-    const result = await useCase.execute('tx-1');
+    it('settles the transaction when poll-by-reference finds a matching gateway transaction', async () => {
+      const tx = buildOrphanedTx();
+      const transactions = new FakeTransactionRepository([tx]);
+      const gateway = new RecordingGatewayPort(
+        { ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } },
+        { ok: true, value: { gatewayTransactionId: 'gw-found', status: 'APPROVED' } },
+      );
+      const useCase = buildUseCase({ transactions, gateway });
 
-    expect(result.isOk()).toBe(true);
-    expect(gateway.getTransactionCallCount).toBe(0);
+      const result = await useCase.execute('tx-1');
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap().transaction.status).toBe('APPROVED');
+      expect(result._unsafeUnwrap().transaction.gatewayTransactionId).toBe('gw-found');
+      expect(gateway.getTransactionByReferenceCallCount).toBe(1);
+    });
+
+    it('stays PENDING (no error) when poll-by-reference finds nothing and the reconciliation window has not elapsed yet', async () => {
+      const tx = buildOrphanedTx({ createdAt: '2026-09-24T00:00:05.000Z' }); // 5s ago, well under the 10-min window
+      const transactions = new FakeTransactionRepository([tx]);
+      const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } });
+      const useCase = buildUseCase({ transactions, gateway });
+
+      const result = await useCase.execute('tx-1');
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap().transaction.status).toBe('PENDING');
+    });
+
+    it('marks the transaction ERROR once the reconciliation window has elapsed AND poll-by-reference confirms nothing exists', async () => {
+      const tx = buildOrphanedTx({ createdAt: '2026-09-23T23:00:00.000Z' }); // ~1h ago, past the 10-min window
+      const transactions = new FakeTransactionRepository([tx]);
+      const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } });
+      const useCase = buildUseCase({ transactions, gateway });
+
+      const result = await useCase.execute('tx-1');
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap().transaction.status).toBe('ERROR');
+    });
+
+    it('never fails the GET when poll-by-reference itself errors, and leaves the transaction PENDING', async () => {
+      const tx = buildOrphanedTx({ createdAt: '2026-09-23T23:00:00.000Z' }); // past the window too, but the call fails
+      const transactions = new FakeTransactionRepository([tx]);
+      const gateway = new RecordingGatewayPort(
+        { ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } },
+        { ok: false, error: new PaymentGatewayError('network down', true) },
+      );
+      const useCase = buildUseCase({ transactions, gateway });
+
+      const result = await useCase.execute('tx-1');
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap().transaction.status).toBe('PENDING');
+    });
+
+    it('always updates lastGatewayCheckAt after a poll-by-reference attempt', async () => {
+      const tx = buildOrphanedTx();
+      const transactions = new FakeTransactionRepository([tx]);
+      const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } });
+      const useCase = buildUseCase({ transactions, gateway });
+
+      await useCase.execute('tx-1');
+
+      const stored = await transactions.findById('tx-1');
+      expect(stored._unsafeUnwrap().lastGatewayCheckAt).toBe(NOW_ISO);
+    });
   });
 
   describe('lazy-poll refresh (stale PENDING with a known gatewayTransactionId)', () => {

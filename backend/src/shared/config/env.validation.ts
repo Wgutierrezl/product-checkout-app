@@ -74,6 +74,18 @@ export class EnvironmentVariables {
   @Min(0)
   LAZY_POLL_THRESHOLD_MS: number = 3000;
 
+  /**
+   * How long a PENDING transaction with no gatewayTransactionId (an
+   * ambiguous synchronous charge failure) is allowed to age before
+   * poll-by-reference confirming no gateway record exists is enough to mark
+   * it ERROR. Default 10 minutes — generous enough to never race a
+   * legitimately-slow but real charge.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  RECONCILIATION_WINDOW_MS: number = 600_000;
+
   @IsOptional()
   @IsInt()
   @Min(1)

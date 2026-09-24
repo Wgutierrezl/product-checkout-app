@@ -1,12 +1,13 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 
-import { Customer } from '../../customers/domain/customer.entity';
 import { CUSTOMER_REPOSITORY_PORT, CustomerRepositoryPort } from '../../customers/domain/customer.repository.port';
+import { Customer } from '../../customers/domain/customer.entity';
+import { DELIVERY_REPOSITORY_PORT, DeliveryRepositoryPort } from '../../deliveries/domain/delivery.repository.port';
 import { Product } from '../../products/domain/product.entity';
 import { PRODUCT_REPOSITORY_PORT, ProductRepositoryPort } from '../../products/domain/product.repository.port';
 import { Money } from '../../products/domain/value-objects/money.vo';
 import { Quantity } from '../../products/domain/value-objects/quantity.vo';
-import { DomainError, InsufficientStockError } from '../../shared/errors/domain-error';
+import { DomainError, InsufficientStockError, PaymentGatewayError } from '../../shared/errors/domain-error';
 import { buildIntegritySignature } from '../../shared/payment-gateway/domain/integrity-signature';
 import { PAYMENT_GATEWAY_PORT, PaymentGatewayPort } from '../../shared/payment-gateway/domain/payment-gateway.port';
 import { GatewayTransactionResult } from '../../shared/payment-gateway/domain/payment-gateway.types';
@@ -20,6 +21,7 @@ import {
   TransactionRepositoryPort,
 } from '../domain/transaction.repository.port';
 import { SettleTransactionUseCase } from './settle-transaction.use-case';
+import { attachDeliveryIfApproved, TransactionWithDelivery } from './transaction-with-delivery';
 
 export const FEES_CONFIG = Symbol('FEES_CONFIG');
 export const INTEGRITY_SECRET = Symbol('INTEGRITY_SECRET');
@@ -69,13 +71,27 @@ interface PendingState extends PricedProduct {
  * ROP pipeline (per design.md): validate quantity -> load product (404) ->
  * check stock (409) -> compute server-side total -> upsert customer by
  * email -> persist a PENDING transaction with a unique reference -> build
- * the integrity signature -> call the gateway -> store the gateway result.
+ * the integrity signature -> call the gateway -> settle the result.
  *
- * If the gateway call itself fails (network/timeout), the transaction is
- * still persisted, now as ERROR, and the original PaymentGatewayError is
- * propagated so the controller maps it to 502. A gateway response that
- * synchronously reports DECLINED/ERROR is NOT a pipeline failure — it is a
- * valid business outcome, stored as-is and returned with a 201.
+ * EVERY synchronous gateway result (including a still-PENDING one) routes
+ * through `SettleTransactionUseCase` — the single entry point shared with
+ * the webhook and lazy-poll paths — so a webhook racing in before this call
+ * finishes can never observe or create an inconsistent state.
+ *
+ * A gateway CALL failure (network/timeout/HTTP error, as opposed to a
+ * successful call that returned e.g. DECLINED) is classified AMBIGUOUS vs
+ * DEFINITE (see `PaymentGatewayError.ambiguous`):
+ * - DEFINITE (the gateway explicitly rejected the request, e.g. 4xx) -> the
+ *   transaction is marked ERROR and the original error is propagated (502).
+ * - AMBIGUOUS (timeout, network error, 5xx, or a malformed body after a 2xx
+ *   — the request may still have gone through) -> the transaction is left
+ *   PENDING with no gatewayTransactionId, logged for reconciliation, and
+ *   `execute()` still resolves Ok with the PENDING transaction (201) — the
+ *   client polls, and the lazy-poll-by-reference / webhook paths resolve it.
+ *
+ * A gateway response that synchronously reports DECLINED/ERROR (a
+ * successful CALL, an unfavorable business OUTCOME) is NOT a pipeline
+ * failure — settled and returned with a 201.
  *
  * `cardToken` is used only to build the gateway request body — it is never
  * read back off `Transaction` or persisted (see spec's Sensitive Data
@@ -89,6 +105,7 @@ export class CreateTransactionUseCase {
     @Inject(PRODUCT_REPOSITORY_PORT) private readonly products: ProductRepositoryPort,
     @Inject(CUSTOMER_REPOSITORY_PORT) private readonly customers: CustomerRepositoryPort,
     @Inject(TRANSACTION_REPOSITORY_PORT) private readonly transactions: TransactionRepositoryPort,
+    @Inject(DELIVERY_REPOSITORY_PORT) private readonly deliveries: DeliveryRepositoryPort,
     @Inject(PAYMENT_GATEWAY_PORT) private readonly gateway: PaymentGatewayPort,
     private readonly settleTransaction: SettleTransactionUseCase,
     @Inject(CLOCK_PORT) private readonly clock: ClockPort,
@@ -97,7 +114,7 @@ export class CreateTransactionUseCase {
     @Inject(INTEGRITY_SECRET) private readonly integritySecret: string,
   ) {}
 
-  execute(command: CreateTransactionCommand): AppResultAsync<Transaction> {
+  execute(command: CreateTransactionCommand): AppResultAsync<TransactionWithDelivery> {
     return Quantity.create(command.quantity)
       .asyncAndThen((quantity) =>
         this.products.findById(command.productId).map((product) => ({ command, quantity, product })),
@@ -118,7 +135,8 @@ export class CreateTransactionUseCase {
         // first attempt). Return it as-is — the gateway must NEVER be
         // charged twice for the same checkout attempt.
         wasCreated ? this.chargeGateway(transaction, command) : okAsync(transaction),
-      );
+      )
+      .andThen((transaction) => attachDeliveryIfApproved(this.deliveries, transaction));
   }
 
   private ensureStock(product: Product, quantity: Quantity): AppResult<void> {
@@ -195,78 +213,82 @@ export class CreateTransactionUseCase {
         cardToken: command.cardToken,
         installments: command.installments,
       })
-      .andThen((gatewayResult) => this.persistGatewayResult(transaction, gatewayResult))
-      .orElse((error) => this.persistErrorStatus(transaction, error));
+      .andThen((gatewayResult) => this.persistSynchronousResult(transaction, gatewayResult))
+      .orElse((error) => this.handleChargeFailure(transaction, error));
   }
 
   /**
-   * The gateway charge already succeeded by the time this runs — an
-   * "orphaned charge" (money moved, our own record never updated) is the
-   * worst possible outcome here. Log enough to manually reconcile (never
-   * PII, never the card token) and retry the write once before giving up.
+   * The gateway CALL already succeeded by the time this runs (any status,
+   * including PENDING) — an "orphaned charge" (money moved, our own record
+   * never updated) is the worst possible outcome for the side-effect-bearing
+   * statuses, but even a plain PENDING write is retried for consistency. Log
+   * enough to manually reconcile (never PII, never the card token) and retry
+   * the settlement once before giving up.
    *
-   * A synchronously-APPROVED result routes through `SettleTransaction` (the
-   * single entry point for all settlement paths — see PR6 design) so stock
-   * decrement + delivery creation happen atomically and consistently with
-   * the webhook/lazy-poll paths, and so a webhook that races in before this
-   * synchronous call finishes can never double-apply those side effects.
-   * Every other status (PENDING/DECLINED/VOIDED/ERROR-from-gateway) has no
-   * side effects to guard and is persisted directly, as before.
+   * Every status — including PENDING — routes through `SettleTransaction`
+   * (the single entry point for all settlement paths, see PR6 design), which
+   * itself uses condition-guarded writes. This means there are NO
+   * unconditioned status writes left in this use case.
    */
-  private persistGatewayResult(
+  private persistSynchronousResult(
     transaction: Transaction,
     gatewayResult: GatewayTransactionResult,
   ): AppResultAsync<Transaction> {
-    const persist = () => this.applyGatewayResult(transaction, gatewayResult);
+    const settle = () =>
+      this.settleTransaction.execute({
+        transactionId: transaction.id,
+        gatewayStatus: gatewayResult.status,
+        gatewayTransactionId: gatewayResult.gatewayTransactionId,
+      });
 
-    return persist().orElse((persistError) => {
+    return settle().orElse((persistError) => {
       this.logger.error(
         `Failed to persist gateway result, retrying once: transactionId=${transaction.id} ` +
           `reference=${transaction.reference} gatewayTransactionId=${gatewayResult.gatewayTransactionId} ` +
           `gatewayStatus=${gatewayResult.status}: ${persistError.message}`,
       );
-      return persist();
-    });
-  }
-
-  private applyGatewayResult(
-    transaction: Transaction,
-    gatewayResult: GatewayTransactionResult,
-  ): AppResultAsync<Transaction> {
-    if (gatewayResult.status === 'APPROVED') {
-      return this.settleTransaction.execute({
-        transactionId: transaction.id,
-        gatewayStatus: 'APPROVED',
-        gatewayTransactionId: gatewayResult.gatewayTransactionId,
-      });
-    }
-
-    return this.transactions.updateGatewayResult(transaction.id, {
-      gatewayTransactionId: gatewayResult.gatewayTransactionId,
-      status: gatewayResult.status,
-      updatedAt: this.clock.now().toISOString(),
+      return settle();
     });
   }
 
   /**
-   * The gateway call itself failed (network/timeout/malformed response) —
-   * the transaction is marked ERROR and the ORIGINAL gateway error is
-   * always what gets returned to the caller, even if persisting the ERROR
-   * status also fails (that secondary failure is only logged, never
-   * swallows or replaces the real cause of the 502).
+   * The gateway CALL itself failed — classify it before deciding what to do:
+   * - AMBIGUOUS (`PaymentGatewayError.ambiguous === true`: timeout, network
+   *   error, 5xx, or a malformed body after a 2xx) — we genuinely don't know
+   *   if the charge went through. Leave the transaction PENDING (no
+   *   gatewayTransactionId), log for reconciliation, and resolve Ok so the
+   *   client gets 201 PENDING and polls — never assume the charge failed.
+   * - DEFINITE (anything else, e.g. a 4xx the gateway explicitly rejected
+   *   before processing) — mark the transaction ERROR via `SettleTransaction`
+   *   and propagate the ORIGINAL error (502), even if finalizing ERROR
+   *   itself also fails (that secondary failure is only logged, never
+   *   swallows or replaces the real cause of the 502).
    */
-  private persistErrorStatus(transaction: Transaction, error: DomainError): AppResultAsync<Transaction> {
-    return this.transactions
-      .updateGatewayResult(transaction.id, { status: 'ERROR', updatedAt: this.clock.now().toISOString() })
+  private handleChargeFailure(transaction: Transaction, error: DomainError): AppResultAsync<Transaction> {
+    if (this.isAmbiguousGatewayFailure(error)) {
+      this.logger.error(
+        'Ambiguous payment gateway failure (network/timeout/5xx/malformed response) — the charge may have ' +
+          `gone through. Leaving transaction PENDING for reconciliation via lazy-poll/webhook: ` +
+          `transactionId=${transaction.id} reference=${transaction.reference}: ${error.message}`,
+      );
+      return okAsync(transaction);
+    }
+
+    return this.settleTransaction
+      .execute({ transactionId: transaction.id, gatewayStatus: 'ERROR' })
       .andThen(() => errAsync(error))
       .orElse((finalError) => {
         if (finalError !== error) {
           this.logger.error(
-            `Failed to persist ERROR status after a gateway failure: transactionId=${transaction.id} ` +
+            `Failed to finalize transaction ERROR after a definite gateway rejection: transactionId=${transaction.id} ` +
               `reference=${transaction.reference}: ${finalError.message}`,
           );
         }
         return errAsync(error);
       });
+  }
+
+  private isAmbiguousGatewayFailure(error: DomainError): boolean {
+    return error instanceof PaymentGatewayError && error.ambiguous;
   }
 }

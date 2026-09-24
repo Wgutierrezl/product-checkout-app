@@ -43,7 +43,7 @@ export class TransactionsController {
     });
 
     return result.match(
-      (transaction) => TransactionResponseDto.fromDomain(transaction),
+      (view) => TransactionResponseDto.fromDomain(view.transaction, view.delivery),
       (error) => {
         throw error;
       },

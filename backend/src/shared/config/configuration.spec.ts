@@ -40,6 +40,7 @@ describe('configuration', () => {
         deliveryFeeCents: env.DELIVERY_FEE_CENTS,
       },
       lazyPollThresholdMs: env.LAZY_POLL_THRESHOLD_MS,
+      reconciliationWindowMs: env.RECONCILIATION_WINDOW_MS,
       cors: {
         allowedOrigins: ['http://localhost:5173', 'http://localhost:3001'],
       },
@@ -48,6 +49,14 @@ describe('configuration', () => {
         limit: env.THROTTLE_LIMIT,
       },
     });
+  });
+
+  it('carries a RECONCILIATION_WINDOW_MS override straight through', () => {
+    const env = buildEnv({ RECONCILIATION_WINDOW_MS: '120000' });
+
+    const config = configuration(env);
+
+    expect(config.reconciliationWindowMs).toBe(120_000);
   });
 
   it('splits, trims and drops empty entries from CORS_ALLOWED_ORIGINS', () => {
