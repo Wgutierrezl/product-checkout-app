@@ -81,6 +81,42 @@ describe('ProductCard', () => {
     expect(screen.getByLabelText('Quantity')).toHaveTextContent('10');
   });
 
+  it('re-clamps the selected quantity when the product stock decreases on a re-render', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<ProductCard product={{ ...PRODUCT, stock: 5 }} onBuy={jest.fn()} />);
+    await user.click(screen.getByRole('button', { name: /increase quantity/i }));
+    await user.click(screen.getByRole('button', { name: /increase quantity/i }));
+    expect(screen.getByLabelText('Quantity')).toHaveTextContent('3');
+
+    rerender(<ProductCard product={{ ...PRODUCT, stock: 1 }} onBuy={jest.fn()} />);
+
+    expect(screen.getByLabelText('Quantity')).toHaveTextContent('1');
+  });
+
+  it('announces the quantity value via an aria-live polite output element', () => {
+    render(<ProductCard product={PRODUCT} onBuy={jest.fn()} />);
+
+    const quantityOutput = screen.getByLabelText('Quantity');
+    expect(quantityOutput.tagName.toLowerCase()).toBe('output');
+    expect(quantityOutput).toHaveAttribute('aria-live', 'polite');
+  });
+
+  it('uses eager loading and high fetch priority when marked as the priority (LCP) image', () => {
+    render(<ProductCard product={PRODUCT} onBuy={jest.fn()} priority />);
+
+    const image = screen.getByRole('img', { name: PRODUCT.name });
+    expect(image).toHaveAttribute('loading', 'eager');
+    expect(image).toHaveAttribute('fetchpriority', 'high');
+  });
+
+  it('defaults to lazy loading with no fetch priority when not the priority image', () => {
+    render(<ProductCard product={PRODUCT} onBuy={jest.fn()} />);
+
+    const image = screen.getByRole('img', { name: PRODUCT.name });
+    expect(image).toHaveAttribute('loading', 'lazy');
+    expect(image).not.toHaveAttribute('fetchpriority');
+  });
+
   it('calls onBuy with the product id and the currently selected quantity', async () => {
     const user = userEvent.setup();
     const onBuy = jest.fn();

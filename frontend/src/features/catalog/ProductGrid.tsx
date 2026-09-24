@@ -11,9 +11,9 @@ export interface ProductGridProps {
 export function ProductGrid({ products, onBuy }: ProductGridProps) {
   return (
     <ul className={styles.grid}>
-      {products.map((product) => (
+      {products.map((product, index) => (
         <li key={product.id}>
-          <ProductCard product={product} onBuy={onBuy} />
+          <ProductCard product={product} onBuy={onBuy} priority={index === 0} />
         </li>
       ))}
     </ul>
