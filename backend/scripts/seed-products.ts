@@ -7,10 +7,9 @@
  * "sold out" UI state) keyed by stable UUIDs, so re-running the script
  * overwrites the same items instead of duplicating them.
  *
- * Customers and Deliveries are only table-created here, not seeded — they're
- * populated by the checkout flow itself (PR5/PR6), so there's no fixed seed
- * data for them. `Transactions` table creation is deferred to PR5, which
- * introduces the transaction repository.
+ * Customers, Deliveries, and Transactions are only table-created here, not
+ * seeded — they're populated by the checkout flow itself (PR5/PR6), so
+ * there's no fixed seed data for them.
  *
  * Usage: npm run seed
  */
@@ -30,6 +29,11 @@ import {
   DELIVERIES_TRANSACTION_ID_INDEX_NAME,
 } from '../src/deliveries/infrastructure/dynamo-delivery.repository';
 import { PRODUCTS_TABLE_NAME } from '../src/products/infrastructure/dynamo-product.repository';
+import {
+  TRANSACTIONS_GATEWAY_TX_INDEX_NAME,
+  TRANSACTIONS_REFERENCE_INDEX_NAME,
+  TRANSACTIONS_TABLE_NAME,
+} from '../src/transactions/infrastructure/dynamo-transaction.repository';
 
 const REGION = process.env.AWS_REGION ?? 'us-east-1';
 // Defaults to DynamoDB Local's docker-compose port for local seeding; set
@@ -174,6 +178,34 @@ async function ensureDeliveriesTable(client: DynamoDBClient): Promise<void> {
   );
 }
 
+async function ensureTransactionsTable(client: DynamoDBClient): Promise<void> {
+  await createTableIfMissing(
+    client,
+    new CreateTableCommand({
+      TableName: TRANSACTIONS_TABLE_NAME,
+      AttributeDefinitions: [
+        { AttributeName: 'transactionId', AttributeType: 'S' },
+        { AttributeName: 'reference', AttributeType: 'S' },
+        { AttributeName: 'gatewayTransactionId', AttributeType: 'S' },
+      ],
+      KeySchema: [{ AttributeName: 'transactionId', KeyType: 'HASH' }],
+      GlobalSecondaryIndexes: [
+        {
+          IndexName: TRANSACTIONS_REFERENCE_INDEX_NAME,
+          KeySchema: [{ AttributeName: 'reference', KeyType: 'HASH' }],
+          Projection: { ProjectionType: 'ALL' },
+        },
+        {
+          IndexName: TRANSACTIONS_GATEWAY_TX_INDEX_NAME,
+          KeySchema: [{ AttributeName: 'gatewayTransactionId', KeyType: 'HASH' }],
+          Projection: { ProjectionType: 'ALL' },
+        },
+      ],
+      BillingMode: 'PAY_PER_REQUEST',
+    }),
+  );
+}
+
 async function seedProducts(): Promise<void> {
   const client = new DynamoDBClient({ region: REGION, endpoint: ENDPOINT });
   const documentClient = DynamoDBDocumentClient.from(client, {
@@ -183,6 +215,7 @@ async function seedProducts(): Promise<void> {
   await ensureProductsTable(client);
   await ensureCustomersTable(client);
   await ensureDeliveriesTable(client);
+  await ensureTransactionsTable(client);
 
   for (const product of SEED_PRODUCTS) {
     await documentClient.send(new PutCommand({ TableName: PRODUCTS_TABLE_NAME, Item: product }));
@@ -191,7 +224,8 @@ async function seedProducts(): Promise<void> {
   // eslint-disable-next-line no-console
   console.log(
     `Seeded ${SEED_PRODUCTS.length} products into "${PRODUCTS_TABLE_NAME}". ` +
-      `Ensured "${CUSTOMERS_TABLE_NAME}" and "${DELIVERIES_TABLE_NAME}" tables exist (no seed data).`,
+      `Ensured "${CUSTOMERS_TABLE_NAME}", "${DELIVERIES_TABLE_NAME}", and "${TRANSACTIONS_TABLE_NAME}" ` +
+      'tables exist (no seed data).',
   );
 }
 

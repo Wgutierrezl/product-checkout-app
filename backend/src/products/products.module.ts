@@ -13,5 +13,7 @@ import { ProductsController } from './infrastructure/products.controller';
     GetProductUseCase,
     { provide: PRODUCT_REPOSITORY_PORT, useClass: DynamoProductRepository },
   ],
+  // Exported so TransactionsModule (PR5) can inject PRODUCT_REPOSITORY_PORT for the create-transaction pipeline.
+  exports: [PRODUCT_REPOSITORY_PORT],
 })
 export class ProductsModule {}

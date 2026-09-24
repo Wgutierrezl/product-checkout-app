@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
-import { DynamoDBDocumentClient, GetCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { TransactionCanceledException } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, QueryCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import { mockClient } from 'aws-sdk-client-mock';
 
 import {
@@ -203,6 +204,98 @@ describe('DynamoCustomerRepository', () => {
       );
 
       warnSpy.mockRestore();
+    });
+  });
+
+  describe('create', () => {
+    const customer = {
+      id: 'cust-1',
+      fullName: 'Jane Doe',
+      email: 'Jane.Doe@Example.com',
+      phone: '+573001234567',
+    };
+
+    it('persists the customer and an email-uniqueness guard item in one transaction', async () => {
+      ddbMock.on(TransactWriteCommand).resolves({});
+      const repository = new DynamoCustomerRepository(
+        ddbMock as unknown as DynamoDBDocumentClient,
+      );
+
+      const result = await repository.create(customer);
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toEqual(customer);
+      const call = ddbMock.commandCalls(TransactWriteCommand)[0].args[0].input;
+      expect(call.TransactItems).toEqual([
+        {
+          Put: {
+            TableName: CUSTOMERS_TABLE_NAME,
+            Item: {
+              customerId: 'cust-1',
+              fullName: 'Jane Doe',
+              email: 'Jane.Doe@Example.com',
+              phone: '+573001234567',
+            },
+            ConditionExpression: 'attribute_not_exists(customerId)',
+          },
+        },
+        {
+          Put: {
+            TableName: CUSTOMERS_TABLE_NAME,
+            // Guard item: its customerId is a synthetic, lowercase-normalized
+            // "EMAIL#..." key, never a real customer id.
+            Item: { customerId: 'EMAIL#jane.doe@example.com' },
+            ConditionExpression: 'attribute_not_exists(customerId)',
+          },
+        },
+      ]);
+    });
+
+    it('returns UnexpectedError when the underlying client call fails', async () => {
+      ddbMock.on(TransactWriteCommand).rejects(new Error('network error'));
+      const repository = new DynamoCustomerRepository(
+        ddbMock as unknown as DynamoDBDocumentClient,
+      );
+
+      const result = await repository.create(customer);
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('Unexpected');
+    });
+
+    it('re-reads and returns the winning customer when two concurrent creates race on the same email', async () => {
+      ddbMock.on(TransactWriteCommand).rejects(
+        new TransactionCanceledException({ message: 'Transaction cancelled', $metadata: {} }),
+      );
+      const winner = {
+        customerId: 'cust-winner',
+        fullName: 'Jane Doe',
+        email: 'Jane.Doe@Example.com',
+        phone: '+573001234567',
+      };
+      ddbMock.on(QueryCommand).resolves({ Items: [winner] });
+      const repository = new DynamoCustomerRepository(
+        ddbMock as unknown as DynamoDBDocumentClient,
+      );
+
+      const result = await repository.create(customer);
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap().id).toBe('cust-winner');
+    });
+
+    it('returns the original cancellation error when the race loser cannot find a winner by email', async () => {
+      const cancellation = new TransactionCanceledException({ message: 'Transaction cancelled', $metadata: {} });
+      ddbMock.on(TransactWriteCommand).rejects(cancellation);
+      ddbMock.on(QueryCommand).resolves({ Items: [] });
+      const repository = new DynamoCustomerRepository(
+        ddbMock as unknown as DynamoDBDocumentClient,
+      );
+
+      const result = await repository.create(customer);
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('Unexpected');
     });
   });
 });
