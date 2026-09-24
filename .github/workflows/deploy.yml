@@ -27,9 +27,13 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+          # frontend/package-lock.json may not exist yet on this ref (SPA
+          # scaffold landing in parallel) — setup-node tolerates a
+          # non-matching path here, same as ci.yml's frontend job guard.
           cache-dependency-path: |
             backend/package-lock.json
             infra/package-lock.json
+            frontend/package-lock.json
 
       - name: Configure AWS credentials (OIDC — no static keys)
         uses: aws-actions/configure-aws-credentials@v4
