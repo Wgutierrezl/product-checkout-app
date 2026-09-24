@@ -1,15 +1,16 @@
 /**
- * Idempotent local seed script for the Products table.
+ * Idempotent local table-creation + seed script for DynamoDB Local.
  *
- * Creates the `Products` table on DynamoDB Local (if it doesn't already exist)
- * and puts a fixed catalog of 7 sample products (including one out-of-stock
- * item, stock 0, to demo the catalog's "sold out" UI state) keyed by stable
- * UUIDs, so re-running the script overwrites the same items instead of
- * duplicating them.
+ * Creates the `Products`, `Customers`, and `Deliveries` tables (with their
+ * GSIs) if they don't already exist, and puts a fixed catalog of 7 sample
+ * products (including one out-of-stock item, stock 0, to demo the catalog's
+ * "sold out" UI state) keyed by stable UUIDs, so re-running the script
+ * overwrites the same items instead of duplicating them.
  *
- * Only the Products table is created here — Customers/Deliveries/Transactions
- * table creation is deferred to the PRs that introduce those repositories
- * (see design.md "Local Dev" note; this script will be extended there).
+ * Customers and Deliveries are only table-created here, not seeded — they're
+ * populated by the checkout flow itself (PR5/PR6), so there's no fixed seed
+ * data for them. `Transactions` table creation is deferred to PR5, which
+ * introduces the transaction repository.
  *
  * Usage: npm run seed
  */
@@ -20,6 +21,14 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 
+import {
+  CUSTOMERS_EMAIL_INDEX_NAME,
+  CUSTOMERS_TABLE_NAME,
+} from '../src/customers/infrastructure/dynamo-customer.repository';
+import {
+  DELIVERIES_TABLE_NAME,
+  DELIVERIES_TRANSACTION_ID_INDEX_NAME,
+} from '../src/deliveries/infrastructure/dynamo-delivery.repository';
 import { PRODUCTS_TABLE_NAME } from '../src/products/infrastructure/dynamo-product.repository';
 
 const REGION = process.env.AWS_REGION ?? 'us-east-1';
@@ -96,21 +105,73 @@ const SEED_PRODUCTS: SeedProductItem[] = [
   },
 ];
 
-async function ensureProductsTable(client: DynamoDBClient): Promise<void> {
+async function createTableIfMissing(
+  client: DynamoDBClient,
+  command: CreateTableCommand,
+): Promise<void> {
   try {
-    await client.send(
-      new CreateTableCommand({
-        TableName: PRODUCTS_TABLE_NAME,
-        AttributeDefinitions: [{ AttributeName: 'productId', AttributeType: 'S' }],
-        KeySchema: [{ AttributeName: 'productId', KeyType: 'HASH' }],
-        BillingMode: 'PAY_PER_REQUEST',
-      }),
-    );
+    await client.send(command);
   } catch (error) {
     if (!(error instanceof ResourceInUseException)) {
       throw error;
     }
   }
+}
+
+async function ensureProductsTable(client: DynamoDBClient): Promise<void> {
+  await createTableIfMissing(
+    client,
+    new CreateTableCommand({
+      TableName: PRODUCTS_TABLE_NAME,
+      AttributeDefinitions: [{ AttributeName: 'productId', AttributeType: 'S' }],
+      KeySchema: [{ AttributeName: 'productId', KeyType: 'HASH' }],
+      BillingMode: 'PAY_PER_REQUEST',
+    }),
+  );
+}
+
+async function ensureCustomersTable(client: DynamoDBClient): Promise<void> {
+  await createTableIfMissing(
+    client,
+    new CreateTableCommand({
+      TableName: CUSTOMERS_TABLE_NAME,
+      AttributeDefinitions: [
+        { AttributeName: 'customerId', AttributeType: 'S' },
+        { AttributeName: 'email', AttributeType: 'S' },
+      ],
+      KeySchema: [{ AttributeName: 'customerId', KeyType: 'HASH' }],
+      GlobalSecondaryIndexes: [
+        {
+          IndexName: CUSTOMERS_EMAIL_INDEX_NAME,
+          KeySchema: [{ AttributeName: 'email', KeyType: 'HASH' }],
+          Projection: { ProjectionType: 'ALL' },
+        },
+      ],
+      BillingMode: 'PAY_PER_REQUEST',
+    }),
+  );
+}
+
+async function ensureDeliveriesTable(client: DynamoDBClient): Promise<void> {
+  await createTableIfMissing(
+    client,
+    new CreateTableCommand({
+      TableName: DELIVERIES_TABLE_NAME,
+      AttributeDefinitions: [
+        { AttributeName: 'deliveryId', AttributeType: 'S' },
+        { AttributeName: 'transactionId', AttributeType: 'S' },
+      ],
+      KeySchema: [{ AttributeName: 'deliveryId', KeyType: 'HASH' }],
+      GlobalSecondaryIndexes: [
+        {
+          IndexName: DELIVERIES_TRANSACTION_ID_INDEX_NAME,
+          KeySchema: [{ AttributeName: 'transactionId', KeyType: 'HASH' }],
+          Projection: { ProjectionType: 'ALL' },
+        },
+      ],
+      BillingMode: 'PAY_PER_REQUEST',
+    }),
+  );
 }
 
 async function seedProducts(): Promise<void> {
@@ -120,17 +181,22 @@ async function seedProducts(): Promise<void> {
   });
 
   await ensureProductsTable(client);
+  await ensureCustomersTable(client);
+  await ensureDeliveriesTable(client);
 
   for (const product of SEED_PRODUCTS) {
     await documentClient.send(new PutCommand({ TableName: PRODUCTS_TABLE_NAME, Item: product }));
   }
 
   // eslint-disable-next-line no-console
-  console.log(`Seeded ${SEED_PRODUCTS.length} products into "${PRODUCTS_TABLE_NAME}".`);
+  console.log(
+    `Seeded ${SEED_PRODUCTS.length} products into "${PRODUCTS_TABLE_NAME}". ` +
+      `Ensured "${CUSTOMERS_TABLE_NAME}" and "${DELIVERIES_TABLE_NAME}" tables exist (no seed data).`,
+  );
 }
 
 seedProducts().catch((error: unknown) => {
   // eslint-disable-next-line no-console
-  console.error('Failed to seed the Products table:', error);
+  console.error('Failed to seed local DynamoDB tables:', error);
   process.exitCode = 1;
 });
