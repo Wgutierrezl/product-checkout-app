@@ -14,6 +14,7 @@ const config: Config = {
     '!src/main.ts',
     '!src/lambda.ts',
     '!src/**/*.module.ts',
+    '!src/**/test/**',
   ],
   coverageDirectory: './coverage',
   coverageThreshold: {

@@ -6,22 +6,9 @@ import { NotFoundError } from '../../shared/errors/domain-error';
 import { errAsync, okAsync } from '../../shared/result/result.types';
 import { GetProductUseCase } from '../application/get-product.use-case';
 import { ListProductsUseCase } from '../application/list-products.use-case';
-import { Product } from '../domain/product.entity';
-import { Money } from '../domain/value-objects/money.vo';
 import { Stock } from '../domain/value-objects/stock.vo';
+import { buildProduct } from '../test/product.fixtures';
 import { ProductsController } from './products.controller';
-
-function buildProduct(overrides: Partial<Product> = {}): Product {
-  return {
-    id: 'prod-1',
-    name: 'Wireless Headphones',
-    description: 'Noise-cancelling over-ear headphones',
-    price: Money.create(150_000)._unsafeUnwrap(),
-    stock: Stock.create(10)._unsafeUnwrap(),
-    imageUrl: 'https://images.unsplash.com/photo-1',
-    ...overrides,
-  };
-}
 
 describe('ProductsController', () => {
   describe('list', () => {
@@ -41,7 +28,7 @@ describe('ProductsController', () => {
           price: 150_000,
           currency: 'COP',
           stock: 10,
-          imageUrl: 'https://images.unsplash.com/photo-1',
+          imageUrl: 'https://images.example.com/headphones.webp',
         },
       ]);
     });
