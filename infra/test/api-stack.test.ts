@@ -11,6 +11,28 @@ import { DataStack } from '../lib/data-stack';
 // deploys/synth use the actual build (see bin/app.ts's ensureLambdaAssetBuilt).
 const FIXTURE_LAMBDA_ASSET_PATH = path.join(__dirname, 'fixtures/lambda-asset');
 
+interface IamStatement {
+  Effect: string;
+  Action: string | string[];
+  Resource: unknown;
+  Condition?: unknown;
+}
+
+/** Finds the single IAM statement granting `action`, asserting there's exactly one. */
+function findStatementByAction(template: Template, action: string): IamStatement {
+  const policies = template.findResources('AWS::IAM::Policy');
+  const statements = Object.values(policies).flatMap(
+    (policy) => policy.Properties.PolicyDocument.Statement as IamStatement[],
+  );
+  const matches = statements.filter(
+    (statement) =>
+      statement.Action === action ||
+      (Array.isArray(statement.Action) && statement.Action.includes(action)),
+  );
+  expect(matches).toHaveLength(1);
+  return matches[0];
+}
+
 function synthApiStack(): Template {
   const app = new App();
   const dataStack = new DataStack(app, 'TestDataStack', {
@@ -56,32 +78,29 @@ describe('ApiStack', () => {
     expect(envVars).toHaveProperty('SSM_PARAM_PREFIX', '/checkout/gateway');
   });
 
-  it('scopes IAM permissions to the 4 tables/GSIs, the 3 SSM params, and the SSM KMS key — no wildcard resource', () => {
+  it('scopes ssm:GetParameter to exactly the 3 gateway SecureString param ARNs — no wildcard resource', () => {
     const template = synthApiStack();
 
-    const policies = template.findResources('AWS::IAM::Policy');
-    const statements = Object.values(policies).flatMap(
-      (policy) => policy.Properties.PolicyDocument.Statement as Array<{
-        Action: string | string[];
-        Resource: unknown;
-      }>,
-    );
+    const statement = findStatementByAction(template, 'ssm:GetParameter');
+    expect(statement.Effect).toBe('Allow');
+    expect(statement.Resource).not.toBe('*');
+    expect(Array.isArray(statement.Resource)).toBe(true);
+    expect(statement.Resource).toHaveLength(3);
+  });
 
-    for (const statement of statements) {
-      expect(statement.Resource).not.toBe('*');
-      if (Array.isArray(statement.Resource)) {
-        expect(statement.Resource).not.toContain('*');
-      }
-    }
+  it('scopes kms:Decrypt via a kms:ViaService=ssm condition, not a bare resource ARN', () => {
+    const template = synthApiStack();
 
-    const actions = statements.flatMap((statement) =>
-      Array.isArray(statement.Action) ? statement.Action : [statement.Action],
-    );
-    expect(actions).toEqual(expect.arrayContaining(['ssm:GetParameter']));
-    expect(actions).toEqual(expect.arrayContaining(['kms:Decrypt']));
-    expect(
-      actions.some((action) => typeof action === 'string' && action.startsWith('dynamodb:')),
-    ).toBe(true);
+    const statement = findStatementByAction(template, 'kms:Decrypt');
+    expect(statement.Effect).toBe('Allow');
+    // The AWS-managed `aws/ssm` key has no static, importable ARN without a
+    // context lookup (forbidden — offline synth). Scoping happens via the
+    // condition instead of the resource: only decrypt calls made *through*
+    // the SSM service in this account/region are authorized.
+    expect(statement.Resource).toBe('*');
+    expect(statement.Condition).toEqual({
+      StringEquals: { 'kms:ViaService': 'ssm.us-east-1.amazonaws.com' },
+    });
   });
 
   it('grants dynamodb:TransactWriteItems on all 4 tables (settlement + customer email guard)', () => {

@@ -107,7 +107,17 @@ export class ApiStack extends Stack {
       new PolicyStatement({
         effect: Effect.ALLOW,
         actions: ['kms:Decrypt'],
-        resources: [`arn:aws:kms:${this.region}:${this.account}:alias/aws/ssm`],
+        // The account's default `aws/ssm` AWS-managed key has no static,
+        // importable ARN reachable without a context lookup (forbidden —
+        // offline synth/tests, no AWS account exists yet). Per AWS's
+        // documented pattern for AWS-managed keys, scope via a ViaService
+        // condition instead of a resource ARN: only decrypt calls made
+        // *through* SSM in this account/region are authorized — still
+        // least-privilege, just condition-scoped rather than ARN-scoped.
+        resources: ['*'],
+        conditions: {
+          StringEquals: { 'kms:ViaService': `ssm.${this.region}.amazonaws.com` },
+        },
       }),
     );
 
