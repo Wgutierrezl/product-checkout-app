@@ -2,6 +2,10 @@ import { App } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 
 import { GithubOidcStack } from '../lib/github-oidc-stack';
+import { webBucketArn } from '../lib/shared/web-bucket-name';
+
+const TEST_ACCOUNT = '123456789012';
+const TEST_REGION = 'us-east-1';
 
 interface IamRoleProperties {
   RoleName?: string;
@@ -89,8 +93,8 @@ describe('GithubOidcStack', () => {
     );
     expect(statement.Resource).toEqual(
       expect.arrayContaining([
-        'arn:aws:s3:::checkout-web-123456789012',
-        'arn:aws:s3:::checkout-web-123456789012/*',
+        webBucketArn(TEST_ACCOUNT, TEST_REGION),
+        `${webBucketArn(TEST_ACCOUNT, TEST_REGION)}/*`,
       ]),
     );
   });
@@ -118,6 +122,20 @@ describe('GithubOidcStack', () => {
 
     expect(statement).toBeDefined();
     expect(statement.Resource).toBe('arn:aws:dynamodb:us-east-1:123456789012:table/Products');
+  });
+
+  it('allows a 2-hour session — CloudFront distribution updates during deploy can take a while', () => {
+    const template = synthOidcStack();
+
+    const roles = template.findResources('AWS::IAM::Role');
+    const deployRole = Object.values(roles).find(
+      (role) => (role.Properties as { RoleName?: string }).RoleName === 'checkout-deploy',
+    );
+
+    expect(deployRole).toBeDefined();
+    expect((deployRole!.Properties as { MaxSessionDuration: number }).MaxSessionDuration).toBe(
+      7200,
+    );
   });
 
   it('outputs the deploy role ARN', () => {

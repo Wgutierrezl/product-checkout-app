@@ -10,6 +10,8 @@ import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import { BlockPublicAccess, Bucket } from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 
+import { webBucketName } from './shared/web-bucket-name';
+
 /** Generic placeholder — never the payment gateway company's name/domain. */
 const DEFAULT_PAYMENT_GATEWAY_SANDBOX_ORIGIN = 'https://payment-gateway-sandbox.invalid';
 
@@ -34,6 +36,11 @@ export class WebStack extends Stack {
     super(scope, id, props);
 
     this.bucket = new Bucket(this, 'SpaBucket', {
+      // Pinned (not CDK-auto-generated) so GithubOidcStack's S3 policy —
+      // deployed separately, before this stack exists on a fresh account —
+      // can reference the exact bucket ARN. Single source of truth in
+      // shared/web-bucket-name.ts; see web-stack-oidc-consistency.test.ts.
+      bucketName: webBucketName(this.account, this.region),
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
       enforceSSL: true,
       removalPolicy: RemovalPolicy.DESTROY,

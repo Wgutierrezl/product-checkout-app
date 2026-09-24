@@ -8,12 +8,12 @@ import {
 } from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
 
+import { webBucketArn } from './shared/web-bucket-name';
+
 const GITHUB_OIDC_ISSUER_URL = 'https://token.actions.githubusercontent.com';
 const DEFAULT_TRUSTED_BRANCH = 'refs/heads/main';
 /** Default CDK v2 bootstrap qualifier — must match whatever `cdk bootstrap` used for this account/region. */
 const CDK_BOOTSTRAP_QUALIFIER = 'hnb659fds';
-/** Matches WebStack's SPA bucket name (see web-stack.ts) — kept in sync manually since this stack is deployed independently, before WebStack exists. */
-const WEB_BUCKET_NAME_PREFIX = 'checkout-web';
 /** Matches DataStack's Products table name (see data-stack.ts). */
 const PRODUCTS_TABLE_NAME = 'Products';
 
@@ -39,9 +39,12 @@ export interface GithubOidcStackProps extends StackProps {
  *
  * Resource ARNs are constructed from known naming conventions rather than
  * cross-stack references, since this stack is deployed BEFORE
- * DataStack/WebStack/ApiStack exist on a fresh account. `WebStack`'s bucket
- * name and `DataStack`'s Products table name must stay in sync with the
- * constants above if ever renamed.
+ * DataStack/WebStack/ApiStack exist on a fresh account. The SPA bucket's
+ * name comes from `shared/web-bucket-name.ts` — the SAME function
+ * `WebStack` uses to set its own `bucketName`, so the two can never drift
+ * apart (see `web-stack-oidc-consistency.test.ts`). `DataStack`'s Products
+ * table name must stay in sync with the `PRODUCTS_TABLE_NAME` constant
+ * above if ever renamed.
  */
 export class GithubOidcStack extends Stack {
   public readonly deployRole: Role;
@@ -64,7 +67,10 @@ export class GithubOidcStack extends Stack {
           'token.actions.githubusercontent.com:sub': `repo:${props.githubOrgRepo}:ref:${trustedBranch}`,
         },
       }),
-      maxSessionDuration: Duration.hours(1),
+      // 2h, not IAM's 1h default — CloudFront distribution
+      // create/update/invalidation can take a while, and deploy.yml must
+      // not have its credentials expire mid-deploy.
+      maxSessionDuration: Duration.hours(2),
     });
 
     this.deployRole.addToPolicy(
@@ -82,8 +88,8 @@ export class GithubOidcStack extends Stack {
         effect: Effect.ALLOW,
         actions: ['s3:PutObject', 's3:DeleteObject', 's3:ListBucket'],
         resources: [
-          `arn:aws:s3:::${WEB_BUCKET_NAME_PREFIX}-${this.account}`,
-          `arn:aws:s3:::${WEB_BUCKET_NAME_PREFIX}-${this.account}/*`,
+          webBucketArn(this.account, this.region),
+          `${webBucketArn(this.account, this.region)}/*`,
         ],
       }),
     );
