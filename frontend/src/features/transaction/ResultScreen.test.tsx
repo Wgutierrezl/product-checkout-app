@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { ResultScreen } from './ResultScreen';
 import { formatCOP } from '../../domain/money/formatCOP';
 import type { DeliveryInput } from '../../api/types';
@@ -49,6 +50,41 @@ describe('ResultScreen', () => {
       const button = screen.getByRole('button', { name: /check again/i });
       button.click();
       expect(onCheckAgain).toHaveBeenCalledTimes(1);
+    });
+
+    it('announces "still processing" politely via aria-live (announced once when it appears, not spammed every poll)', () => {
+      renderResult({ status: 'PENDING', pollExhausted: true });
+
+      const message = screen.getByText(/still processing/i);
+      expect(message).toHaveAttribute('aria-live', 'polite');
+    });
+  });
+
+  describe('overlay behavior (shared with Modal/Summary via useOverlayA11y)', () => {
+    it('traps Tab focus within the overlay and marks sibling app content inert while mounted', () => {
+      const sibling = document.createElement('div');
+      document.body.appendChild(sibling);
+
+      const { unmount } = renderResult({ status: 'APPROVED', reference: 'REF-1', amounts: AMOUNTS });
+
+      expect(sibling).toHaveAttribute('aria-hidden', 'true');
+      expect(sibling).toHaveAttribute('inert');
+
+      unmount();
+
+      expect(sibling).not.toHaveAttribute('aria-hidden');
+      expect(sibling).not.toHaveAttribute('inert');
+      document.body.removeChild(sibling);
+    });
+
+    it('cycles Tab focus from the last focusable control back to the first, within the RESULT overlay', async () => {
+      const user = userEvent.setup();
+      renderResult({ status: 'DECLINED', reference: 'REF-1' });
+
+      screen.getByRole('button', { name: /back to store/i }).focus();
+      await user.tab();
+
+      expect(screen.getByRole('button', { name: /try again/i })).toHaveFocus();
     });
   });
 
