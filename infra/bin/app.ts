@@ -9,6 +9,7 @@ import { App } from 'aws-cdk-lib';
 
 import { ApiStack } from '../lib/api-stack';
 import { DataStack } from '../lib/data-stack';
+import { WebStack } from '../lib/web-stack';
 
 /**
  * Account/region resolve from env with offline-safe fallbacks so `cdk synth`
@@ -38,19 +39,12 @@ function ensureLambdaAssetBuilt(): void {
   execSync('npm run package:lambda', { cwd: BACKEND_DIR, stdio: 'inherit' });
 }
 
-/**
- * Placeholder until `WebStack` lands (next PR slice) and this gets replaced
- * with `webStack.distribution.domainName`. Overridable via env for local
- * experimentation; deliberately generic — never a real/vendor domain.
- */
-const webStackDomain =
-  process.env.WEB_STACK_DOMAIN_PLACEHOLDER ?? 'web-stack-pending.invalid';
-
 ensureLambdaAssetBuilt();
 
 const app = new App();
 
 const dataStack = new DataStack(app, 'DataStack', { env });
+const webStack = new WebStack(app, 'WebStack', { env });
 
 const apiStack = new ApiStack(app, 'ApiStack', {
   env,
@@ -58,7 +52,12 @@ const apiStack = new ApiStack(app, 'ApiStack', {
   customersTable: dataStack.customersTable,
   deliveriesTable: dataStack.deliveriesTable,
   transactionsTable: dataStack.transactionsTable,
-  webStackDomain,
+  webStackDomain: webStack.distribution.distributionDomainName,
   lambdaAssetPath: LAMBDA_ASSET_PATH,
 });
-apiStack.addDependency(dataStack);
+// `addDependency` is deprecated in favor of `addStackDependency`. ApiStack
+// needs both: DataStack's tables (IAM grants + env vars) and WebStack's
+// distribution domain (CORS) — CDK computes the deploy DAG from these,
+// independent of declaration order above.
+apiStack.addStackDependency(dataStack);
+apiStack.addStackDependency(webStack);
