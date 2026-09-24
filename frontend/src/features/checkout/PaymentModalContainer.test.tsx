@@ -96,7 +96,7 @@ describe('PaymentModalContainer', () => {
       number: '4111111111111111',
       cvc: '123',
       expMonth: '09',
-      expYear: '2030',
+      expYear: '30',
       cardHolder: 'Jane Doe',
     });
 
@@ -108,6 +108,28 @@ describe('PaymentModalContainer', () => {
     expect(checkout.customer).toEqual({ fullName: 'Jane Doe', email: 'jane@example.com', phone: '+573001234567' });
     expect(checkout.delivery).toEqual({ address: 'Cra 1 # 2-3', city: 'Bogota', region: 'Cundinamarca' });
     expect(checkout.submitStatus).toBe('idle');
+  });
+
+  it('sends exp_month and exp_year as 2-digit strings to the gateway, regardless of the entered expiry', async () => {
+    mockedTokenizeCard.mockResolvedValue({ cardToken: 'tok_test_card' });
+    const user = userEvent.setup();
+    renderWithStore();
+
+    await user.type(screen.getByLabelText(/card number/i), '4111111111111111');
+    await user.type(screen.getByLabelText(/cardholder name/i), 'Jane Doe');
+    await user.type(screen.getByLabelText(/expiry/i), '05/29');
+    await user.type(screen.getByLabelText(/cvc/i), '123');
+    await user.type(screen.getByLabelText(/full name/i), 'Jane Doe');
+    await user.type(screen.getByLabelText(/email/i), 'jane@example.com');
+    await user.type(screen.getByLabelText(/phone/i), '+573001234567');
+    await user.type(screen.getByLabelText(/^address/i), 'Cra 1 # 2-3');
+    await user.type(screen.getByLabelText(/city/i), 'Bogota');
+    await user.type(screen.getByLabelText(/region/i), 'Cundinamarca');
+    await user.click(screen.getByRole('button', { name: /continue/i }));
+
+    expect(mockedTokenizeCard).toHaveBeenCalledWith(
+      expect.objectContaining({ expMonth: '05', expYear: '29' }),
+    );
   });
 
   it('shows the tokenize failure inline and keeps the buyer on DETAILS without saving customer/delivery', async () => {

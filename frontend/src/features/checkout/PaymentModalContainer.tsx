@@ -44,8 +44,9 @@ export function PaymentModalContainer() {
       const { cardToken } = await tokenizeCard({
         number: values.cardNumber,
         cvc: values.cvc,
+        // The gateway expects 2-digit MM/YY, never a 4-digit year.
         expMonth: String(values.expMonth).padStart(2, '0'),
-        expYear: String(values.expYear),
+        expYear: String(values.expYear % 100).padStart(2, '0'),
         cardHolder: values.cardHolder,
       });
 
