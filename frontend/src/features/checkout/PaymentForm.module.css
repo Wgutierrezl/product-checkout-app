@@ -1,0 +1,72 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.sectionTitle {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  margin-bottom: var(--space-3);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+}
+
+.gridTwo {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+}
+
+@media (min-width: 480px) {
+  .gridTwo {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.input {
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: var(--font-size-md);
+}
+
+.input:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: 1px;
+}
+
+.cardNumberRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.cardNumberRow .input {
+  flex: 1;
+}
+
+.brandMessage {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.alert {
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--font-size-sm);
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-3);
+  justify-content: flex-end;
+}
