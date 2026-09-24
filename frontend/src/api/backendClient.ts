@@ -33,6 +33,10 @@ function extractErrorMessage(body: unknown, fallback: string): string {
   return fallback || 'Unexpected backend error';
 }
 
+/** No real HTTP status applies to a network failure or a client-side timeout. */
+const NETWORK_ERROR_STATUS = 0;
+const REQUEST_TIMEOUT_MS = 15_000;
+
 async function parseJsonBody(response: Response): Promise<unknown> {
   try {
     return await response.json();
@@ -43,13 +47,25 @@ async function parseJsonBody(response: Response): Promise<unknown> {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const { apiUrl } = getEnv();
-  const response = await fetch(`${apiUrl}${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...init?.headers,
-    },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(`${apiUrl}${path}`, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...init?.headers,
+      },
+    });
+  } catch (error) {
+    const reason = error instanceof Error && error.name === 'AbortError' ? 'Request timed out' : `Network error: ${(error as Error).message}`;
+    throw new BackendApiError(reason, NETWORK_ERROR_STATUS);
+  } finally {
+    clearTimeout(timeout);
+  }
 
   const body = await parseJsonBody(response);
 

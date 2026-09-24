@@ -23,6 +23,8 @@ function isTokenizeCardResponse(value: unknown): value is TokenizeCardResponse {
   );
 }
 
+const REQUEST_TIMEOUT_MS = 15_000;
+
 /**
  * Tokenizes a card DIRECTLY against the payment gateway's public
  * tokenization endpoint, authenticated with the PUBLIC key only — this is
@@ -31,11 +33,14 @@ function isTokenizeCardResponse(value: unknown): value is TokenizeCardResponse {
  */
 export async function tokenizeCard(input: TokenizeCardInput): Promise<TokenizeCardResult> {
   const { paymentGatewayUrl, paymentGatewayPublicKey } = getEnv();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   let response: Response;
   try {
     response = await fetch(`${paymentGatewayUrl}/tokens/cards`, {
       method: 'POST',
+      signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${paymentGatewayPublicKey}`,
@@ -49,9 +54,14 @@ export async function tokenizeCard(input: TokenizeCardInput): Promise<TokenizeCa
       }),
     });
   } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new GatewayTokenizeError('Card tokenization request timed out');
+    }
     throw new GatewayTokenizeError(
       `Card tokenization request failed: ${(error as Error).message}`,
     );
+  } finally {
+    clearTimeout(timeout);
   }
 
   const body: unknown = await response.json().catch(() => undefined);

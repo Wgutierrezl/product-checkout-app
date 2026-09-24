@@ -88,4 +88,42 @@ describe('paymentGatewayClient', () => {
 
     await expect(tokenizeCard(input)).rejects.toBeInstanceOf(GatewayTokenizeError);
   });
+
+  describe('network resilience', () => {
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('aborts the request and throws GatewayTokenizeError after the timeout', async () => {
+      jest.useFakeTimers();
+      fetchMock.mockImplementation(
+        (_url: string, init?: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+              const abortError = new Error('The operation was aborted');
+              abortError.name = 'AbortError';
+              reject(abortError);
+            });
+          }),
+      );
+
+      const pending = tokenizeCard(input);
+      const assertion = expect(pending).rejects.toBeInstanceOf(GatewayTokenizeError);
+      await jest.advanceTimersByTimeAsync(15_000);
+      await assertion;
+    });
+
+    it('passes an AbortSignal to the gateway fetch call', async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({ data: { id: 'tok_test_card', status: 'CREATED' } }, { ok: true, status: 201 }),
+      );
+
+      await tokenizeCard(input);
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+    });
+  });
 });

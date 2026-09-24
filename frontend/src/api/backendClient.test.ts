@@ -26,6 +26,51 @@ describe('backendClient', () => {
     global.fetch = fetchMock as unknown as typeof fetch;
   });
 
+  describe('network resilience (shared by every backendClient call)', () => {
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('throws a BackendApiError with status 0 when the network request itself fails', async () => {
+      fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+      await expect(fetchProducts()).rejects.toMatchObject({
+        name: 'BackendApiError',
+        status: 0,
+      });
+    });
+
+    it('aborts the request and throws a BackendApiError with status 0 after the timeout', async () => {
+      jest.useFakeTimers();
+      fetchMock.mockImplementation(
+        (_url: string, init?: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+              const abortError = new Error('The operation was aborted');
+              abortError.name = 'AbortError';
+              reject(abortError);
+            });
+          }),
+      );
+
+      const pending = fetchProducts();
+      const assertion = expect(pending).rejects.toMatchObject({ status: 0, name: 'BackendApiError' });
+      await jest.advanceTimersByTimeAsync(15_000);
+      await assertion;
+    });
+
+    it('passes an AbortSignal to fetch on every call', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse([], { ok: true, status: 200 }));
+
+      await fetchProducts();
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+    });
+  });
+
   describe('fetchProducts', () => {
     it('GETs /products and returns the parsed array', async () => {
       const products = [
