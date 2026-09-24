@@ -119,6 +119,20 @@ describe('TransactionsController', () => {
         .expect(400);
     });
 
+    it('rejects a quantity above the 10-unit cap with 400', async () => {
+      await request(app.getHttpServer())
+        .post('/transactions')
+        .send({ ...validCreateBody(), quantity: 11 })
+        .expect(400);
+    });
+
+    it('accepts a quantity at the 10-unit cap', async () => {
+      await request(app.getHttpServer())
+        .post('/transactions')
+        .send({ ...validCreateBody(), quantity: 10 })
+        .expect(201);
+    });
+
     it('accepts a well-formed create body', async () => {
       await request(app.getHttpServer()).post('/transactions').send(validCreateBody()).expect(201);
     });

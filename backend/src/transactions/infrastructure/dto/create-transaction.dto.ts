@@ -55,9 +55,10 @@ export class CreateTransactionDto {
   @IsUUID('4')
   productId!: string;
 
-  @ApiProperty({ example: 2 })
+  @ApiProperty({ example: 2, minimum: 1, maximum: 10 })
   @IsInt()
   @Min(1)
+  @Max(10)
   quantity!: number;
 
   @ApiProperty({ type: CreateTransactionCustomerDto })
