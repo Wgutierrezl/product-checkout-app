@@ -8,6 +8,7 @@ import { DeliveriesModule } from './deliveries/deliveries.module';
 import { HealthController } from './health/health.controller';
 import { PaymentAcceptanceModule } from './payment-acceptance/payment-acceptance.module';
 import { ProductsModule } from './products/products.module';
+import { TransactionsModule } from './transactions/transactions.module';
 import type { AppConfig } from './shared/config/configuration';
 import { AppConfigModule } from './shared/config/config.module';
 import { DynamoModule } from './shared/infrastructure/dynamo/dynamo.module';
@@ -31,6 +32,7 @@ import { PaymentGatewayModule } from './shared/payment-gateway/payment-gateway.m
     CustomersModule,
     DeliveriesModule,
     PaymentAcceptanceModule,
+    TransactionsModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
