@@ -84,6 +84,33 @@ describe('ApiStack', () => {
     ).toBe(true);
   });
 
+  it('grants dynamodb:TransactWriteItems on all 4 tables (settlement + customer email guard)', () => {
+    const template = synthApiStack();
+
+    const policies = template.findResources('AWS::IAM::Policy');
+    const transactWriteStatements = Object.values(policies)
+      .flatMap(
+        (policy) =>
+          policy.Properties.PolicyDocument.Statement as Array<{
+            Effect: string;
+            Action: string | string[];
+            Resource: unknown;
+          }>,
+      )
+      .filter(
+        (statement) =>
+          statement.Action === 'dynamodb:TransactWriteItems' ||
+          (Array.isArray(statement.Action) &&
+            statement.Action.includes('dynamodb:TransactWriteItems')),
+      );
+
+    expect(transactWriteStatements).toHaveLength(1);
+    const [statement] = transactWriteStatements;
+    expect(statement.Effect).toBe('Allow');
+    expect(Array.isArray(statement.Resource)).toBe(true);
+    expect(statement.Resource).toHaveLength(4);
+  });
+
   it('exposes a throttled $default route', () => {
     const template = synthApiStack();
 

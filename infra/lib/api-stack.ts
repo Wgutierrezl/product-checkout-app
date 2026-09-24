@@ -66,14 +66,31 @@ export class ApiStack extends Stack {
       },
     });
 
-    for (const table of [
+    const tables = [
       props.productsTable,
       props.customersTable,
       props.deliveriesTable,
       props.transactionsTable,
-    ]) {
+    ];
+    for (const table of tables) {
       table.grantReadWriteData(fn);
     }
+
+    // grantReadWriteData() does not include TransactWriteItems.
+    // Required by: customers' at-most-one-per-email create() guard
+    // (2-item Put transaction) and transactions' settleApproved()
+    // (3-item Update/Update/Put transaction across Transactions, Products,
+    // and Deliveries). ConditionCheckItem is already covered by
+    // grantReadWriteData()'s RESOURCE_READ_DATA_ACTIONS — no separate
+    // ConditionCheck transact-item type is used by either flow (conditions
+    // are inlined on the Put/Update items themselves).
+    fn.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['dynamodb:TransactWriteItems'],
+        resources: tables.map((table) => table.tableArn),
+      }),
+    );
 
     const ssmParamArns = SSM_SECRET_SUFFIXES.map(
       (suffix) =>
