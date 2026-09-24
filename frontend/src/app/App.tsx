@@ -20,6 +20,9 @@ export function App() {
       <main className={styles.main}>
         <ProductListContainer />
       </main>
+      <footer className={styles.footer}>
+        <p>&copy; {new Date().getFullYear()} {STORE_NAME}. We never store your card details.</p>
+      </footer>
       {step === 'DETAILS' && <PaymentModalContainer />}
       {step === 'SUMMARY' && <SummaryContainer />}
       {step === 'RESULT' && <ResultContainer />}

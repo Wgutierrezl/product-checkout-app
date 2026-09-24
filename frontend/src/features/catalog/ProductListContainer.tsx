@@ -6,6 +6,8 @@ import { ProductGrid } from './ProductGrid';
 import { CatalogSkeleton } from './CatalogSkeleton';
 import { resolveErrorMessage } from './resolveErrorMessage';
 import { Button } from '../../shared/ui/Button';
+import { EmptyStateIllustration } from '../../shared/ui/EmptyStateIllustration';
+import { ErrorStateIllustration } from '../../shared/ui/ErrorStateIllustration';
 import styles from './ProductListContainer.module.css';
 
 /** Connects the catalog + checkout slices to the presentational catalog UI. */
@@ -40,6 +42,7 @@ export function ProductListContainer() {
     if (status === 'failed') {
       return (
         <div role="alert" className={styles.errorState}>
+          <ErrorStateIllustration />
           <p>{resolveErrorMessage(error)}</p>
           <Button onClick={handleRetry}>Retry</Button>
         </div>
@@ -47,7 +50,12 @@ export function ProductListContainer() {
     }
 
     if (items.length === 0) {
-      return <p className={styles.emptyState}>No products available right now.</p>;
+      return (
+        <div className={styles.emptyState}>
+          <EmptyStateIllustration />
+          <p>No products available right now.</p>
+        </div>
+      );
     }
 
     return <ProductGrid products={items} onBuy={handleBuy} />;

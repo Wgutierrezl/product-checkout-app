@@ -46,6 +46,16 @@ describe('App', () => {
     expect(screen.getByRole('banner')).toHaveTextContent('Meridian Goods');
   });
 
+  it('renders a footer landmark with the store name and a security note', () => {
+    mockedFetchProducts.mockReturnValue(new Promise(() => {}));
+
+    renderApp();
+
+    const footer = screen.getByRole('contentinfo');
+    expect(footer).toHaveTextContent('Meridian Goods');
+    expect(footer).toHaveTextContent(/never store your card details/i);
+  });
+
   it('renders the catalog inside a main landmark', async () => {
     mockedFetchProducts.mockResolvedValue([]);
 

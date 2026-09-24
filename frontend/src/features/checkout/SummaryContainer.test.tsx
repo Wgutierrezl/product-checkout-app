@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { configureStore } from '@reduxjs/toolkit';
 import { Provider } from 'react-redux';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -186,6 +187,35 @@ describe('SummaryContainer', () => {
     expect(checkout.cardToken).toBeNull();
     expect(checkout.idempotencyKey).toBe(sentKey);
     expect(checkout.submitAttempted).toBe(false);
+  });
+
+  it('does not stall Pay under React StrictMode double-invocation (dev mode)', async () => {
+    mockedCreateTransaction.mockResolvedValue({
+      id: 't1',
+      reference: 'REF-1',
+      status: 'PENDING',
+      productAmount: 300_000,
+      baseFee: 250_000,
+      deliveryFee: 800_000,
+      total: 1_350_000,
+      currency: 'COP',
+    });
+    const user = userEvent.setup();
+    const store = buildStore();
+
+    render(
+      <StrictMode>
+        <Provider store={store}>
+          <SummaryContainer />
+        </Provider>
+      </StrictMode>,
+    );
+    await acceptBoth(user);
+
+    await user.click(screen.getByRole('button', { name: /^pay$/i }));
+
+    await waitFor(() => expect(store.getState().checkout.step).toBe('RESULT'));
+    expect(mockedCreateTransaction).toHaveBeenCalledTimes(1);
   });
 
   it('on success: records a pollStartedAt timestamp so the RESULT step can poll/resume', async () => {

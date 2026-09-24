@@ -99,6 +99,7 @@
     flex: none;
     width: min(560px, calc(100% - var(--space-6)));
     max-height: 85vh;
+    max-height: 85dvh;
     border-radius: var(--radius-lg);
   }
 }

@@ -44,13 +44,21 @@ export function SummaryContainer() {
   const [acceptance, setAcceptance] = useState<PaymentAcceptance | null>(null);
   const [acceptanceError, setAcceptanceError] = useState<string | null>(null);
 
-  const isMountedRef = useRef(true);
-  useEffect(
-    () => () => {
+  // Starts `false` and is set `true` INSIDE the effect body (not at
+  // `useRef` init time) so it re-arms on every REAL mount — required for
+  // React 18 StrictMode's dev-only mount -> cleanup -> mount cycle: the
+  // simulated cleanup sets it `false`, and without resetting it here on
+  // the second (real) mount, it would stay permanently `false` for the
+  // rest of the component's actual lifetime, silently discarding every
+  // future fetchPaymentAcceptance/createTransaction result (same fix
+  // already applied to `PaymentModalContainer` and `ResultContainer`).
+  const isMountedRef = useRef(false);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
       isMountedRef.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

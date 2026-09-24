@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { configureStore } from '@reduxjs/toolkit';
 import { Provider } from 'react-redux';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -252,6 +253,26 @@ describe('PaymentModalContainer', () => {
 
       expect(store.getState().checkout.submitStatus).toBe('tokenizing');
     });
+  });
+
+  it('does not stall tokenization under React StrictMode double-invocation (dev mode)', async () => {
+    mockedTokenizeCard.mockResolvedValue({ cardToken: 'tok_test_card' });
+    const user = userEvent.setup();
+    const store = buildStore();
+
+    render(
+      <StrictMode>
+        <Provider store={store}>
+          <PaymentModalContainer />
+        </Provider>
+      </StrictMode>,
+    );
+
+    await fillValidForm(user);
+    await user.click(screen.getByRole('button', { name: /continue/i }));
+
+    await waitFor(() => expect(store.getState().checkout.step).toBe('SUMMARY'));
+    expect(store.getState().checkout.cardToken).toBe('tok_test_card');
   });
 
   it('prefills customer/delivery from the store for refresh resilience', () => {

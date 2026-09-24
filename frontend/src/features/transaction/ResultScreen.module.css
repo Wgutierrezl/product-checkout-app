@@ -27,6 +27,7 @@
   padding: var(--space-6) var(--space-5);
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: var(--space-4);
   text-align: center;
   animation: riseIn var(--transition-normal);
