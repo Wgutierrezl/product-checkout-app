@@ -1,0 +1,162 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # npm's --if-present flag is a no-op (not a failure) when the script
+      # doesn't exist, so this stays green even before a lint script lands.
+      - name: Lint
+        run: npm run lint --if-present
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      # jest.config.ts's coverageThreshold (80% global) fails this step's
+      # exit code if coverage regresses — no extra flag needed.
+      - name: Test with coverage
+        run: npm test -- --coverage
+
+      - name: Upload coverage summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage
+          retention-days: 7
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    # The frontend SPA scaffold may land in a parallel PR before or after
+    # this one — hashFiles() resolves against the checked-out ref this
+    # workflow run targets, so the job is skipped (not failed) whenever
+    # frontend/package.json doesn't exist yet on that ref.
+    if: hashFiles('frontend/package.json') != ''
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint --if-present
+
+      - name: Test with coverage
+        run: npm test -- --coverage
+
+      - name: Build
+        run: npm run build
+        env:
+          # Dummy, non-vendor values — only need to satisfy Vite's build-time
+          # env validation offline. Real values come from GitHub Actions
+          # vars/secrets in deploy.yml.
+          VITE_API_URL: https://api.example.invalid
+          VITE_PAYMENT_GATEWAY_URL: https://payment-gateway-sandbox.invalid
+          VITE_PAYMENT_GATEWAY_PUBLIC_KEY: pk_placeholder
+
+      - name: Upload coverage summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend/coverage
+          retention-days: 7
+
+  infra:
+    name: Infra
+    runs-on: ubuntu-latest
+    needs: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            infra/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      # Builds backend/dist-lambda, which ApiStack's Code.fromAsset needs at
+      # synth time. Doing this explicitly (rather than relying solely on
+      # bin/app.ts's ensureLambdaAssetBuilt() auto-build fallback) keeps CI
+      # failures isolated to a clearly-named step instead of buried inside
+      # the synth step's log.
+      - name: Package backend Lambda asset
+        working-directory: backend
+        run: npm run package:lambda
+
+      - name: Install infra dependencies
+        working-directory: infra
+        run: npm ci
+
+      # infra's own test suite never touches backend/dist-lambda (ApiStack's
+      # tests use a fixture asset dir — see infra/test/fixtures/lambda-asset)
+      # so this step has zero dependency on the packaging step above.
+      - name: Test with coverage
+        working-directory: infra
+        run: npm test -- --coverage
+
+      # Offline synth: no AWS account exists yet, and none of the 3 stacks
+      # perform context lookups, so dummy account/region env vars are
+      # enough — zero AWS credentials and zero network calls to AWS.
+      - name: Synth (offline, no AWS credentials)
+        working-directory: infra
+        run: npx cdk synth --all
+        env:
+          CDK_DEFAULT_ACCOUNT: '123456789012'
+          CDK_DEFAULT_REGION: us-east-1
+
+      - name: Upload coverage summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: infra-coverage
+          path: infra/coverage
+          retention-days: 7
