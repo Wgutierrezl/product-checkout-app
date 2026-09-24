@@ -78,21 +78,23 @@ describe('ProductListContainer', () => {
     expect(screen.getByRole('heading', { level: 2 })).toBeInTheDocument();
   });
 
-  it('shows an empty-catalog message when the backend returns zero products', async () => {
+  it('shows an empty-catalog message with a decorative illustration when the backend returns zero products', async () => {
     mockedFetchProducts.mockResolvedValue([]);
 
     renderWithStore();
 
     expect(await screen.findByText(/no products available/i)).toBeInTheDocument();
+    expect(screen.getByTestId('empty-state-illustration')).toBeInTheDocument();
   });
 
-  it('shows an error message with a retry action when the fetch fails', async () => {
+  it('shows an error message with a decorative illustration and a retry action when the fetch fails', async () => {
     mockedFetchProducts.mockRejectedValueOnce(new BackendApiError('Internal server error', 500));
 
     renderWithStore();
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Internal server error');
+    expect(screen.getByTestId('error-state-illustration')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
   });
 

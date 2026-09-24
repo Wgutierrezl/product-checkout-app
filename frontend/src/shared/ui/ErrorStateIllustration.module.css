@@ -1,0 +1,14 @@
+.illustration {
+  color: var(--color-error);
+}
+
+.socket,
+.prong,
+.plug,
+.cord {
+  stroke: currentColor;
+}
+
+.spark {
+  color: var(--color-error);
+}
