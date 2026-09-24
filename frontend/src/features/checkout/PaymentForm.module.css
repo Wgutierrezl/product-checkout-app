@@ -1,0 +1,98 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.sectionTitle {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  margin-bottom: var(--space-3);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+}
+
+.gridTwo {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+}
+
+@media (min-width: 480px) {
+  .gridTwo {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.input {
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: var(--font-size-md);
+}
+
+.input:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: 1px;
+}
+
+/*
+ * CVC masking via CSS rather than type="password": password managers may
+ * offer to save/autofill a password-type field, which a CVC must never be.
+ * -webkit-text-security is WebKit/Blink-only (Firefox has no equivalent);
+ * on browsers without it the CVC is shown in plain text, an accepted
+ * degradation over risking password-manager storage of a card security code.
+ */
+.maskedInput {
+  composes: input;
+  -webkit-text-security: disc;
+}
+
+.cardNumberRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.cardNumberRow .input {
+  flex: 1;
+}
+
+.brandMessage {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.alert {
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--font-size-sm);
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-3);
+  justify-content: flex-end;
+}
+
+/* Keeps Cancel/Continue reachable without scrolling through the whole
+   form on small screens, where the sheet (Modal.module.css's .sheet) is
+   the scrolling ancestor these coordinates are relative to. */
+@media (max-width: 767.98px) {
+  .actions {
+    position: sticky;
+    bottom: 0;
+    background: var(--color-surface);
+    margin: 0 calc(var(--space-5) * -1) calc(var(--space-5) * -1);
+    padding: var(--space-4) var(--space-5);
+    border-top: 1px solid var(--color-border);
+  }
+}
