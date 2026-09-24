@@ -11,9 +11,10 @@ import { buildCustomer, FakeCustomerRepository } from '../../customers/test/cust
 import { buildProduct, FakeProductRepository } from '../../products/test/product.fixtures';
 import { Stock } from '../../products/domain/value-objects/stock.vo';
 import { Transaction } from '../domain/transaction.entity';
-import { UpdateGatewayResultInput } from '../domain/transaction.repository.port';
+import { SettleApprovedInput, UpdateGatewayResultInput } from '../domain/transaction.repository.port';
 import { FakeTransactionRepository } from '../test/transaction.fixtures';
 import { CreateTransactionCommand, CreateTransactionUseCase } from './create-transaction.use-case';
+import { SettleTransactionUseCase } from './settle-transaction.use-case';
 
 function buildFakeClock(initialTimeMs: number): ClockPort {
   return { now: () => new Date(initialTimeMs) };
@@ -63,14 +64,24 @@ class RecordingGatewayPort implements PaymentGatewayPort {
  */
 class FlakyTransactionRepository extends FakeTransactionRepository {
   private readonly updateGatewayResultQueue: Array<() => AppResultAsync<Transaction>> = [];
+  private readonly settleApprovedQueue: Array<() => AppResultAsync<Transaction>> = [];
 
   queueUpdateGatewayResultFailure(error: DomainError): void {
     this.updateGatewayResultQueue.push(() => errAsync(error));
   }
 
+  queueSettleApprovedFailure(error: DomainError): void {
+    this.settleApprovedQueue.push(() => errAsync(error));
+  }
+
   updateGatewayResult(id: string, input: UpdateGatewayResultInput): AppResultAsync<Transaction> {
     const next = this.updateGatewayResultQueue.shift();
     return next ? next() : super.updateGatewayResult(id, input);
+  }
+
+  settleApproved(input: SettleApprovedInput): AppResultAsync<Transaction> {
+    const next = this.settleApprovedQueue.shift();
+    return next ? next() : super.settleApproved(input);
   }
 }
 
@@ -102,13 +113,19 @@ function buildUseCase(options: {
   clock?: ClockPort;
   ids?: IdGeneratorPort;
 }) {
+  const transactions = options.transactions ?? new FakeTransactionRepository();
+  const clock = options.clock ?? buildFakeClock(0);
+  const ids = options.ids ?? new SequentialIdGenerator();
+  const settleTransaction = new SettleTransactionUseCase(transactions, ids, clock);
+
   return new CreateTransactionUseCase(
     options.products ?? new FakeProductRepository([buildProduct({ id: 'prod-1', stock: Stock.create(10)._unsafeUnwrap() })]),
     options.customers ?? new FakeCustomerRepository(),
-    options.transactions ?? new FakeTransactionRepository(),
+    transactions,
     options.gateway,
-    options.clock ?? buildFakeClock(0),
-    options.ids ?? new SequentialIdGenerator(),
+    settleTransaction,
+    clock,
+    ids,
     FEES,
     INTEGRITY_SECRET,
   );
@@ -127,6 +144,32 @@ describe('CreateTransactionUseCase', () => {
     expect(transaction.status).toBe('APPROVED');
     expect(transaction.gatewayTransactionId).toBe('gw-1');
     expect(transaction.totalAmount.valueInCents).toBe(150_000 * 2 + 250_000 + 800_000);
+  });
+
+  it('routes a synchronous APPROVED gateway result through SettleTransaction (stock decrement + delivery)', async () => {
+    const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } });
+    const transactions = new FakeTransactionRepository();
+    const useCase = buildUseCase({ transactions, gateway });
+
+    const result = await useCase.execute(buildCommand());
+
+    expect(result.isOk()).toBe(true);
+    expect(transactions.settleApprovedCalls).toHaveLength(1);
+    expect(transactions.settleApprovedCalls[0]).toMatchObject({
+      transactionId: IDEMPOTENCY_KEY,
+      productId: 'prod-1',
+      gatewayTransactionId: 'gw-1',
+    });
+  });
+
+  it('does NOT route a synchronous PENDING/DECLINED gateway result through settleApproved', async () => {
+    const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'DECLINED' } });
+    const transactions = new FakeTransactionRepository();
+    const useCase = buildUseCase({ transactions, gateway });
+
+    await useCase.execute(buildCommand());
+
+    expect(transactions.settleApprovedCalls).toHaveLength(0);
   });
 
   it('creates a new customer when none exists for the given email', async () => {
@@ -278,10 +321,10 @@ describe('CreateTransactionUseCase', () => {
       errorSpy.mockRestore();
     });
 
-    it('retries updateGatewayResult once and succeeds after a transient DB failure', async () => {
+    it('retries settlement once and succeeds after a transient DB failure (APPROVED routes through settleApproved)', async () => {
       const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } });
       const transactions = new FlakyTransactionRepository();
-      transactions.queueUpdateGatewayResultFailure(new UnexpectedError('DynamoDB throttled'));
+      transactions.queueSettleApprovedFailure(new UnexpectedError('DynamoDB throttled'));
       const useCase = buildUseCase({ transactions, gateway });
 
       const result = await useCase.execute(buildCommand());
@@ -304,8 +347,8 @@ describe('CreateTransactionUseCase', () => {
       const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } });
       const transactions = new FlakyTransactionRepository();
       const secondFailure = new UnexpectedError('DynamoDB still throttled');
-      transactions.queueUpdateGatewayResultFailure(new UnexpectedError('DynamoDB throttled'));
-      transactions.queueUpdateGatewayResultFailure(secondFailure);
+      transactions.queueSettleApprovedFailure(new UnexpectedError('DynamoDB throttled'));
+      transactions.queueSettleApprovedFailure(secondFailure);
       const useCase = buildUseCase({ transactions, gateway });
 
       const result = await useCase.execute(buildCommand());

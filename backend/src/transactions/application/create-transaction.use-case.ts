@@ -19,6 +19,7 @@ import {
   TRANSACTION_REPOSITORY_PORT,
   TransactionRepositoryPort,
 } from '../domain/transaction.repository.port';
+import { SettleTransactionUseCase } from './settle-transaction.use-case';
 
 export const FEES_CONFIG = Symbol('FEES_CONFIG');
 export const INTEGRITY_SECRET = Symbol('INTEGRITY_SECRET');
@@ -89,6 +90,7 @@ export class CreateTransactionUseCase {
     @Inject(CUSTOMER_REPOSITORY_PORT) private readonly customers: CustomerRepositoryPort,
     @Inject(TRANSACTION_REPOSITORY_PORT) private readonly transactions: TransactionRepositoryPort,
     @Inject(PAYMENT_GATEWAY_PORT) private readonly gateway: PaymentGatewayPort,
+    private readonly settleTransaction: SettleTransactionUseCase,
     @Inject(CLOCK_PORT) private readonly clock: ClockPort,
     @Inject(ID_GENERATOR_PORT) private readonly ids: IdGeneratorPort,
     @Inject(FEES_CONFIG) private readonly fees: FeesConfig,
@@ -202,24 +204,47 @@ export class CreateTransactionUseCase {
    * "orphaned charge" (money moved, our own record never updated) is the
    * worst possible outcome here. Log enough to manually reconcile (never
    * PII, never the card token) and retry the write once before giving up.
+   *
+   * A synchronously-APPROVED result routes through `SettleTransaction` (the
+   * single entry point for all settlement paths — see PR6 design) so stock
+   * decrement + delivery creation happen atomically and consistently with
+   * the webhook/lazy-poll paths, and so a webhook that races in before this
+   * synchronous call finishes can never double-apply those side effects.
+   * Every other status (PENDING/DECLINED/VOIDED/ERROR-from-gateway) has no
+   * side effects to guard and is persisted directly, as before.
    */
   private persistGatewayResult(
     transaction: Transaction,
     gatewayResult: GatewayTransactionResult,
   ): AppResultAsync<Transaction> {
-    const input = {
-      gatewayTransactionId: gatewayResult.gatewayTransactionId,
-      status: gatewayResult.status,
-      updatedAt: this.clock.now().toISOString(),
-    };
+    const persist = () => this.applyGatewayResult(transaction, gatewayResult);
 
-    return this.transactions.updateGatewayResult(transaction.id, input).orElse((persistError) => {
+    return persist().orElse((persistError) => {
       this.logger.error(
         `Failed to persist gateway result, retrying once: transactionId=${transaction.id} ` +
           `reference=${transaction.reference} gatewayTransactionId=${gatewayResult.gatewayTransactionId} ` +
           `gatewayStatus=${gatewayResult.status}: ${persistError.message}`,
       );
-      return this.transactions.updateGatewayResult(transaction.id, input);
+      return persist();
+    });
+  }
+
+  private applyGatewayResult(
+    transaction: Transaction,
+    gatewayResult: GatewayTransactionResult,
+  ): AppResultAsync<Transaction> {
+    if (gatewayResult.status === 'APPROVED') {
+      return this.settleTransaction.execute({
+        transactionId: transaction.id,
+        gatewayStatus: 'APPROVED',
+        gatewayTransactionId: gatewayResult.gatewayTransactionId,
+      });
+    }
+
+    return this.transactions.updateGatewayResult(transaction.id, {
+      gatewayTransactionId: gatewayResult.gatewayTransactionId,
+      status: gatewayResult.status,
+      updatedAt: this.clock.now().toISOString(),
     });
   }
 
