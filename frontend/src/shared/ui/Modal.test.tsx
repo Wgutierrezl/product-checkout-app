@@ -96,6 +96,22 @@ describe('Modal', () => {
     expect(screen.getByRole('button', { name: 'First' })).toHaveFocus();
   });
 
+  it('lets a normal Tab move focus between two middle elements without interception', async () => {
+    const user = userEvent.setup();
+    render(
+      <Modal titleId="t" title="Payment details" onClose={jest.fn()}>
+        <button>First</button>
+        <button>Middle</button>
+        <button>Last</button>
+      </Modal>,
+    );
+
+    screen.getByRole('button', { name: 'First' }).focus();
+    await user.tab();
+
+    expect(screen.getByRole('button', { name: 'Middle' })).toHaveFocus();
+  });
+
   it('traps Shift+Tab focus: cycles from the first focusable element back to the last', async () => {
     const user = userEvent.setup();
     render(
@@ -134,5 +150,57 @@ describe('Modal', () => {
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
+  });
+
+  describe('body scroll lock and background inertness', () => {
+    it('locks body scroll while open and restores it on close', () => {
+      const originalOverflow = document.body.style.overflow;
+      const { unmount } = render(
+        <Modal titleId="t" title="Payment details" onClose={jest.fn()}>
+          content
+        </Modal>,
+      );
+
+      expect(document.body.style.overflow).toBe('hidden');
+
+      unmount();
+
+      expect(document.body.style.overflow).toBe(originalOverflow);
+    });
+
+    it('marks sibling app content aria-hidden and inert while open, restoring on close', () => {
+      const { container, unmount } = render(
+        <Modal titleId="t" title="Payment details" onClose={jest.fn()}>
+          content
+        </Modal>,
+      );
+
+      expect(container).toHaveAttribute('aria-hidden', 'true');
+      expect(container).toHaveAttribute('inert');
+
+      unmount();
+
+      expect(container).not.toHaveAttribute('aria-hidden');
+      expect(container).not.toHaveAttribute('inert');
+    });
+
+    it('restores pre-existing aria-hidden/inert values on sibling content instead of clobbering them', () => {
+      const sibling = document.createElement('div');
+      sibling.setAttribute('aria-hidden', 'true');
+      sibling.setAttribute('inert', '');
+      document.body.appendChild(sibling);
+
+      const { unmount } = render(
+        <Modal titleId="t" title="Payment details" onClose={jest.fn()}>
+          content
+        </Modal>,
+      );
+
+      unmount();
+
+      expect(sibling).toHaveAttribute('aria-hidden', 'true');
+      expect(sibling).toHaveAttribute('inert');
+      document.body.removeChild(sibling);
+    });
   });
 });

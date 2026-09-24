@@ -26,6 +26,7 @@ function getFocusableElements(container: HTMLElement): HTMLElement[] {
  */
 export function Modal({ titleId, title, onClose, children }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -36,6 +37,43 @@ export function Modal({ titleId, title, onClose, children }: ModalProps) {
 
     return () => {
       previouslyFocused.current?.focus();
+    };
+  }, []);
+
+  // Locks page scroll and hides the rest of the app from assistive tech
+  // and pointer/keyboard interaction while the modal is open — this is a
+  // real UI-blocking dialog, not an overlay the buyer can interact past.
+  useEffect(() => {
+    const originalBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const overlay = overlayRef.current;
+    const siblings = overlay
+      ? (Array.from(document.body.children).filter((el) => el !== overlay) as HTMLElement[])
+      : [];
+    const previousSiblingState = siblings.map((el) => ({
+      el,
+      ariaHidden: el.getAttribute('aria-hidden'),
+      hadInert: el.hasAttribute('inert'),
+    }));
+
+    siblings.forEach((el) => {
+      el.setAttribute('aria-hidden', 'true');
+      el.setAttribute('inert', '');
+    });
+
+    return () => {
+      document.body.style.overflow = originalBodyOverflow;
+      previousSiblingState.forEach(({ el, ariaHidden, hadInert }) => {
+        if (ariaHidden === null) {
+          el.removeAttribute('aria-hidden');
+        } else {
+          el.setAttribute('aria-hidden', ariaHidden);
+        }
+        if (!hadInert) {
+          el.removeAttribute('inert');
+        }
+      });
     };
   }, []);
 
@@ -73,7 +111,7 @@ export function Modal({ titleId, title, onClose, children }: ModalProps) {
   }, [onClose]);
 
   return createPortal(
-    <div className={styles.overlay}>
+    <div className={styles.overlay} ref={overlayRef}>
       <Backdrop onClick={onClose} />
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className={styles.sheet} tabIndex={-1}>
         <h2 id={titleId} className={styles.title}>
