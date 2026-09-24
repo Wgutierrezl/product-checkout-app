@@ -61,8 +61,24 @@ describe('paymentGatewayClient', () => {
     await expect(tokenizeCard(input)).rejects.toBeInstanceOf(GatewayTokenizeError);
   });
 
-  it('throws GatewayTokenizeError when the response body is malformed', async () => {
+  it('throws GatewayTokenizeError when the response body is missing required fields', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ data: { status: 'CREATED' } }, { ok: true, status: 201 }));
+
+    await expect(tokenizeCard(input)).rejects.toBeInstanceOf(GatewayTokenizeError);
+  });
+
+  it('throws GatewayTokenizeError when the response body is not an object at all', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(null, { ok: true, status: 201 }));
+
+    await expect(tokenizeCard(input)).rejects.toBeInstanceOf(GatewayTokenizeError);
+  });
+
+  it('throws GatewayTokenizeError when a successful response body is not valid JSON', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: () => Promise.reject(new Error('not json')),
+    } as Response);
 
     await expect(tokenizeCard(input)).rejects.toBeInstanceOf(GatewayTokenizeError);
   });

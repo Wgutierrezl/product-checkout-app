@@ -96,6 +96,13 @@ describe('persistMiddleware', () => {
       expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
     });
 
+    it('returns undefined and clears storage when the payload is valid JSON but not an object', () => {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(42));
+
+      expect(loadPersistedState()).toBeUndefined();
+      expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+    });
+
     it('returns undefined and clears storage on a version mismatch', () => {
       localStorage.setItem(
         STORAGE_KEY,

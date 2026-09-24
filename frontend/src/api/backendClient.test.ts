@@ -171,6 +171,43 @@ describe('backendClient', () => {
         message: 'Service Unavailable',
       });
     });
+
+    it('falls back to a generic message when there is neither a usable message nor a statusText', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse({}, { ok: false, status: 500, statusText: '' }));
+
+      await expect(createTransaction(input)).rejects.toMatchObject({
+        status: 500,
+        message: 'Unexpected backend error',
+      });
+    });
+
+    it('falls back to statusText when the message array contains non-string items', async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(
+          { statusCode: 400, message: ['ok', 42] },
+          { ok: false, status: 400, statusText: 'Bad Request' },
+        ),
+      );
+
+      await expect(createTransaction(input)).rejects.toMatchObject({
+        status: 400,
+        message: 'Bad Request',
+      });
+    });
+
+    it('falls back to statusText when the error response body is not valid JSON', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: false,
+        status: 502,
+        statusText: 'Bad Gateway',
+        json: () => Promise.reject(new Error('not json')),
+      } as Response);
+
+      await expect(createTransaction(input)).rejects.toMatchObject({
+        status: 502,
+        message: 'Bad Gateway',
+      });
+    });
   });
 
   describe('fetchTransaction', () => {

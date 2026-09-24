@@ -61,6 +61,15 @@ describe('catalogSlice', () => {
     expect(state.items).toEqual([]);
   });
 
+  it('falls back to a generic error message when the rejection carries none', async () => {
+    mockedFetchProducts.mockRejectedValue({});
+    const store = buildStore();
+
+    await store.dispatch(fetchProducts());
+
+    expect(store.getState().catalog.error).toBe('Failed to load products');
+  });
+
   it('replaces the previous item list on a fresh successful fetch (e.g. after returning to the catalog)', async () => {
     mockedFetchProducts.mockResolvedValueOnce([PRODUCT]);
     const store = buildStore();
