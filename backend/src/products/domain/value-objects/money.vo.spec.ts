@@ -26,7 +26,20 @@ describe('Money', () => {
     const a = Money.create(1_000)._unsafeUnwrap();
     const b = Money.create(500)._unsafeUnwrap();
 
-    expect(a.add(b).valueInCents).toBe(1_500);
+    const result = a.add(b);
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap().valueInCents).toBe(1_500);
+  });
+
+  it('rejects an addition result that exceeds the safe integer range', () => {
+    const a = Money.create(Number.MAX_SAFE_INTEGER)._unsafeUnwrap();
+    const b = Money.create(1)._unsafeUnwrap();
+
+    const result = a.add(b);
+
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().type).toBe('Validation');
   });
 
   it('multiplies by a positive integer factor', () => {
@@ -59,5 +72,14 @@ describe('Money', () => {
     const result = price.multiply(1.5);
 
     expect(result.isErr()).toBe(true);
+  });
+
+  it('rejects a multiplication result that exceeds the safe integer range', () => {
+    const price = Money.create(Number.MAX_SAFE_INTEGER)._unsafeUnwrap();
+
+    const result = price.multiply(2);
+
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().type).toBe('Validation');
   });
 });

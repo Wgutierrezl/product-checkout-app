@@ -24,8 +24,14 @@ export class Money {
     return this.amountCents;
   }
 
-  add(other: Money): Money {
-    return new Money(this.amountCents + other.amountCents);
+  add(other: Money): AppResult<Money> {
+    const sum = this.amountCents + other.amountCents;
+
+    if (!Number.isSafeInteger(sum)) {
+      return err(new ValidationError('Money addition result exceeds the safe integer range'));
+    }
+
+    return ok(new Money(sum));
   }
 
   multiply(factor: number): AppResult<Money> {
@@ -35,6 +41,14 @@ export class Money {
       );
     }
 
-    return ok(new Money(this.amountCents * factor));
+    const product = this.amountCents * factor;
+
+    if (!Number.isSafeInteger(product)) {
+      return err(
+        new ValidationError('Money multiplication result exceeds the safe integer range'),
+      );
+    }
+
+    return ok(new Money(product));
   }
 }
