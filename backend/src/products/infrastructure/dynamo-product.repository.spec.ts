@@ -59,6 +59,48 @@ describe('DynamoProductRepository', () => {
       expect(result._unsafeUnwrapErr().type).toBe('Unexpected');
     });
 
+    it('paginates through multiple scan pages until exhausted', async () => {
+      ddbMock
+        .on(ScanCommand)
+        .resolvesOnce({
+          Items: [
+            {
+              productId: 'prod-1',
+              name: 'Wireless Headphones',
+              description: 'Noise-cancelling over-ear headphones',
+              priceCents: 150_000,
+              stock: 10,
+              imageUrl: 'https://images.example.com/headphones.webp',
+            },
+          ],
+          LastEvaluatedKey: { productId: 'prod-1' },
+        })
+        .resolvesOnce({
+          Items: [
+            {
+              productId: 'prod-2',
+              name: 'Mechanical Keyboard',
+              description: 'RGB backlit keyboard',
+              priceCents: 220_000,
+              stock: 5,
+              imageUrl: 'https://images.example.com/keyboard.webp',
+            },
+          ],
+        });
+      const repository = new DynamoProductRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.findAll();
+
+      expect(result.isOk()).toBe(true);
+      const products = result._unsafeUnwrap();
+      expect(products.map((product) => product.id)).toEqual(['prod-1', 'prod-2']);
+      expect(ddbMock.commandCalls(ScanCommand)).toHaveLength(2);
+      expect(ddbMock.commandCalls(ScanCommand)[0].args[0].input.ExclusiveStartKey).toBeUndefined();
+      expect(ddbMock.commandCalls(ScanCommand)[1].args[0].input.ExclusiveStartKey).toEqual({
+        productId: 'prod-1',
+      });
+    });
+
     it('maps and returns an out-of-stock product (stock 0)', async () => {
       ddbMock.on(ScanCommand).resolves({
         Items: [

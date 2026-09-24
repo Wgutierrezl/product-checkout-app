@@ -21,6 +21,8 @@ interface ProductItem {
   imageUrl: string;
 }
 
+type ScanKey = Record<string, unknown>;
+
 function toProduct(item: ProductItem): AppResult<Product> {
   return Result.combine([Money.create(item.priceCents), Stock.create(item.stock)]).map(
     ([price, stock]) => ({
@@ -42,14 +44,31 @@ export class DynamoProductRepository implements ProductRepositoryPort {
 
   findAll(): AppResultAsync<Product[]> {
     return ResultAsync.fromPromise(
-      this.client.send(new ScanCommand({ TableName: PRODUCTS_TABLE_NAME })),
+      this.scanAllItems(),
       (error) => new UnexpectedError(`Failed to scan products: ${(error as Error).message}`),
-    ).andThen((result) => {
-      const items = (result.Items ?? []) as ProductItem[];
-      return Result.combine(items.map((item) => toProduct(item))).asyncMap((products) =>
+    ).andThen((items) =>
+      Result.combine(items.map((item) => toProduct(item))).asyncMap((products) =>
         Promise.resolve(products),
+      ),
+    );
+  }
+
+  private async scanAllItems(): Promise<ProductItem[]> {
+    const items: ProductItem[] = [];
+    let exclusiveStartKey: ScanKey | undefined;
+
+    do {
+      const result = await this.client.send(
+        new ScanCommand({
+          TableName: PRODUCTS_TABLE_NAME,
+          ExclusiveStartKey: exclusiveStartKey,
+        }),
       );
-    });
+      items.push(...((result.Items ?? []) as ProductItem[]));
+      exclusiveStartKey = result.LastEvaluatedKey as ScanKey | undefined;
+    } while (exclusiveStartKey);
+
+    return items;
   }
 
   findById(id: string): AppResultAsync<Product> {
