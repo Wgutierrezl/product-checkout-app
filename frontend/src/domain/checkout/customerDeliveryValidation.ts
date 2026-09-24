@@ -1,4 +1,6 @@
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** An optional leading +, then 7-15 digits — no spaces, dashes, or other separators. */
+const PHONE_PATTERN = /^\+?\d{7,15}$/;
 
 /**
  * Exported for reuse by other required-text-field validators outside this
@@ -23,7 +25,11 @@ export function validateEmail(value: string): string | null {
 }
 
 export function validatePhone(value: string): string | null {
-  return requireNonEmpty(value, 'Phone is required');
+  const required = requireNonEmpty(value, 'Phone is required');
+  if (required) {
+    return required;
+  }
+  return PHONE_PATTERN.test(value.trim()) ? null : 'Enter a valid phone number';
 }
 
 export function validateAddress(value: string): string | null {

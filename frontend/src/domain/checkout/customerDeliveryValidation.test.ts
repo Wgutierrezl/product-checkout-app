@@ -40,8 +40,33 @@ describe('validatePhone', () => {
     expect(validatePhone('')).toBe('Phone is required');
   });
 
-  it('accepts a non-empty phone number', () => {
+  it('accepts digits with a leading +', () => {
     expect(validatePhone('+573001234567')).toBeNull();
+  });
+
+  it('accepts digits without a leading +', () => {
+    expect(validatePhone('573001234567')).toBeNull();
+  });
+
+  it('accepts the shortest valid length (7 digits)', () => {
+    expect(validatePhone('1234567')).toBeNull();
+  });
+
+  it('accepts the longest valid length (15 digits)', () => {
+    expect(validatePhone('123456789012345')).toBeNull();
+  });
+
+  it('rejects fewer than 7 digits', () => {
+    expect(validatePhone('123456')).toBe('Enter a valid phone number');
+  });
+
+  it('rejects more than 15 digits', () => {
+    expect(validatePhone('1234567890123456')).toBe('Enter a valid phone number');
+  });
+
+  it('rejects non-digit characters', () => {
+    expect(validatePhone('+57 300 123 4567')).toBe('Enter a valid phone number');
+    expect(validatePhone('call-me-maybe')).toBe('Enter a valid phone number');
   });
 });
 
