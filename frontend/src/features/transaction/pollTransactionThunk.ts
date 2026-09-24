@@ -3,8 +3,23 @@ import { BackendApiError, type TransactionStatus } from '../../api/types';
 import { isFinalTransactionStatus, nextPollDelayMs, remainingPollBudgetMs } from '../../domain/checkout/pollBackoff';
 import { transactionErrorSet, transactionReceived } from './transactionSlice';
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/** Resolves after `ms`, or immediately if `signal` is already/becomes aborted -- the timer is cleared either way, never left dangling. */
+function delay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const timeoutId = setTimeout(resolve, ms);
+    signal.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timeoutId);
+        resolve();
+      },
+      { once: true },
+    );
+  });
 }
 
 /**
@@ -18,12 +33,13 @@ export interface FetchAndDispatchOptions {
   transactionId: string;
   dispatch: TransactionDispatch;
   /**
-   * Checked right after the response arrives, before dispatching — guards
-   * against a stale result landing after the caller stopped caring (e.g.
-   * the buyer navigated away while a manual "Check again" was in flight),
-   * matching the `isMountedRef` guard used elsewhere in the checkout flow.
+   * Aborts the underlying `GET /transactions/:id` network call (forwarded
+   * to `fetchTransaction`) AND guards against a stale response landing
+   * after the caller stopped caring (e.g. the buyer clicked "Back to
+   * store" while a manual "Check again" was in flight) — checked right
+   * after the response arrives, before dispatching anything.
    */
-  isCancelled?: () => boolean;
+  signal?: AbortSignal;
 }
 
 /**
@@ -35,11 +51,11 @@ export interface FetchAndDispatchOptions {
 export async function fetchAndDispatchTransaction({
   transactionId,
   dispatch,
-  isCancelled = () => false,
+  signal,
 }: FetchAndDispatchOptions): Promise<TransactionStatus | null> {
   try {
-    const transaction = await fetchTransaction(transactionId);
-    if (isCancelled()) {
+    const transaction = await fetchTransaction(transactionId, { signal });
+    if (signal?.aborted) {
       return null;
     }
     dispatch(
@@ -58,7 +74,7 @@ export async function fetchAndDispatchTransaction({
     );
     return transaction.status;
   } catch (error) {
-    if (isCancelled()) {
+    if (signal?.aborted) {
       return null;
     }
     dispatch(
@@ -73,7 +89,8 @@ export interface PollTransactionOptions {
   /** Persisted, so the same window survives a page refresh. */
   pollStartedAt: number;
   dispatch: TransactionDispatch;
-  isCancelled: () => boolean;
+  /** Aborts the in-flight fetch AND cancels a pending backoff wait immediately, instead of waiting for either to resolve naturally. */
+  signal: AbortSignal;
 }
 
 /**
@@ -90,15 +107,15 @@ export async function pollTransaction({
   transactionId,
   pollStartedAt,
   dispatch,
-  isCancelled,
+  signal,
 }: PollTransactionOptions): Promise<void> {
   let attempt = 0;
 
-  while (!isCancelled()) {
+  while (!signal.aborted) {
     attempt += 1;
-    const status = await fetchAndDispatchTransaction({ transactionId, dispatch, isCancelled });
+    const status = await fetchAndDispatchTransaction({ transactionId, dispatch, signal });
 
-    if (isCancelled()) {
+    if (signal.aborted) {
       return;
     }
     if (status && isFinalTransactionStatus(status)) {
@@ -110,6 +127,6 @@ export async function pollTransaction({
       return;
     }
 
-    await delay(Math.min(nextPollDelayMs(attempt), remainingBudget));
+    await delay(Math.min(nextPollDelayMs(attempt), remainingBudget), signal);
   }
 }

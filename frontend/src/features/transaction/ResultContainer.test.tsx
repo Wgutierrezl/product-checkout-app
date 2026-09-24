@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { configureStore } from '@reduxjs/toolkit';
 import { Provider } from 'react-redux';
 import { act, render, screen, waitFor } from '@testing-library/react';
@@ -8,6 +9,7 @@ import { checkoutReducer, initialCheckoutState, type CheckoutState } from '../ch
 import { catalogReducer, type CatalogState } from '../catalog/catalogSlice';
 import { STORAGE_KEY } from '../../shared/persistence/persistMiddleware';
 import * as backendClient from '../../api/backendClient';
+import { buildTransactionFixture } from './transactionFixtures';
 import type { Product } from '../../api/types';
 
 jest.mock('../../api/backendClient');
@@ -28,20 +30,6 @@ const PRODUCT: Product = {
   stock: 5,
   imageUrl: 'https://img.test/p1.png',
 };
-
-function transaction(overrides: Partial<Awaited<ReturnType<typeof backendClient.fetchTransaction>>> = {}) {
-  return {
-    id: 't1',
-    reference: 'REF-1',
-    status: 'PENDING' as const,
-    productAmount: 300_000,
-    baseFee: 250_000,
-    deliveryFee: 800_000,
-    total: 1_350_000,
-    currency: 'COP' as const,
-    ...overrides,
-  };
-}
 
 function buildStore(
   transactionOverrides: Partial<TransactionState> = {},
@@ -84,19 +72,19 @@ describe('ResultContainer', () => {
     jest.useRealTimers();
   });
 
-  it('shows the PENDING spinner and starts polling, landing on APPROVED once the poll resolves', async () => {
-    mockedFetchTransaction.mockResolvedValue(transaction({ status: 'APPROVED' }));
+  it('shows the PENDING spinner and starts polling (forwarding an AbortSignal), landing on APPROVED once the poll resolves', async () => {
+    mockedFetchTransaction.mockResolvedValue(buildTransactionFixture({ status: 'APPROVED' }));
     const store = buildStore({ id: 't1', status: 'PENDING', pollStartedAt: null });
 
     renderWithStore(store);
 
     expect(screen.getByRole('status')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('heading', { name: /approved/i })).toBeInTheDocument());
-    expect(mockedFetchTransaction).toHaveBeenCalledWith('t1');
+    expect(mockedFetchTransaction).toHaveBeenCalledWith('t1', { signal: expect.any(AbortSignal) });
   });
 
   it('sets pollStartedAt on mount when resuming without one (a freshly-created transaction)', async () => {
-    mockedFetchTransaction.mockResolvedValue(transaction({ status: 'APPROVED' }));
+    mockedFetchTransaction.mockResolvedValue(buildTransactionFixture({ status: 'APPROVED' }));
     const before = Date.now();
     const store = buildStore({ id: 't1', status: 'PENDING', pollStartedAt: null });
 
@@ -107,7 +95,7 @@ describe('ResultContainer', () => {
   });
 
   it('resumes from an EXISTING pollStartedAt (refresh scenario) instead of granting a fresh 60s budget', async () => {
-    mockedFetchTransaction.mockResolvedValue(transaction({ status: 'PENDING' }));
+    mockedFetchTransaction.mockResolvedValue(buildTransactionFixture({ status: 'PENDING' }));
     const oldPollStartedAt = Date.now() - 55_000; // only ~5s of budget left
     const store = buildStore({ id: 't1', status: 'PENDING', pollStartedAt: oldPollStartedAt });
 
@@ -120,17 +108,34 @@ describe('ResultContainer', () => {
     expect(store.getState().transaction.pollStartedAt).toBe(oldPollStartedAt);
   });
 
-  it('does not poll at all when the resumed status is already final', () => {
-    const store = buildStore({ id: 't1', status: 'DECLINED', pollStartedAt: Date.now() });
+  it('always fetches once on mount even when the resumed status is ALREADY final (refresh-when-APPROVED), refreshing reference/amounts', async () => {
+    mockedFetchTransaction.mockResolvedValue(
+      buildTransactionFixture({ status: 'APPROVED', reference: 'FRESH-REF', total: 999_000 }),
+    );
+    // Persisted reference/amounts are NEVER stored -- a refresh always rehydrates them as null.
+    const store = buildStore({ id: 't1', status: 'APPROVED', reference: null, amounts: null, pollStartedAt: Date.now() });
 
-    renderWithStore(store);
+    await act(async () => {
+      renderWithStore(store);
+      // Flushes the full chain synchronously within one act() scope:
+      // fetchTransaction resolves -> fetchAndDispatch's await resolves ->
+      // dispatch -> pollTransaction's await resolves -> its trailing
+      // `.then(() => setPollExhausted(true))` fires.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
 
-    expect(mockedFetchTransaction).not.toHaveBeenCalled();
-    expect(screen.getByRole('heading', { name: /not completed/i })).toBeInTheDocument();
+    expect(mockedFetchTransaction).toHaveBeenCalledWith('t1', { signal: expect.any(AbortSignal) });
+    expect(screen.getByText(/FRESH-REF/)).toBeInTheDocument();
+    expect(store.getState().transaction.amounts?.total).toBe(999_000);
+    // Stops after the one fresh check -- already final, no further polling.
+    expect(mockedFetchTransaction).toHaveBeenCalledTimes(1);
   });
 
   it('shows "still processing" past the 60s cap, and a manual Check again re-fetches once', async () => {
-    mockedFetchTransaction.mockResolvedValue(transaction({ status: 'PENDING' }));
+    mockedFetchTransaction.mockResolvedValue(buildTransactionFixture({ status: 'PENDING' }));
     const store = buildStore({ id: 't1', status: 'PENDING', pollStartedAt: Date.now() });
     const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
 
@@ -144,6 +149,70 @@ describe('ResultContainer', () => {
     await user.click(screen.getByRole('button', { name: /check again/i }));
 
     await waitFor(() => expect(mockedFetchTransaction.mock.calls.length).toBe(callsBeforeRetry + 1));
+    await waitFor(() => expect(screen.getByText(/still processing/i)).toBeInTheDocument());
+  });
+
+  it('discards a stale "Check again" response that resolves AFTER the component unmounts, never resurrecting old transaction state', async () => {
+    mockedFetchTransaction.mockResolvedValue(buildTransactionFixture({ status: 'PENDING' }));
+    const store = buildStore({ id: 't1', status: 'PENDING', pollStartedAt: Date.now() });
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+
+    const { unmount } = renderWithStore(store);
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(61_000);
+    });
+    await waitFor(() => expect(screen.getByText(/still processing/i)).toBeInTheDocument());
+
+    let resolveCheckAgain: ((value: ReturnType<typeof buildTransactionFixture>) => void) | undefined;
+    mockedFetchTransaction.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveCheckAgain = resolve;
+        }),
+    );
+
+    await user.click(screen.getByRole('button', { name: /check again/i }));
+    unmount(); // simulates "Back to store" swapping ResultContainer out of the tree mid-fetch
+
+    resolveCheckAgain?.(buildTransactionFixture({ status: 'APPROVED' }));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(store.getState().transaction.status).toBe('PENDING');
+  });
+
+  it('does not stall polling under React StrictMode double-invocation (dev mode)', async () => {
+    mockedFetchTransaction.mockResolvedValue(buildTransactionFixture({ status: 'APPROVED' }));
+    const store = buildStore({ id: 't1', status: 'PENDING', pollStartedAt: null });
+
+    render(
+      <StrictMode>
+        <Provider store={store}>
+          <ResultContainer />
+        </Provider>
+      </StrictMode>,
+    );
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: /approved/i })).toBeInTheDocument());
+  });
+
+  it('under StrictMode, still correctly reaches "still processing" past the poll cap (isMountedRef reset on the real remount, not stuck false forever)', async () => {
+    mockedFetchTransaction.mockResolvedValue(buildTransactionFixture({ status: 'PENDING' }));
+    const store = buildStore({ id: 't1', status: 'PENDING', pollStartedAt: Date.now() });
+
+    render(
+      <StrictMode>
+        <Provider store={store}>
+          <ResultContainer />
+        </Provider>
+      </StrictMode>,
+    );
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(61_000);
+    });
+
     await waitFor(() => expect(screen.getByText(/still processing/i)).toBeInTheDocument());
   });
 

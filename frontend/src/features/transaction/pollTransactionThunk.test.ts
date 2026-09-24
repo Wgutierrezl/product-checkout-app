@@ -2,26 +2,13 @@ import * as backendClient from '../../api/backendClient';
 import { BackendApiError } from '../../api/types';
 import { fetchAndDispatchTransaction, pollTransaction } from './pollTransactionThunk';
 import { transactionErrorSet, transactionReceived } from './transactionSlice';
+import { buildTransactionFixture } from './transactionFixtures';
 
 jest.mock('../../api/backendClient');
 
 const mockedFetchTransaction = backendClient.fetchTransaction as jest.MockedFunction<
   typeof backendClient.fetchTransaction
 >;
-
-function transaction(overrides: Partial<Awaited<ReturnType<typeof backendClient.fetchTransaction>>> = {}) {
-  return {
-    id: 't1',
-    reference: 'REF-1',
-    status: 'PENDING' as const,
-    productAmount: 300_000,
-    baseFee: 250_000,
-    deliveryFee: 800_000,
-    total: 1_350_000,
-    currency: 'COP' as const,
-    ...overrides,
-  };
-}
 
 const RECEIVED_PAYLOAD = (status: 'PENDING' | 'APPROVED') =>
   transactionReceived({
@@ -37,13 +24,23 @@ describe('fetchAndDispatchTransaction', () => {
   });
 
   it('dispatches transactionReceived and returns the status on success', async () => {
-    mockedFetchTransaction.mockResolvedValue(transaction({ status: 'APPROVED' }));
+    mockedFetchTransaction.mockResolvedValue(buildTransactionFixture({ status: 'APPROVED' }));
     const dispatch = jest.fn();
 
     const status = await fetchAndDispatchTransaction({ transactionId: 't1', dispatch });
 
     expect(status).toBe('APPROVED');
     expect(dispatch).toHaveBeenCalledWith(RECEIVED_PAYLOAD('APPROVED'));
+  });
+
+  it('forwards the signal to fetchTransaction, so a real network abort is possible', async () => {
+    mockedFetchTransaction.mockResolvedValue(buildTransactionFixture());
+    const controller = new AbortController();
+    const dispatch = jest.fn();
+
+    await fetchAndDispatchTransaction({ transactionId: 't1', dispatch, signal: controller.signal });
+
+    expect(mockedFetchTransaction).toHaveBeenCalledWith('t1', { signal: controller.signal });
   });
 
   it('dispatches transactionErrorSet and returns null on a backend error', async () => {
@@ -66,11 +63,13 @@ describe('fetchAndDispatchTransaction', () => {
     expect(dispatch).toHaveBeenCalledWith(transactionErrorSet('Could not check payment status.'));
   });
 
-  it('skips dispatch entirely when isCancelled is already true by the time the response arrives', async () => {
-    mockedFetchTransaction.mockResolvedValue(transaction({ status: 'APPROVED' }));
+  it('skips dispatch entirely when the signal is already aborted by the time the response arrives', async () => {
+    mockedFetchTransaction.mockResolvedValue(buildTransactionFixture({ status: 'APPROVED' }));
+    const controller = new AbortController();
+    controller.abort();
     const dispatch = jest.fn();
 
-    await fetchAndDispatchTransaction({ transactionId: 't1', dispatch, isCancelled: () => true });
+    await fetchAndDispatchTransaction({ transactionId: 't1', dispatch, signal: controller.signal });
 
     expect(dispatch).not.toHaveBeenCalled();
   });
@@ -87,10 +86,15 @@ describe('pollTransaction', () => {
   });
 
   it('stops after the first fetch when it already returns a final status', async () => {
-    mockedFetchTransaction.mockResolvedValue(transaction({ status: 'APPROVED' }));
+    mockedFetchTransaction.mockResolvedValue(buildTransactionFixture({ status: 'APPROVED' }));
     const dispatch = jest.fn();
 
-    await pollTransaction({ transactionId: 't1', pollStartedAt: Date.now(), dispatch, isCancelled: () => false });
+    await pollTransaction({
+      transactionId: 't1',
+      pollStartedAt: Date.now(),
+      dispatch,
+      signal: new AbortController().signal,
+    });
 
     expect(mockedFetchTransaction).toHaveBeenCalledTimes(1);
     expect(dispatch).toHaveBeenCalledWith(RECEIVED_PAYLOAD('APPROVED'));
@@ -98,16 +102,16 @@ describe('pollTransaction', () => {
 
   it('retries on PENDING with a growing linear delay, stopping once a final status arrives', async () => {
     mockedFetchTransaction
-      .mockResolvedValueOnce(transaction({ status: 'PENDING' }))
-      .mockResolvedValueOnce(transaction({ status: 'PENDING' }))
-      .mockResolvedValueOnce(transaction({ status: 'APPROVED' }));
+      .mockResolvedValueOnce(buildTransactionFixture({ status: 'PENDING' }))
+      .mockResolvedValueOnce(buildTransactionFixture({ status: 'PENDING' }))
+      .mockResolvedValueOnce(buildTransactionFixture({ status: 'APPROVED' }));
     const dispatch = jest.fn();
 
     const promise = pollTransaction({
       transactionId: 't1',
       pollStartedAt: Date.now(),
       dispatch,
-      isCancelled: () => false,
+      signal: new AbortController().signal,
     });
     await jest.advanceTimersByTimeAsync(0);
     expect(mockedFetchTransaction).toHaveBeenCalledTimes(1);
@@ -125,14 +129,14 @@ describe('pollTransaction', () => {
   it('keeps retrying without aborting when a fetch rejects, until a later attempt succeeds', async () => {
     mockedFetchTransaction
       .mockRejectedValueOnce(new BackendApiError('Network error', 0))
-      .mockResolvedValueOnce(transaction({ status: 'APPROVED' }));
+      .mockResolvedValueOnce(buildTransactionFixture({ status: 'APPROVED' }));
     const dispatch = jest.fn();
 
     const promise = pollTransaction({
       transactionId: 't1',
       pollStartedAt: Date.now(),
       dispatch,
-      isCancelled: () => false,
+      signal: new AbortController().signal,
     });
     await jest.advanceTimersByTimeAsync(0);
     expect(dispatch).toHaveBeenCalledWith(transactionErrorSet('Network error'));
@@ -145,11 +149,16 @@ describe('pollTransaction', () => {
   });
 
   it('stops scheduling further fetches once the 60s budget from pollStartedAt is exhausted', async () => {
-    mockedFetchTransaction.mockResolvedValue(transaction({ status: 'PENDING' }));
+    mockedFetchTransaction.mockResolvedValue(buildTransactionFixture({ status: 'PENDING' }));
     const dispatch = jest.fn();
     const pollStartedAt = Date.now();
 
-    const promise = pollTransaction({ transactionId: 't1', pollStartedAt, dispatch, isCancelled: () => false });
+    const promise = pollTransaction({
+      transactionId: 't1',
+      pollStartedAt,
+      dispatch,
+      signal: new AbortController().signal,
+    });
     await jest.advanceTimersByTimeAsync(61_000);
     const callsAtCap = mockedFetchTransaction.mock.calls.length;
     expect(callsAtCap).toBeGreaterThan(1);
@@ -161,40 +170,51 @@ describe('pollTransaction', () => {
   });
 
   it('performs exactly one fetch and does not schedule a retry when the budget is already exhausted at call time', async () => {
-    mockedFetchTransaction.mockResolvedValue(transaction({ status: 'PENDING' }));
+    mockedFetchTransaction.mockResolvedValue(buildTransactionFixture({ status: 'PENDING' }));
     const dispatch = jest.fn();
 
     await pollTransaction({
       transactionId: 't1',
       pollStartedAt: Date.now() - 90_000,
       dispatch,
-      isCancelled: () => false,
+      signal: new AbortController().signal,
     });
 
     expect(mockedFetchTransaction).toHaveBeenCalledTimes(1);
   });
 
-  it('stops before a second fetch once isCancelled becomes true', async () => {
-    mockedFetchTransaction.mockResolvedValue(transaction({ status: 'PENDING' }));
+  it('stops before a second fetch once the signal is aborted', async () => {
+    mockedFetchTransaction.mockResolvedValue(buildTransactionFixture({ status: 'PENDING' }));
     const dispatch = jest.fn();
-    let cancelled = false;
+    const controller = new AbortController();
 
-    const promise = pollTransaction({
-      transactionId: 't1',
-      pollStartedAt: Date.now(),
-      dispatch,
-      isCancelled: () => cancelled,
-    });
+    const promise = pollTransaction({ transactionId: 't1', pollStartedAt: Date.now(), dispatch, signal: controller.signal });
     await jest.advanceTimersByTimeAsync(0);
-    cancelled = true;
+    controller.abort();
     await jest.advanceTimersByTimeAsync(5_000);
     await promise;
 
     expect(mockedFetchTransaction).toHaveBeenCalledTimes(1);
   });
 
-  it('discards a successful result that resolves AFTER isCancelled flips true mid-flight, never dispatching or continuing the loop', async () => {
-    let resolveFetch: ((value: ReturnType<typeof transaction>) => void) | undefined;
+  it('aborting during the backoff wait resolves the loop IMMEDIATELY, without waiting for the full delay', async () => {
+    mockedFetchTransaction
+      .mockResolvedValueOnce(buildTransactionFixture({ status: 'PENDING' }))
+      .mockResolvedValueOnce(buildTransactionFixture({ status: 'PENDING' }));
+    const dispatch = jest.fn();
+    const controller = new AbortController();
+
+    const promise = pollTransaction({ transactionId: 't1', pollStartedAt: Date.now(), dispatch, signal: controller.signal });
+    await jest.advanceTimersByTimeAsync(0); // 1st fetch resolves, now waiting out the 1000ms backoff
+    controller.abort(); // abort DURING the wait, well before the 1000ms delay would naturally elapse
+
+    await promise; // must resolve without needing `advanceTimersByTimeAsync(1000)`
+
+    expect(mockedFetchTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('discards a successful result that resolves AFTER the signal is aborted mid-flight, never dispatching or continuing the loop', async () => {
+    let resolveFetch: ((value: ReturnType<typeof buildTransactionFixture>) => void) | undefined;
     mockedFetchTransaction.mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -202,23 +222,18 @@ describe('pollTransaction', () => {
         }),
     );
     const dispatch = jest.fn();
-    let cancelled = false;
+    const controller = new AbortController();
 
-    const promise = pollTransaction({
-      transactionId: 't1',
-      pollStartedAt: Date.now(),
-      dispatch,
-      isCancelled: () => cancelled,
-    });
-    cancelled = true;
-    resolveFetch?.(transaction({ status: 'PENDING' }));
+    const promise = pollTransaction({ transactionId: 't1', pollStartedAt: Date.now(), dispatch, signal: controller.signal });
+    controller.abort();
+    resolveFetch?.(buildTransactionFixture({ status: 'PENDING' }));
     await promise;
 
     expect(dispatch).not.toHaveBeenCalled();
     expect(mockedFetchTransaction).toHaveBeenCalledTimes(1);
   });
 
-  it('discards a rejection that resolves AFTER isCancelled flips true mid-flight, never dispatching an error', async () => {
+  it('discards a rejection that resolves AFTER the signal is aborted mid-flight, never dispatching an error', async () => {
     let rejectFetch: ((error: unknown) => void) | undefined;
     mockedFetchTransaction.mockImplementation(
       () =>
@@ -227,15 +242,10 @@ describe('pollTransaction', () => {
         }),
     );
     const dispatch = jest.fn();
-    let cancelled = false;
+    const controller = new AbortController();
 
-    const promise = pollTransaction({
-      transactionId: 't1',
-      pollStartedAt: Date.now(),
-      dispatch,
-      isCancelled: () => cancelled,
-    });
-    cancelled = true;
+    const promise = pollTransaction({ transactionId: 't1', pollStartedAt: Date.now(), dispatch, signal: controller.signal });
+    controller.abort();
     rejectFetch?.(new BackendApiError('Network error', 0));
     await promise;
 

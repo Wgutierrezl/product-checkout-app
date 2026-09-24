@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppDispatch, useAppSelector, useAppStore } from '../../app/hooks';
 import { ResultScreen } from './ResultScreen';
-import { pollStarted, transactionCleared } from './transactionSlice';
+import { pollStartedNow, transactionCleared } from './transactionSlice';
 import {
   checkoutReset,
   idempotencyKeyRotated,
@@ -29,53 +29,75 @@ export function ResultContainer() {
   const delivery = useAppSelector((state) => state.checkout.delivery);
 
   const [pollExhausted, setPollExhausted] = useState(false);
-  const isMountedRef = useRef(true);
-
-  useEffect(
-    () => () => {
-      isMountedRef.current = false;
-    },
-    [],
-  );
+  const isMountedRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!transactionId) {
       return;
     }
-    const current = store.getState().transaction;
-    if (current.status !== 'PENDING') {
-      return;
-    }
 
-    // Resumes from an EXISTING pollStartedAt (survives a refresh) rather
-    // than granting a fresh 60s budget; only a brand-new transaction (never
-    // persisted yet) gets one set here.
+    // Set (not just initialized) INSIDE the effect body, and cleared in
+    // cleanup: React 18 StrictMode dev-double-invokes effects (mount ->
+    // cleanup -> mount) to surface unsafe assumptions. A ref only ever
+    // set `true` once at declaration would stay `false` forever after
+    // that simulated unmount, silently stalling every future poll since
+    // `signal.aborted` would look permanently true. Re-running this
+    // assignment on every real mount keeps it correct across that cycle.
+    isMountedRef.current = true;
+
+    // A FRESH AbortController per effect invocation (not a shared ref) is
+    // what actually makes StrictMode's double-invoke safe: the stale first
+    // invocation's cleanup aborts ONLY its own controller, permanently and
+    // independently of whatever the (correctly re-mounted) second
+    // invocation's isMountedRef/controller state is doing — the abort
+    // controller also cancels the in-flight fetch and any pending backoff
+    // wait immediately (see pollTransactionThunk's `delay`).
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    const current = store.getState().transaction;
     const startedAt = current.pollStartedAt ?? Date.now();
     if (current.pollStartedAt === null) {
-      dispatch(pollStarted(startedAt));
+      dispatch(pollStartedNow());
     }
 
+    // Always checks at least once, even when the resumed status is
+    // ALREADY final (e.g. refreshing on an APPROVED screen) -- reference
+    // and amounts are never persisted, so a refresh otherwise leaves them
+    // null indefinitely. pollTransaction stops after the first check once
+    // it sees a final status, so this never causes extra polling.
     pollTransaction({
       transactionId,
       pollStartedAt: startedAt,
       dispatch,
-      isCancelled: () => !isMountedRef.current,
+      signal: controller.signal,
     }).then(() => {
-      if (isMountedRef.current) {
+      if (isMountedRef.current && !controller.signal.aborted) {
         setPollExhausted(true);
       }
     });
+
+    return () => {
+      isMountedRef.current = false;
+      controller.abort();
+    };
     // Re-runs only when the transaction identity changes; the loop reacts
     // to fresh state via `store.getState()`, not via this effect's deps.
   }, [transactionId, dispatch, store]);
 
   function handleCheckAgain() {
-    if (!transactionId) {
+    if (!transactionId || !abortControllerRef.current) {
       return;
     }
     setPollExhausted(false);
-    fetchAndDispatchTransaction({ transactionId, dispatch }).finally(() => {
-      if (isMountedRef.current) {
+    // Reuses the SAME controller the mount effect owns: if the component
+    // unmounts (e.g. "Back to store") while this manual check is still in
+    // flight, the effect's cleanup aborts it too, so a stale response can
+    // never resurrect old transaction state into an already-reset store.
+    const { signal } = abortControllerRef.current;
+    fetchAndDispatchTransaction({ transactionId, dispatch, signal }).finally(() => {
+      if (isMountedRef.current && !signal.aborted) {
         setPollExhausted(true);
       }
     });
