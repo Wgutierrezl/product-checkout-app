@@ -48,8 +48,12 @@ export class WebStack extends Stack {
     });
 
     const apiOriginPattern = `https://*.execute-api.${this.region}.amazonaws.com`;
-    const gatewaySandboxOrigin =
-      process.env.PAYMENT_GATEWAY_SANDBOX_ORIGIN ?? DEFAULT_PAYMENT_GATEWAY_SANDBOX_ORIGIN;
+    // The deploy workflow passes the gateway base URL, which may include a
+    // path (e.g. /v1). A CSP source with a path only matches that exact
+    // path, so reduce it to its origin to allow every gateway endpoint.
+    const gatewaySandboxOrigin = new URL(
+      process.env.PAYMENT_GATEWAY_SANDBOX_ORIGIN ?? DEFAULT_PAYMENT_GATEWAY_SANDBOX_ORIGIN,
+    ).origin;
     const contentSecurityPolicy = [
       "default-src 'self'",
       `connect-src 'self' ${apiOriginPattern} ${gatewaySandboxOrigin}`,

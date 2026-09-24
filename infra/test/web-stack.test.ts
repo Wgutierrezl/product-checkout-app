@@ -157,6 +157,30 @@ describe('WebStack', () => {
     expect(csp).toMatch(/connect-src[^;]*payment-gateway-sandbox\.invalid/);
   });
 
+  it('reduces a gateway URL with a path to its origin, since a CSP source with a path only matches that exact path', () => {
+    const previous = process.env.PAYMENT_GATEWAY_SANDBOX_ORIGIN;
+    process.env.PAYMENT_GATEWAY_SANDBOX_ORIGIN = 'https://gateway.example.test/v1';
+    try {
+      const template = synthWebStack();
+      const policies = template.findResources('AWS::CloudFront::ResponseHeadersPolicy');
+      const [, policy] = Object.entries(policies)[0];
+      const csp: string =
+        policy.Properties.ResponseHeadersPolicyConfig.SecurityHeadersConfig.ContentSecurityPolicy
+          .ContentSecurityPolicy;
+
+      expect(csp).toContain(
+        "connect-src 'self' https://*.execute-api.us-east-1.amazonaws.com https://gateway.example.test;",
+      );
+      expect(csp).not.toContain('/v1');
+    } finally {
+      if (previous === undefined) {
+        delete process.env.PAYMENT_GATEWAY_SANDBOX_ORIGIN;
+      } else {
+        process.env.PAYMENT_GATEWAY_SANDBOX_ORIGIN = previous;
+      }
+    }
+  });
+
   it('outputs the distribution domain, bucket name, and distribution id', () => {
     const template = synthWebStack();
 
