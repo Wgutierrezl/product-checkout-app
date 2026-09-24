@@ -143,4 +143,80 @@ describe('HandleWebhookUseCase', () => {
     expect(found._unsafeUnwrap().status).toBe('DECLINED');
     expect(transactions.settleApprovedCalls).toHaveLength(0);
   });
+
+  describe('amount/currency integrity check', () => {
+    function signedPayloadWithAmount(transaction: Record<string, unknown>) {
+      const properties = ['transaction.id', 'transaction.status', 'transaction.amount_in_cents', 'transaction.currency'];
+      const timestamp = 1_700_000_000;
+      const values = [transaction.id, transaction.status, transaction.amount_in_cents, transaction.currency].map(String);
+      const checksum = createHash('sha256').update(`${values.join('')}${timestamp}${EVENTS_SECRET}`).digest('hex');
+      return {
+        event: 'transaction.updated',
+        environment: 'test',
+        data: { transaction },
+        signature: { properties, checksum },
+        timestamp,
+        sent_at: '2023-11-14T22:13:20.000Z',
+      };
+    }
+
+    it('settles when the event amount/currency match the stored transaction', async () => {
+      const tx = buildTransaction({ id: 'tx-1', status: 'PENDING', gatewayTransactionId: 'gw-1' }); // totalAmount = 1_350_000
+      const transactions = new FakeTransactionRepository([tx]);
+      const payload = signedPayloadWithAmount({ id: 'gw-1', status: 'APPROVED', amount_in_cents: 1_350_000, currency: 'COP' });
+      const useCase = buildUseCase(transactions);
+
+      const result = await useCase.execute(payload);
+
+      expect(result.isOk()).toBe(true);
+      const found = await transactions.findById('tx-1');
+      expect(found._unsafeUnwrap().status).toBe('APPROVED');
+    });
+
+    it('does NOT settle when the event amount does not match the stored total, and logs an error', async () => {
+      const tx = buildTransaction({ id: 'tx-1', reference: 'REF-tx-1', status: 'PENDING', gatewayTransactionId: 'gw-1' });
+      const transactions = new FakeTransactionRepository([tx]);
+      const payload = signedPayloadWithAmount({ id: 'gw-1', status: 'APPROVED', amount_in_cents: 999_999, currency: 'COP' });
+      const errorSpy = jest.spyOn(require('@nestjs/common').Logger.prototype, 'error').mockImplementation();
+      const useCase = buildUseCase(transactions);
+
+      const result = await useCase.execute(payload);
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toBeNull();
+      const found = await transactions.findById('tx-1');
+      expect(found._unsafeUnwrap().status).toBe('PENDING');
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('tx-1'));
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('REF-tx-1'));
+      errorSpy.mockRestore();
+    });
+
+    it('does NOT settle when the event currency does not match', async () => {
+      const tx = buildTransaction({ id: 'tx-1', status: 'PENDING', gatewayTransactionId: 'gw-1' });
+      const transactions = new FakeTransactionRepository([tx]);
+      const payload = signedPayloadWithAmount({ id: 'gw-1', status: 'APPROVED', amount_in_cents: 1_350_000, currency: 'USD' });
+      jest.spyOn(require('@nestjs/common').Logger.prototype, 'error').mockImplementation();
+      const useCase = buildUseCase(transactions);
+
+      const result = await useCase.execute(payload);
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toBeNull();
+      const found = await transactions.findById('tx-1');
+      expect(found._unsafeUnwrap().status).toBe('PENDING');
+    });
+
+    it('settles when the event carries no amount/currency at all (nothing to verify)', async () => {
+      const tx = buildTransaction({ id: 'tx-1', status: 'PENDING', gatewayTransactionId: 'gw-1' });
+      const transactions = new FakeTransactionRepository([tx]);
+      const payload = signedPayload({ id: 'gw-1', status: 'APPROVED' });
+      const useCase = buildUseCase(transactions);
+
+      const result = await useCase.execute(payload);
+
+      expect(result.isOk()).toBe(true);
+      const found = await transactions.findById('tx-1');
+      expect(found._unsafeUnwrap().status).toBe('APPROVED');
+    });
+  });
 });

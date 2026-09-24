@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 
 import { ValidationError } from '../../shared/errors/domain-error';
 import { verifyWebhookChecksum, WebhookEventPayload } from '../../shared/payment-gateway/domain/webhook-checksum';
@@ -13,6 +13,9 @@ import { SettleTransactionUseCase } from './settle-transaction.use-case';
 
 export const EVENTS_SECRET = Symbol('EVENTS_SECRET');
 
+/** This whole system is COP-only — see design ADR-6. */
+const TRANSACTION_CURRENCY = 'COP';
+
 /**
  * Handles `POST /transactions/webhook`. Verifies the checksum first — an
  * invalid checksum is rejected outright, never trusted enough to even look
@@ -23,6 +26,8 @@ export const EVENTS_SECRET = Symbol('EVENTS_SECRET');
  */
 @Injectable()
 export class HandleWebhookUseCase {
+  private readonly logger = new Logger(HandleWebhookUseCase.name);
+
   constructor(
     @Inject(TRANSACTION_REPOSITORY_PORT) private readonly transactions: TransactionRepositoryPort,
     private readonly settleTransaction: SettleTransactionUseCase,
@@ -44,12 +49,37 @@ export class HandleWebhookUseCase {
         return okAsync(null);
       }
 
+      if (!this.amountMatches(event, tx)) {
+        this.logger.error(
+          `Webhook amount/currency mismatch — refusing to settle: transactionId=${tx.id} ` +
+            `reference=${tx.reference} storedAmountCents=${tx.totalAmount.valueInCents} ` +
+            `eventAmountCents=${event.amountInCents} eventCurrency=${event.currency}`,
+        );
+        return okAsync(null);
+      }
+
       return this.settleTransaction.execute({
         transactionId: tx.id,
         gatewayStatus: event.status,
         gatewayTransactionId: event.gatewayTransactionId,
       });
     });
+  }
+
+  /**
+   * A mismatch means the webhook event doesn't describe the transaction it
+   * claims to — refuse to settle rather than trust it. Missing fields are
+   * NOT a mismatch: not every event type is guaranteed to carry an amount,
+   * and this check only runs when there is something concrete to compare.
+   */
+  private amountMatches(event: WebhookTransactionEvent, tx: Transaction): boolean {
+    if (event.amountInCents !== undefined && event.amountInCents !== tx.totalAmount.valueInCents) {
+      return false;
+    }
+    if (event.currency !== undefined && event.currency !== TRANSACTION_CURRENCY) {
+      return false;
+    }
+    return true;
   }
 
   /**
