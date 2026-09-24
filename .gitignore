@@ -7,6 +7,7 @@ dist-lambda/
 build/
 coverage/
 openapi.json
+*.tsbuildinfo
 
 # CDK
 cdk.out/
