@@ -1,8 +1,9 @@
 import { Provider } from 'react-redux';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { App } from './App';
 import { createAppStore } from './store';
 import { PERSISTED_VERSION, STORAGE_KEY } from '../shared/persistence/persistMiddleware';
+import { BackendApiError } from '../api/types';
 import * as backendClient from '../api/backendClient';
 
 jest.mock('../api/backendClient');
@@ -11,6 +12,32 @@ const mockedFetchProducts = backendClient.fetchProducts as jest.MockedFunction<t
 const mockedFetchPaymentAcceptance = backendClient.fetchPaymentAcceptance as jest.MockedFunction<
   typeof backendClient.fetchPaymentAcceptance
 >;
+const mockedFetchTransaction = backendClient.fetchTransaction as jest.MockedFunction<
+  typeof backendClient.fetchTransaction
+>;
+
+const IN_FLIGHT_KEY = 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f';
+
+function persistInFlightAttempt() {
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({
+      version: PERSISTED_VERSION,
+      checkout: {
+        step: 'DETAILS',
+        productId: 'p1',
+        quantity: 1,
+        customer: { fullName: 'Jane Doe', email: 'jane@example.com', phone: '+573001234567' },
+        delivery: { address: 'Cra 1 # 2-3', city: 'Bogota', region: 'Cundinamarca' },
+        installments: 1,
+        idempotencyKey: IN_FLIGHT_KEY,
+        cardSummary: { brand: 'visa', last4: '1111', holder: 'Jane Doe' },
+        submitAttempted: true,
+      },
+      transaction: { id: null, status: null, pollStartedAt: null },
+    }),
+  );
+}
 
 /**
  * End-to-end refresh-resilience check: a REAL store built via
@@ -27,6 +54,7 @@ describe('App refresh resilience (integration)', () => {
     mockedFetchProducts.mockReturnValue(new Promise(() => {}));
     mockedFetchPaymentAcceptance.mockReset();
     mockedFetchPaymentAcceptance.mockReturnValue(new Promise(() => {}));
+    mockedFetchTransaction.mockReset();
   });
 
   it('downgrades a persisted SUMMARY step to DETAILS on "refresh", showing the payment modal instead of the summary', () => {
@@ -96,5 +124,54 @@ describe('App refresh resilience (integration)', () => {
     expect(screen.getByLabelText(/cvc/i)).toHaveValue('');
     expect(store.getState().checkout.cardToken).toBeNull();
     expect(store.getState().checkout.cardSummary).toBeNull();
+  });
+
+  describe('resuming a payment attempt left in flight by a refresh (submitAttempted)', () => {
+    it('200 (the request had reached the backend): forces RESULT for the discovered transaction, never rotating the key', async () => {
+      persistInFlightAttempt();
+      mockedFetchTransaction.mockResolvedValue({
+        id: IN_FLIGHT_KEY,
+        reference: 'REF-1',
+        status: 'PENDING',
+        productAmount: 300_000,
+        baseFee: 250_000,
+        deliveryFee: 800_000,
+        total: 1_350_000,
+        currency: 'COP',
+      });
+
+      const store = createAppStore();
+      render(
+        <Provider store={store}>
+          <App />
+        </Provider>,
+      );
+
+      await waitFor(() => expect(store.getState().checkout.step).toBe('RESULT'));
+      expect(mockedFetchTransaction).toHaveBeenCalledWith(IN_FLIGHT_KEY);
+      const { checkout, transaction } = store.getState();
+      expect(transaction.id).toBe(IN_FLIGHT_KEY);
+      expect(transaction.status).toBe('PENDING');
+      expect(checkout.cardToken).toBeNull();
+      expect(checkout.submitAttempted).toBe(false);
+      expect(checkout.idempotencyKey).toBe(IN_FLIGHT_KEY);
+    });
+
+    it('404 (nothing was ever created): clears the in-flight flag and keeps the SAME key, staying on DETAILS', async () => {
+      persistInFlightAttempt();
+      mockedFetchTransaction.mockRejectedValue(new BackendApiError('Transaction not found', 404));
+
+      const store = createAppStore();
+      render(
+        <Provider store={store}>
+          <App />
+        </Provider>,
+      );
+
+      await waitFor(() => expect(store.getState().checkout.submitAttempted).toBe(false));
+      expect(store.getState().checkout.step).toBe('DETAILS');
+      expect(store.getState().checkout.idempotencyKey).toBe(IN_FLIGHT_KEY);
+      expect(store.getState().transaction.id).toBeNull();
+    });
   });
 });

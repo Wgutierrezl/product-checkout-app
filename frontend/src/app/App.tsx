@@ -1,12 +1,14 @@
 import { ProductListContainer } from '../features/catalog/ProductListContainer';
 import { PaymentModalContainer } from '../features/checkout/PaymentModalContainer';
 import { SummaryContainer } from '../features/checkout/SummaryContainer';
+import { useResumeInFlightPayment } from '../features/checkout/useResumeInFlightPayment';
 import { useAppSelector } from './hooks';
 import styles from './App.module.css';
 
 const STORE_NAME = 'Meridian Goods';
 
 export function App() {
+  useResumeInFlightPayment();
   const step = useAppSelector((state) => state.checkout.step);
 
   return (
