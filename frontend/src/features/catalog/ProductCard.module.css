@@ -1,6 +1,7 @@
 .card {
   display: flex;
   flex-direction: column;
+  height: 100%;
   gap: var(--space-3);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -36,15 +37,34 @@
   object-fit: cover;
 }
 
+/* Clamped to a fixed number of lines (with a `-webkit-` fallback for the
+   iOS/Safari versions that only support the prefixed property) so every
+   card in a row keeps the same height for this region regardless of how
+   long the product name/description actually is. `min-height` reserves the
+   full two-line box even for short text, so short and long names/
+   descriptions line up their footer at the same vertical position. */
 .name {
   font-size: var(--font-size-lg);
   font-weight: 600;
+  line-height: var(--line-height-normal);
+  min-height: calc(var(--font-size-lg) * var(--line-height-normal) * 2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .description {
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
   line-height: var(--line-height-relaxed);
+  min-height: calc(var(--font-size-sm) * var(--line-height-relaxed) * 2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .meta {
@@ -136,7 +156,14 @@
   font-weight: 600;
 }
 
-.actions {
+/* Groups the price/stock row, stepper, and pay action so they always sit at
+   the bottom of the card (`margin-top: auto` pushes this whole block down),
+   keeping that row aligned across every card in a grid row no matter how
+   many lines the clamped name/description above take up. */
+.footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
   margin-top: auto;
 }
 
