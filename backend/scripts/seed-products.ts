@@ -1,15 +1,26 @@
 /**
- * Idempotent local table-creation + seed script for DynamoDB Local.
+ * Idempotent product-seeding script, safe against both DynamoDB Local and
+ * real AWS.
  *
- * Creates the `Products`, `Customers`, and `Deliveries` tables (with their
- * GSIs) if they don't already exist, and puts a fixed catalog of 7 sample
- * products (including one out-of-stock item, stock 0, to demo the catalog's
- * "sold out" UI state) keyed by stable UUIDs, so re-running the script
- * overwrites the same items instead of duplicating them.
+ * Local (DYNAMO_ENDPOINT set, e.g. `docker-compose`'s DynamoDB Local):
+ * creates the `Products`, `Customers`, and `Deliveries` tables (with their
+ * GSIs) if they don't already exist, then seeds products.
  *
- * Customers, Deliveries, and Transactions are only table-created here, not
- * seeded — they're populated by the checkout flow itself (PR5/PR6), so
- * there's no fixed seed data for them.
+ * Real AWS (DYNAMO_ENDPOINT unset, e.g. deploy.yml's post-`cdk deploy`
+ * step): table creation is skipped — `DataStack` already created all 4
+ * tables — and the script only PutItems into them. Attempting
+ * CreateTableCommand against real tables would be redundant at best and
+ * risk an unrelated permissions error at worst (the Lambda role deploy.yml
+ * runs this under has no `dynamodb:CreateTable` grant, by design — least
+ * privilege).
+ *
+ * Puts a fixed catalog of 7 sample products (including one out-of-stock
+ * item, stock 0, to demo the catalog's "sold out" UI state) keyed by stable
+ * UUIDs, so re-running the script overwrites the same items instead of
+ * duplicating them.
+ *
+ * Customers, Deliveries, and Transactions are only table-created here (local
+ * only), never seeded — they're populated by the checkout flow itself.
  *
  * Usage: npm run seed
  */
@@ -36,9 +47,15 @@ import {
 } from '../src/transactions/infrastructure/dynamo-transaction.repository';
 
 const REGION = process.env.AWS_REGION ?? 'us-east-1';
-// Defaults to DynamoDB Local's docker-compose port for local seeding; set
-// DYNAMO_ENDPOINT to omit this and target a real AWS endpoint instead.
-const ENDPOINT = process.env.DYNAMO_ENDPOINT ?? 'http://localhost:8000';
+// Unset by default — the AWS SDK then targets real regional DynamoDB
+// endpoints. Set DYNAMO_ENDPOINT (e.g. DynamoDB Local's docker-compose
+// port) to override it for local development only.
+const ENDPOINT = process.env.DYNAMO_ENDPOINT;
+
+/** True for DynamoDB Local (table creation needed); false for real AWS (DataStack already created the tables). */
+export function isLocalDynamoEndpoint(endpoint: string | undefined): boolean {
+  return Boolean(endpoint);
+}
 
 interface SeedProductItem {
   productId: string;
@@ -206,16 +223,22 @@ async function ensureTransactionsTable(client: DynamoDBClient): Promise<void> {
   );
 }
 
-async function seedProducts(): Promise<void> {
-  const client = new DynamoDBClient({ region: REGION, endpoint: ENDPOINT });
-  const documentClient = DynamoDBDocumentClient.from(client, {
-    marshallOptions: { removeUndefinedValues: true },
-  });
+export interface SeedProductsOptions {
+  /** true = DynamoDB Local (create tables first); false = real AWS (DataStack owns table lifecycle). */
+  manageLocalTables: boolean;
+}
 
-  await ensureProductsTable(client);
-  await ensureCustomersTable(client);
-  await ensureDeliveriesTable(client);
-  await ensureTransactionsTable(client);
+export async function seedProducts(
+  client: DynamoDBClient,
+  documentClient: DynamoDBDocumentClient,
+  options: SeedProductsOptions,
+): Promise<void> {
+  if (options.manageLocalTables) {
+    await ensureProductsTable(client);
+    await ensureCustomersTable(client);
+    await ensureDeliveriesTable(client);
+    await ensureTransactionsTable(client);
+  }
 
   for (const product of SEED_PRODUCTS) {
     await documentClient.send(new PutCommand({ TableName: PRODUCTS_TABLE_NAME, Item: product }));
@@ -224,13 +247,28 @@ async function seedProducts(): Promise<void> {
   // eslint-disable-next-line no-console
   console.log(
     `Seeded ${SEED_PRODUCTS.length} products into "${PRODUCTS_TABLE_NAME}". ` +
-      `Ensured "${CUSTOMERS_TABLE_NAME}", "${DELIVERIES_TABLE_NAME}", and "${TRANSACTIONS_TABLE_NAME}" ` +
-      'tables exist (no seed data).',
+      (options.manageLocalTables
+        ? `Ensured "${CUSTOMERS_TABLE_NAME}", "${DELIVERIES_TABLE_NAME}", and "${TRANSACTIONS_TABLE_NAME}" tables exist (no seed data).`
+        : `Skipped table creation (real AWS — DataStack already owns "${CUSTOMERS_TABLE_NAME}", ` +
+          `"${DELIVERIES_TABLE_NAME}", and "${TRANSACTIONS_TABLE_NAME}").`),
   );
 }
 
-seedProducts().catch((error: unknown) => {
-  // eslint-disable-next-line no-console
-  console.error('Failed to seed local DynamoDB tables:', error);
-  process.exitCode = 1;
-});
+async function main(): Promise<void> {
+  const client = new DynamoDBClient({ region: REGION, ...(ENDPOINT ? { endpoint: ENDPOINT } : {}) });
+  const documentClient = DynamoDBDocumentClient.from(client, {
+    marshallOptions: { removeUndefinedValues: true },
+  });
+
+  await seedProducts(client, documentClient, { manageLocalTables: isLocalDynamoEndpoint(ENDPOINT) });
+}
+
+// Only auto-run when executed directly (`npm run seed`/`ts-node`), not when
+// imported by tests.
+if (require.main === module) {
+  main().catch((error: unknown) => {
+    // eslint-disable-next-line no-console
+    console.error('Failed to seed products:', error);
+    process.exitCode = 1;
+  });
+}
