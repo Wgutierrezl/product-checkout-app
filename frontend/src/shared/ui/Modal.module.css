@@ -12,6 +12,10 @@
   z-index: 1;
   width: 100%;
   max-height: 90vh;
+  /* Overridden by the browser when `dvh` is supported — accounts for
+     mobile Safari's collapsing address bar so the sheet never gets
+     clipped by a viewport height that was measured before it collapsed. */
+  max-height: 90dvh;
   overflow-y: auto;
   background: var(--color-surface);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
@@ -46,6 +50,7 @@
   .sheet {
     width: min(560px, calc(100% - var(--space-6)));
     max-height: 85vh;
+    max-height: 85dvh;
     border-radius: var(--radius-lg);
     animation: fadeInScale var(--transition-normal);
   }
