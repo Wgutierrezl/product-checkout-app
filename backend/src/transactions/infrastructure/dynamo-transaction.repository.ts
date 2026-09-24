@@ -33,6 +33,42 @@ export const TRANSACTIONS_GATEWAY_TX_INDEX_NAME = 'GatewayTxIndex';
 
 /** Outcome of attempting the 3-item settlement `TransactWriteItems`. */
 type SettleAttemptOutcome = 'settled' | 'racedByTransactionCondition' | 'oversold';
+/** Internal-only outcome of a single TransactWriteItems attempt, before the retry-once policy is applied. */
+type SettleAttemptRawOutcome = SettleAttemptOutcome | 'retry';
+
+interface StatusUpdateInput {
+  status: string;
+  updatedAt: string;
+  gatewayTransactionId?: string;
+}
+
+interface StatusUpdateExpression {
+  updateExpression: string;
+  names: Record<string, string>;
+  values: Record<string, unknown>;
+}
+
+/**
+ * Shared SET-expression builder for every write that transitions
+ * `Transactions.status` (`updateGatewayResult`, `settleApproved`'s
+ * transaction item, its oversold fallback, and `finalizeNonApproved`).
+ * Callers add their own `ConditionExpression`/`:pending` value on top — this
+ * only builds the SET side, so the same three pieces (names/values/expression)
+ * are never hand-duplicated per call site.
+ */
+function buildStatusUpdate(input: StatusUpdateInput): StatusUpdateExpression {
+  const names: Record<string, string> = { '#status': 'status', '#updatedAt': 'updatedAt' };
+  const values: Record<string, unknown> = { ':status': input.status, ':updatedAt': input.updatedAt };
+  let updateExpression = 'SET #status = :status, #updatedAt = :updatedAt';
+
+  if (input.gatewayTransactionId !== undefined) {
+    names['#gatewayTransactionId'] = 'gatewayTransactionId';
+    values[':gatewayTransactionId'] = input.gatewayTransactionId;
+    updateExpression += ', #gatewayTransactionId = :gatewayTransactionId';
+  }
+
+  return { updateExpression, names, values };
+}
 
 interface TransactionItem {
   transactionId: string;
@@ -189,40 +225,72 @@ export class DynamoTransactionRepository implements TransactionRepositoryPort {
     }
   }
 
+  /**
+   * BLOCKER FIX: every write touching `Transactions.status` after creation
+   * must be condition-guarded — this one is no exception, even though its
+   * only caller (`SettleTransactionUseCase.recordStillPending`) is only
+   * reached when the transaction was PENDING at read time. A concurrent
+   * settle (webhook racing a lazy-poll, or the reconciliation sweep) could
+   * flip it to a terminal status between that read and this write.
+   * `ConditionalCheckFailedException` = race lost — re-read and return the
+   * CURRENT row, never as an error. `ReturnValues: 'ALL_NEW'` avoids a
+   * re-read on the success path.
+   */
   updateGatewayResult(id: string, input: UpdateGatewayResultInput): AppResultAsync<Transaction> {
-    const names: Record<string, string> = { '#status': 'status', '#updatedAt': 'updatedAt' };
-    const values: Record<string, unknown> = { ':status': input.status, ':updatedAt': input.updatedAt };
-    let updateExpression = 'SET #status = :status, #updatedAt = :updatedAt';
+    return ResultAsync.fromPromise(
+      this.attemptConditionedStatusUpdate(id, {
+        status: input.status,
+        updatedAt: input.updatedAt,
+        gatewayTransactionId: input.gatewayTransactionId,
+        lastGatewayCheckAt: input.lastGatewayCheckAt,
+      }),
+      (error) =>
+        new UnexpectedError(`Failed to update transaction ${id} gateway result: ${(error as Error).message}`),
+    ).andThen((attributes) => this.resolveConditionedUpdateResult(id, attributes));
+  }
 
-    if (input.gatewayTransactionId !== undefined) {
-      names['#gatewayTransactionId'] = 'gatewayTransactionId';
-      values[':gatewayTransactionId'] = input.gatewayTransactionId;
-      updateExpression += ', #gatewayTransactionId = :gatewayTransactionId';
-    }
-
+  private async attemptConditionedStatusUpdate(
+    id: string,
+    input: StatusUpdateInput & { lastGatewayCheckAt?: string },
+  ): Promise<Record<string, unknown> | null> {
+    const { updateExpression, names, values } = buildStatusUpdate(input);
+    let finalUpdateExpression = updateExpression;
     if (input.lastGatewayCheckAt !== undefined) {
       names['#lastGatewayCheckAt'] = 'lastGatewayCheckAt';
       values[':lastGatewayCheckAt'] = input.lastGatewayCheckAt;
-      updateExpression += ', #lastGatewayCheckAt = :lastGatewayCheckAt';
+      finalUpdateExpression += ', #lastGatewayCheckAt = :lastGatewayCheckAt';
     }
 
-    return ResultAsync.fromPromise(
-      this.client.send(
+    try {
+      const result = await this.client.send(
         new UpdateCommand({
           TableName: TRANSACTIONS_TABLE_NAME,
           Key: { transactionId: id },
-          UpdateExpression: updateExpression,
+          ConditionExpression: '#status = :pending',
+          UpdateExpression: finalUpdateExpression,
           ExpressionAttributeNames: names,
-          ExpressionAttributeValues: values,
+          ExpressionAttributeValues: { ...values, ':pending': 'PENDING' },
           ReturnValues: 'ALL_NEW',
         }),
-      ),
-      (error) =>
-        new UnexpectedError(`Failed to update transaction ${id} gateway result: ${(error as Error).message}`),
-    ).andThen((result) => {
-      const transaction = toTransaction(result.Attributes as TransactionItem);
-      return transaction.isOk() ? okAsync(transaction.value) : errAsync(transaction.error);
-    });
+      );
+      return result.Attributes ?? null;
+    } catch (error) {
+      if (!(error instanceof ConditionalCheckFailedException)) {
+        throw error;
+      }
+      return null;
+    }
+  }
+
+  private resolveConditionedUpdateResult(
+    id: string,
+    attributes: Record<string, unknown> | null,
+  ): AppResultAsync<Transaction> {
+    if (!attributes) {
+      return this.findById(id);
+    }
+    const transaction = toTransaction(attributes as unknown as TransactionItem);
+    return transaction.isOk() ? okAsync(transaction.value) : errAsync(transaction.error);
   }
 
   findById(id: string): AppResultAsync<Transaction> {
@@ -247,37 +315,55 @@ export class DynamoTransactionRepository implements TransactionRepositoryPort {
    * `TransactionCanceledException`, `CancellationReasons` tells us which
    * item's condition failed (`reasons[0]` = Transactions, `reasons[1]` =
    * Products, `reasons[2]` = Deliveries):
-   * - Transactions condition failed -> a concurrent caller already settled
-   *   this transaction (race loser) -> re-read and return its current state.
-   * - Products condition failed -> oversold race: the buyer was already
-   *   charged, so the transaction is still marked APPROVED, but WITHOUT
-   *   decrementing stock or creating a delivery. Logged for manual
-   *   reconciliation (restock or refund) since this should be rare in
-   *   practice (stock was already checked at create time).
-   * - Any other/unexpected shape -> treated conservatively as a race rather
-   *   than crashing; re-read and return current state.
+   * - `reasons[0]` ConditionalCheckFailed -> a concurrent caller already
+   *   settled this transaction (race loser) -> re-read and return its
+   *   current state. This takes PRIORITY even if `reasons[1]` also failed
+   *   (nothing to oversell once the transaction itself is no longer PENDING).
+   * - `reasons[1]` ConditionalCheckFailed (and `reasons[0]` did NOT fail) ->
+   *   oversold race: the buyer was already charged, so the transaction is
+   *   still marked APPROVED, but WITHOUT decrementing stock or creating a
+   *   delivery. Logged at error level for manual reconciliation (restock or
+   *   refund) since this should be rare in practice (stock was already
+   *   checked at create time).
+   * - Any other/unrecognized cancellation reason (e.g. `TransactionConflict`,
+   *   a transient DynamoDB condition) -> retry the whole TransactWriteItems
+   *   ONCE. If the retry also yields an unrecognized reason, give up and
+   *   surface an `UnexpectedError` (masked 500) rather than silently
+   *   guessing — this is NOT treated as a benign race.
    */
   settleApproved(input: SettleApprovedInput): AppResultAsync<Transaction> {
     return ResultAsync.fromPromise(
-      this.attemptSettleApproved(input),
+      this.attemptSettleApprovedWithRetry(input),
       (error) =>
         new UnexpectedError(`Failed to settle transaction ${input.transactionId} as APPROVED: ${(error as Error).message}`),
     ).andThen((outcome) => this.finishSettleApproved(input, outcome));
   }
 
-  private async attemptSettleApproved(input: SettleApprovedInput): Promise<SettleAttemptOutcome> {
-    const transactionNames: Record<string, string> = { '#status': 'status', '#updatedAt': 'updatedAt' };
-    const transactionValues: Record<string, unknown> = {
-      ':pending': 'PENDING',
-      ':approved': 'APPROVED',
-      ':now': input.updatedAt,
-    };
-    let transactionUpdateExpression = 'SET #status = :approved, #updatedAt = :now';
-    if (input.gatewayTransactionId !== undefined) {
-      transactionNames['#gatewayTransactionId'] = 'gatewayTransactionId';
-      transactionValues[':gatewayTransactionId'] = input.gatewayTransactionId;
-      transactionUpdateExpression += ', #gatewayTransactionId = :gatewayTransactionId';
+  private async attemptSettleApprovedWithRetry(input: SettleApprovedInput): Promise<SettleAttemptOutcome> {
+    const first = await this.trySettleApprovedTransactWrite(input);
+    if (first !== 'retry') {
+      return first;
     }
+
+    this.logger.warn(
+      `Unrecognized TransactWriteItems cancellation reason while settling transaction ${input.transactionId} ` +
+        'as APPROVED — retrying once.',
+    );
+    const second = await this.trySettleApprovedTransactWrite(input);
+    if (second === 'retry') {
+      this.logger.error(
+        `Settlement TransactWriteItems for transaction ${input.transactionId} failed twice with an ` +
+          'unrecognized cancellation reason — giving up.',
+      );
+      throw new Error(
+        `Settlement TransactWriteItems for transaction ${input.transactionId} failed twice with an unrecognized cancellation reason`,
+      );
+    }
+    return second;
+  }
+
+  private async trySettleApprovedTransactWrite(input: SettleApprovedInput): Promise<SettleAttemptRawOutcome> {
+    const { updateExpression, names, values } = buildStatusUpdate({ status: 'APPROVED', updatedAt: input.updatedAt, gatewayTransactionId: input.gatewayTransactionId });
 
     try {
       await this.client.send(
@@ -288,9 +374,9 @@ export class DynamoTransactionRepository implements TransactionRepositoryPort {
                 TableName: TRANSACTIONS_TABLE_NAME,
                 Key: { transactionId: input.transactionId },
                 ConditionExpression: '#status = :pending',
-                UpdateExpression: transactionUpdateExpression,
-                ExpressionAttributeNames: transactionNames,
-                ExpressionAttributeValues: transactionValues,
+                UpdateExpression: updateExpression,
+                ExpressionAttributeNames: names,
+                ExpressionAttributeValues: { ...values, ':pending': 'PENDING' },
               },
             },
             {
@@ -335,11 +421,7 @@ export class DynamoTransactionRepository implements TransactionRepositoryPort {
       if (reasons[1]?.Code === 'ConditionalCheckFailed') {
         return 'oversold';
       }
-      // Any other cancellation shape (including the Deliveries item alone,
-      // which given a freshly-generated deliveryId should never happen in
-      // practice) is treated conservatively as a benign race rather than
-      // crashing — the re-read below reports whatever the current state is.
-      return 'racedByTransactionCondition';
+      return 'retry';
     }
   }
 
@@ -359,85 +441,35 @@ export class DynamoTransactionRepository implements TransactionRepositoryPort {
     );
 
     return ResultAsync.fromPromise(
-      this.markApprovedWithoutStockOrDelivery(input),
+      this.attemptConditionedStatusUpdate(input.transactionId, {
+        status: 'APPROVED',
+        updatedAt: input.updatedAt,
+        gatewayTransactionId: input.gatewayTransactionId,
+      }),
       (error) =>
         new UnexpectedError(
           `Failed to mark oversold transaction ${input.transactionId} as APPROVED: ${(error as Error).message}`,
         ),
-    ).andThen(() => this.findById(input.transactionId));
-  }
-
-  private async markApprovedWithoutStockOrDelivery(input: SettleApprovedInput): Promise<void> {
-    const names: Record<string, string> = { '#status': 'status', '#updatedAt': 'updatedAt' };
-    const values: Record<string, unknown> = { ':pending': 'PENDING', ':approved': 'APPROVED', ':now': input.updatedAt };
-    let updateExpression = 'SET #status = :approved, #updatedAt = :now';
-    if (input.gatewayTransactionId !== undefined) {
-      names['#gatewayTransactionId'] = 'gatewayTransactionId';
-      values[':gatewayTransactionId'] = input.gatewayTransactionId;
-      updateExpression += ', #gatewayTransactionId = :gatewayTransactionId';
-    }
-
-    try {
-      await this.client.send(
-        new UpdateCommand({
-          TableName: TRANSACTIONS_TABLE_NAME,
-          Key: { transactionId: input.transactionId },
-          ConditionExpression: '#status = :pending',
-          UpdateExpression: updateExpression,
-          ExpressionAttributeNames: names,
-          ExpressionAttributeValues: values,
-        }),
-      );
-    } catch (error) {
-      if (!(error instanceof ConditionalCheckFailedException)) {
-        throw error;
-      }
-      // Already settled by a concurrent caller in the meantime — fine, the
-      // caller's re-read (`findById`) will report whatever won.
-    }
+    ).andThen((attributes) => this.resolveConditionedUpdateResult(input.transactionId, attributes));
   }
 
   /**
    * Conditioned (status = PENDING) update to a terminal non-approved status.
    * A `ConditionalCheckFailedException` means a concurrent caller already
    * finalized this transaction (race loser) — re-read and return its
-   * current state rather than failing.
+   * current state rather than failing. `ReturnValues: 'ALL_NEW'` avoids a
+   * re-read on the success path.
    */
   finalizeNonApproved(input: FinalizeNonApprovedInput): AppResultAsync<Transaction> {
     return ResultAsync.fromPromise(
-      this.updateStatusIfPending(input),
+      this.attemptConditionedStatusUpdate(input.transactionId, {
+        status: input.status,
+        updatedAt: input.updatedAt,
+        gatewayTransactionId: input.gatewayTransactionId,
+      }),
       (error) =>
         new UnexpectedError(`Failed to finalize transaction ${input.transactionId} as ${input.status}: ${(error as Error).message}`),
-    ).andThen(() => this.findById(input.transactionId));
-  }
-
-  private async updateStatusIfPending(input: FinalizeNonApprovedInput): Promise<void> {
-    const names: Record<string, string> = { '#status': 'status', '#updatedAt': 'updatedAt' };
-    const values: Record<string, unknown> = { ':pending': 'PENDING', ':status': input.status, ':now': input.updatedAt };
-    let updateExpression = 'SET #status = :status, #updatedAt = :now';
-    if (input.gatewayTransactionId !== undefined) {
-      names['#gatewayTransactionId'] = 'gatewayTransactionId';
-      values[':gatewayTransactionId'] = input.gatewayTransactionId;
-      updateExpression += ', #gatewayTransactionId = :gatewayTransactionId';
-    }
-
-    try {
-      await this.client.send(
-        new UpdateCommand({
-          TableName: TRANSACTIONS_TABLE_NAME,
-          Key: { transactionId: input.transactionId },
-          ConditionExpression: '#status = :pending',
-          UpdateExpression: updateExpression,
-          ExpressionAttributeNames: names,
-          ExpressionAttributeValues: values,
-        }),
-      );
-    } catch (error) {
-      if (!(error instanceof ConditionalCheckFailedException)) {
-        throw error;
-      }
-      // Race loser — already finalized by a concurrent caller. Fine.
-    }
+    ).andThen((attributes) => this.resolveConditionedUpdateResult(input.transactionId, attributes));
   }
 
   touchLastGatewayCheckAt(transactionId: string, lastGatewayCheckAt: string): AppResultAsync<void> {

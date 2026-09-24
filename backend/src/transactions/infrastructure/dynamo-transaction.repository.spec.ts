@@ -130,7 +130,7 @@ describe('DynamoTransactionRepository', () => {
   });
 
   describe('updateGatewayResult', () => {
-    it('updates status, gatewayTransactionId, and lastGatewayCheckAt', async () => {
+    it('updates status, gatewayTransactionId, and lastGatewayCheckAt, conditioned on still being PENDING, via ReturnValues ALL_NEW (no re-read)', async () => {
       ddbMock.on(UpdateCommand).resolves({
         Attributes: { ...storedItem, status: 'APPROVED', gatewayTransactionId: 'gw-1', updatedAt: '2026-09-23T00:05:00.000Z' },
       });
@@ -147,6 +147,41 @@ describe('DynamoTransactionRepository', () => {
       const call = ddbMock.commandCalls(UpdateCommand)[0].args[0].input;
       expect(call.TableName).toBe(TRANSACTIONS_TABLE_NAME);
       expect(call.Key).toEqual({ transactionId: 'tx-1' });
+      expect(call.ConditionExpression).toContain('=');
+      expect(call.ReturnValues).toBe('ALL_NEW');
+      expect(ddbMock.commandCalls(GetCommand)).toHaveLength(0);
+    });
+
+    it('re-reads when the conditioned update succeeds but returns no Attributes (defensive fallback)', async () => {
+      ddbMock.on(UpdateCommand).resolves({});
+      ddbMock.on(GetCommand).resolves({ Item: storedItem });
+      const repository = new DynamoTransactionRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.updateGatewayResult('tx-1', {
+        status: 'PENDING',
+        gatewayTransactionId: 'gw-1',
+        updatedAt: '2026-09-23T00:05:00.000Z',
+      });
+
+      expect(result.isOk()).toBe(true);
+      expect(ddbMock.commandCalls(GetCommand)).toHaveLength(1);
+    });
+
+    it('re-reads and returns the current row (not an error) when the transaction is no longer PENDING (race lost)', async () => {
+      ddbMock.on(UpdateCommand).rejects(
+        new ConditionalCheckFailedException({ message: 'The conditional request failed', $metadata: {} }),
+      );
+      ddbMock.on(GetCommand).resolves({ Item: { ...storedItem, status: 'APPROVED', gatewayTransactionId: 'gw-winner' } });
+      const repository = new DynamoTransactionRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.updateGatewayResult('tx-1', {
+        status: 'PENDING',
+        gatewayTransactionId: 'gw-loser',
+        updatedAt: '2026-09-23T00:05:00.000Z',
+      });
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap().gatewayTransactionId).toBe('gw-winner');
     });
 
     it('updates lastGatewayCheckAt when given (lazy-poll refresh)', async () => {
@@ -310,10 +345,9 @@ describe('DynamoTransactionRepository', () => {
       expect(ddbMock.commandCalls(UpdateCommand)).toHaveLength(0);
     });
 
-    it('marks the transaction APPROVED without stock/delivery when the products condition fails (oversold)', async () => {
+    it('marks the transaction APPROVED without stock/delivery when the products condition fails (oversold), via ReturnValues ALL_NEW (no re-read)', async () => {
       ddbMock.on(TransactWriteCommand).rejects(buildCancellationError([{ Code: 'None' }, { Code: 'ConditionalCheckFailed' }, { Code: 'None' }]));
-      ddbMock.on(UpdateCommand).resolves({});
-      ddbMock.on(GetCommand).resolves({ Item: { ...storedItem, status: 'APPROVED', gatewayTransactionId: 'gw-1' } });
+      ddbMock.on(UpdateCommand).resolves({ Attributes: { ...storedItem, status: 'APPROVED', gatewayTransactionId: 'gw-1' } });
       const errorSpy = jest.spyOn(require('@nestjs/common').Logger.prototype, 'error').mockImplementation();
 
       const repository = new DynamoTransactionRepository(ddbMock as unknown as DynamoDBDocumentClient);
@@ -323,19 +357,55 @@ describe('DynamoTransactionRepository', () => {
       expect(result._unsafeUnwrap().status).toBe('APPROVED');
       const updateCall = ddbMock.commandCalls(UpdateCommand)[0].args[0].input;
       expect(updateCall.TableName).toBe(TRANSACTIONS_TABLE_NAME);
+      expect(updateCall.ReturnValues).toBe('ALL_NEW');
+      expect(ddbMock.commandCalls(GetCommand)).toHaveLength(0);
       expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Oversold'));
       errorSpy.mockRestore();
     });
 
-    it('treats an unrecognized cancellation shape as a benign race (never crashes) and re-reads', async () => {
-      ddbMock.on(TransactWriteCommand).rejects(buildCancellationError([{ Code: 'None' }, { Code: 'None' }, { Code: 'ConditionalCheckFailed' }]));
-      ddbMock.on(GetCommand).resolves({ Item: { ...storedItem, status: 'APPROVED' } });
+    it('re-reads and returns the winner when reasons[0] AND reasons[1] both fail simultaneously (reasons[0]/race takes priority over oversold)', async () => {
+      ddbMock.on(TransactWriteCommand).rejects(buildCancellationError([{ Code: 'ConditionalCheckFailed' }, { Code: 'ConditionalCheckFailed' }, { Code: 'None' }]));
+      ddbMock.on(GetCommand).resolves({ Item: { ...storedItem, status: 'APPROVED', gatewayTransactionId: 'gw-winner' } });
+      const repository = new DynamoTransactionRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.settleApproved(settleInput);
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap().gatewayTransactionId).toBe('gw-winner');
+      expect(ddbMock.commandCalls(UpdateCommand)).toHaveLength(0);
+    });
+
+    it('retries the TransactWriteItems once for an unrecognized cancellation reason (e.g. TransactionConflict), and succeeds on the retry', async () => {
+      ddbMock
+        .on(TransactWriteCommand)
+        .rejectsOnce(buildCancellationError([{ Code: 'TransactionConflict' }, { Code: 'None' }, { Code: 'None' }]))
+        .resolves({});
+      ddbMock.on(GetCommand).resolves({ Item: { ...storedItem, status: 'APPROVED', gatewayTransactionId: 'gw-1' } });
+      const warnSpy = jest.spyOn(require('@nestjs/common').Logger.prototype, 'warn').mockImplementation();
       const repository = new DynamoTransactionRepository(ddbMock as unknown as DynamoDBDocumentClient);
 
       const result = await repository.settleApproved(settleInput);
 
       expect(result.isOk()).toBe(true);
       expect(result._unsafeUnwrap().status).toBe('APPROVED');
+      expect(ddbMock.commandCalls(TransactWriteCommand)).toHaveLength(2);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('tx-1'));
+      warnSpy.mockRestore();
+    });
+
+    it('returns UnexpectedError (masked 500) when the retry also fails with an unrecognized cancellation reason', async () => {
+      ddbMock.on(TransactWriteCommand).rejects(buildCancellationError([{ Code: 'TransactionConflict' }, { Code: 'None' }, { Code: 'None' }]));
+      const errorSpy = jest.spyOn(require('@nestjs/common').Logger.prototype, 'error').mockImplementation();
+      jest.spyOn(require('@nestjs/common').Logger.prototype, 'warn').mockImplementation();
+      const repository = new DynamoTransactionRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.settleApproved(settleInput);
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('Unexpected');
+      expect(ddbMock.commandCalls(TransactWriteCommand)).toHaveLength(2);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('tx-1'));
+      errorSpy.mockRestore();
     });
 
     it('returns UnexpectedError when the fallback oversold update itself fails unexpectedly', async () => {
@@ -359,12 +429,26 @@ describe('DynamoTransactionRepository', () => {
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr().type).toBe('Unexpected');
     });
+
+    it('treats a TransactionCanceledException with no CancellationReasons at all as an unrecognized reason (retries once)', async () => {
+      ddbMock
+        .on(TransactWriteCommand)
+        .rejectsOnce(new TransactionCanceledException({ message: 'Transaction cancelled', $metadata: {} }))
+        .resolves({});
+      ddbMock.on(GetCommand).resolves({ Item: { ...storedItem, status: 'APPROVED' } });
+      jest.spyOn(require('@nestjs/common').Logger.prototype, 'warn').mockImplementation();
+      const repository = new DynamoTransactionRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.settleApproved(settleInput);
+
+      expect(result.isOk()).toBe(true);
+      expect(ddbMock.commandCalls(TransactWriteCommand)).toHaveLength(2);
+    });
   });
 
   describe('finalizeNonApproved', () => {
-    it('conditionally updates the status to a terminal non-approved value', async () => {
-      ddbMock.on(UpdateCommand).resolves({});
-      ddbMock.on(GetCommand).resolves({ Item: { ...storedItem, status: 'DECLINED' } });
+    it('conditionally updates the status to a terminal non-approved value via ReturnValues ALL_NEW (no re-read)', async () => {
+      ddbMock.on(UpdateCommand).resolves({ Attributes: { ...storedItem, status: 'DECLINED' } });
       const repository = new DynamoTransactionRepository(ddbMock as unknown as DynamoDBDocumentClient);
 
       const result = await repository.finalizeNonApproved({
@@ -378,6 +462,8 @@ describe('DynamoTransactionRepository', () => {
       expect(result._unsafeUnwrap().status).toBe('DECLINED');
       const call = ddbMock.commandCalls(UpdateCommand)[0].args[0].input;
       expect(call.ConditionExpression).toContain('=');
+      expect(call.ReturnValues).toBe('ALL_NEW');
+      expect(ddbMock.commandCalls(GetCommand)).toHaveLength(0);
     });
 
     it('re-reads and returns the current transaction on a benign race (already finalized)', async () => {
@@ -508,6 +594,26 @@ describe('DynamoTransactionRepository', () => {
       const placeholder = Object.keys(call.ExpressionAttributeNames!)[0];
       expect(call.ExpressionAttributeNames![placeholder]).toBe('reference');
       expect(call.KeyConditionExpression).toBe(`${placeholder} = :value`);
+    });
+
+    it('treats a response with no Items field at all as no match (defensive fallback)', async () => {
+      ddbMock.on(QueryCommand).resolves({});
+      const repository = new DynamoTransactionRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.findByReference('REF-unknown');
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toBeNull();
+    });
+
+    it('returns ValidationError when the matched item has corrupt data', async () => {
+      ddbMock.on(QueryCommand).resolves({ Items: [{ ...storedItem, unitPriceCents: -1 }] });
+      const repository = new DynamoTransactionRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.findByReference('REF-tx-1');
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('Validation');
     });
 
     it('returns null (not an error) when no transaction matches', async () => {

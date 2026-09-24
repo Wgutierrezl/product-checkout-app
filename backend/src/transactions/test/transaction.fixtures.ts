@@ -69,10 +69,20 @@ export class FakeTransactionRepository implements TransactionRepositoryPort {
     return okAsync({ transaction, wasCreated: true });
   }
 
+  /**
+   * Mirrors the real adapter's conditioned semantics (blocker fix: every
+   * write touching `status` must be guarded on still being PENDING): if the
+   * transaction is no longer PENDING, this is a benign race loser — return
+   * the CURRENT row unchanged rather than error or clobber it.
+   */
   updateGatewayResult(id: string, input: UpdateGatewayResultInput): AppResultAsync<Transaction> {
     const index = this.transactions.findIndex((transaction) => transaction.id === id);
     if (index === -1) {
       return errAsync(new NotFoundError(`Transaction ${id} not found`));
+    }
+
+    if (this.transactions[index].status !== 'PENDING') {
+      return okAsync(this.transactions[index]);
     }
 
     const updated: Transaction = {
