@@ -6,6 +6,8 @@ import {
   cardTokenConsumed,
   idempotencyKeyEnsured,
   idempotencyKeyRotated,
+  paymentAttemptResolved,
+  paymentAttemptStarted,
   stepChangeRequested,
   submitErrorSet,
   submitStatusSet,
@@ -117,6 +119,10 @@ export function SummaryContainer() {
     dispatch(idempotencyKeyEnsured());
     const idempotencyKey = store.getState().checkout.idempotencyKey as string;
     dispatch(submitStatusSet('submitting'));
+    // Persisted (see persistMiddleware) right before the risky network call,
+    // so a refresh mid-request can be resolved later via resumeInFlightPayment
+    // instead of blindly rotating the key.
+    dispatch(paymentAttemptStarted());
 
     try {
       const transaction = await createTransaction({
@@ -152,6 +158,7 @@ export function SummaryContainer() {
       // prerequisite checks `cardToken !== null` (see checkoutSlice.ts).
       dispatch(stepChangeRequested('RESULT'));
       dispatch(cardTokenConsumed());
+      dispatch(paymentAttemptResolved());
       // NOT rotated here: a 201/PENDING response is not yet a definitive
       // outcome (the transaction may still settle to DECLINED/ERROR via
       // polling). The idempotencyKey is only rotated on a definite outcome
@@ -169,6 +176,7 @@ export function SummaryContainer() {
           dispatch(stepChangeRequested('PRODUCT'));
           dispatch(fetchProducts());
           dispatch(submitStatusSet('failed'));
+          dispatch(paymentAttemptResolved());
           return;
         }
         if (error.status === 400) {
@@ -180,6 +188,7 @@ export function SummaryContainer() {
           dispatch(idempotencyKeyRotated());
           dispatch(stepChangeRequested('DETAILS'));
           dispatch(submitStatusSet('failed'));
+          dispatch(paymentAttemptResolved());
           return;
         }
         if (error.status === 0) {
@@ -188,6 +197,7 @@ export function SummaryContainer() {
           // SAME key) for a same-tap retry from SUMMARY, no re-tokenize needed.
           dispatch(submitErrorSet(error.message));
           dispatch(submitStatusSet('failed'));
+          dispatch(paymentAttemptResolved());
           return;
         }
         // 5xx: the backend DID receive the request and may have forwarded
@@ -202,11 +212,13 @@ export function SummaryContainer() {
         dispatch(cardTokenConsumed());
         dispatch(stepChangeRequested('DETAILS'));
         dispatch(submitStatusSet('failed'));
+        dispatch(paymentAttemptResolved());
         return;
       }
 
       dispatch(submitErrorSet(error instanceof Error ? error.message : 'Payment failed. Please try again.'));
       dispatch(submitStatusSet('failed'));
+      dispatch(paymentAttemptResolved());
     }
   }
 

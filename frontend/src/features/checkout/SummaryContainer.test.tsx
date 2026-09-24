@@ -184,6 +184,7 @@ describe('SummaryContainer', () => {
     expect(transaction.status).toBe('PENDING');
     expect(checkout.cardToken).toBeNull();
     expect(checkout.idempotencyKey).toBe(sentKey);
+    expect(checkout.submitAttempted).toBe(false);
   });
 
   it('disables Pay (double-submit guard) while a submission is in flight', async () => {
@@ -195,6 +196,17 @@ describe('SummaryContainer', () => {
     await user.click(screen.getByRole('button', { name: /^pay$/i }));
 
     expect(await screen.findByRole('button', { name: /processing/i })).toBeDisabled();
+  });
+
+  it('marks submitAttempted true right before the request is sent, so a refresh mid-request can be resolved later', async () => {
+    mockedCreateTransaction.mockReturnValue(new Promise(() => {}));
+    const user = userEvent.setup();
+    const { store } = renderWithStore();
+    await acceptBoth(user);
+
+    await user.click(screen.getByRole('button', { name: /^pay$/i }));
+
+    await waitFor(() => expect(store.getState().checkout.submitAttempted).toBe(true));
   });
 
   it('does not call createTransaction a second time when Pay is clicked again while submitting', async () => {
@@ -221,6 +233,7 @@ describe('SummaryContainer', () => {
       await waitFor(() => expect(store.getState().checkout.step).toBe('PRODUCT'));
       expect(store.getState().checkout.submitError).toBe('Insufficient stock');
       expect(mockedFetchProducts).toHaveBeenCalledTimes(1);
+      expect(store.getState().checkout.submitAttempted).toBe(false);
     });
 
     it('400 validation: shows the message and routes back to DETAILS to re-enter the card, rotating the key', async () => {
@@ -237,6 +250,7 @@ describe('SummaryContainer', () => {
       expect(checkout.submitError).toBe('Invalid installments');
       expect(checkout.cardToken).toBeNull();
       expect(checkout.idempotencyKey).not.toBe(existingKey);
+      expect(checkout.submitAttempted).toBe(false);
     });
 
     it('network (status 0): never reached the backend -- keeps the SAME key and the SAME card token, stays on SUMMARY for a retry', async () => {
@@ -253,6 +267,7 @@ describe('SummaryContainer', () => {
       expect(checkout.step).toBe('SUMMARY');
       expect(checkout.idempotencyKey).toBe(existingKey);
       expect(checkout.cardToken).toBe('tok_test_card');
+      expect(checkout.submitAttempted).toBe(false);
     });
 
     it('5xx: the backend received the request -- treats the token as spent and routes to DETAILS to re-tokenize, but KEEPS the same key (safe idempotent replay on retry)', async () => {
@@ -269,6 +284,7 @@ describe('SummaryContainer', () => {
       expect(checkout.submitError).toBe('Payment provider unavailable');
       expect(checkout.cardToken).toBeNull();
       expect(checkout.idempotencyKey).toBe(existingKey);
+      expect(checkout.submitAttempted).toBe(false);
     });
 
     it('falls back to a generic acceptance-fetch-before-pay error, staying on SUMMARY with the same key', async () => {
@@ -309,6 +325,7 @@ describe('SummaryContainer', () => {
 
     await waitFor(() => expect(store.getState().checkout.submitStatus).toBe('failed'));
     expect(store.getState().checkout.submitError).toBe('boom');
+    expect(store.getState().checkout.submitAttempted).toBe(false);
   });
 
   it('ignores a pre-pay acceptance-fetch REJECTION that resolves after the container has unmounted', async () => {
