@@ -98,6 +98,7 @@
 }
 
 .stepperButton {
+  position: relative;
   width: 28px;
   height: 28px;
   display: inline-flex;
@@ -110,6 +111,14 @@
   font-weight: 700;
   cursor: pointer;
   transition: background-color var(--transition-fast);
+}
+
+/* Expands the tap target to the recommended 44x44px minimum without
+   growing the visual footprint of the button (WCAG 2.5.5 / Apple HIG). */
+.stepperButton::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
 }
 
 .stepperButton:hover:not(:disabled) {
