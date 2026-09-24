@@ -108,6 +108,44 @@ describe('HttpPaymentGatewayAdapter', () => {
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr().type).toBe('PaymentGatewayError');
     });
+
+    it('maps a response missing data.presigned_acceptance to PaymentGatewayError (does not throw)', async () => {
+      global.fetch = jest
+        .fn()
+        .mockResolvedValue(
+          jsonResponse({ data: { presigned_personal_data_auth: { acceptance_token: 'x', permalink: 'y' } } }),
+        ) as unknown as typeof fetch;
+      const adapter = buildAdapter();
+
+      const result = await adapter.getAcceptanceTokens();
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('PaymentGatewayError');
+    });
+
+    it('maps a response with no data envelope at all to PaymentGatewayError (does not throw)', async () => {
+      global.fetch = jest.fn().mockResolvedValue(jsonResponse({})) as unknown as typeof fetch;
+      const adapter = buildAdapter();
+
+      const result = await adapter.getAcceptanceTokens();
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('PaymentGatewayError');
+    });
+
+    it('maps a non-JSON response body to PaymentGatewayError (does not throw)', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.reject(new SyntaxError('Unexpected token in JSON')),
+      }) as unknown as typeof fetch;
+      const adapter = buildAdapter();
+
+      const result = await adapter.getAcceptanceTokens();
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('PaymentGatewayError');
+    });
   });
 
   describe('createCardTransaction', () => {
@@ -170,6 +208,40 @@ describe('HttpPaymentGatewayAdapter', () => {
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr().type).toBe('PaymentGatewayError');
     });
+
+    it('maps a response with no data envelope at all to PaymentGatewayError (does not throw)', async () => {
+      global.fetch = jest.fn().mockResolvedValue(jsonResponse({})) as unknown as typeof fetch;
+      const adapter = buildAdapter();
+
+      const result = await adapter.createCardTransaction(input);
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('PaymentGatewayError');
+    });
+
+    it('maps a response missing data.id/status to PaymentGatewayError (does not throw)', async () => {
+      global.fetch = jest
+        .fn()
+        .mockResolvedValue(jsonResponse({ data: {} })) as unknown as typeof fetch;
+      const adapter = buildAdapter();
+
+      const result = await adapter.createCardTransaction(input);
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('PaymentGatewayError');
+    });
+
+    it('maps an unknown gateway transaction status to PaymentGatewayError', async () => {
+      global.fetch = jest
+        .fn()
+        .mockResolvedValue(jsonResponse({ data: { id: 'gw-tx-3', status: 'SOME_FUTURE_STATUS' } })) as unknown as typeof fetch;
+      const adapter = buildAdapter();
+
+      const result = await adapter.createCardTransaction(input);
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('PaymentGatewayError');
+    });
   });
 
   describe('getTransaction', () => {
@@ -193,6 +265,30 @@ describe('HttpPaymentGatewayAdapter', () => {
       const adapter = buildAdapter();
 
       const result = await adapter.getTransaction('unknown-id');
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('PaymentGatewayError');
+    });
+
+    it('maps a response missing data.id/status to PaymentGatewayError (does not throw)', async () => {
+      global.fetch = jest
+        .fn()
+        .mockResolvedValue(jsonResponse({ data: { id: 'gw-tx-1' } })) as unknown as typeof fetch;
+      const adapter = buildAdapter();
+
+      const result = await adapter.getTransaction('gw-tx-1');
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('PaymentGatewayError');
+    });
+
+    it('maps an unknown gateway transaction status to PaymentGatewayError', async () => {
+      global.fetch = jest
+        .fn()
+        .mockResolvedValue(jsonResponse({ data: { id: 'gw-tx-1', status: 'MADE_UP' } })) as unknown as typeof fetch;
+      const adapter = buildAdapter();
+
+      const result = await adapter.getTransaction('gw-tx-1');
 
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr().type).toBe('PaymentGatewayError');
