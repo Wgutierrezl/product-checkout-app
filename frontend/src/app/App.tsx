@@ -2,6 +2,7 @@ import { ProductListContainer } from '../features/catalog/ProductListContainer';
 import { PaymentModalContainer } from '../features/checkout/PaymentModalContainer';
 import { SummaryContainer } from '../features/checkout/SummaryContainer';
 import { useResumeInFlightPayment } from '../features/checkout/useResumeInFlightPayment';
+import { ResultContainer } from '../features/transaction/ResultContainer';
 import { useAppSelector } from './hooks';
 import styles from './App.module.css';
 
@@ -21,6 +22,7 @@ export function App() {
       </main>
       {step === 'DETAILS' && <PaymentModalContainer />}
       {step === 'SUMMARY' && <SummaryContainer />}
+      {step === 'RESULT' && <ResultContainer />}
     </div>
   );
 }

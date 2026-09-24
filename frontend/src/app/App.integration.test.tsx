@@ -1,5 +1,6 @@
 import { Provider } from 'react-redux';
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { App } from './App';
 import { createAppStore } from './store';
 import { PERSISTED_VERSION, STORAGE_KEY } from '../shared/persistence/persistMiddleware';
@@ -172,6 +173,66 @@ describe('App refresh resilience (integration)', () => {
       expect(store.getState().checkout.step).toBe('DETAILS');
       expect(store.getState().checkout.idempotencyKey).toBe(IN_FLIGHT_KEY);
       expect(store.getState().transaction.id).toBeNull();
+    });
+  });
+
+  describe('"Back to store" from a final RESULT status', () => {
+    it('resets checkout and transaction, clears persisted storage, and refetches the catalog with updated stock', async () => {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          version: PERSISTED_VERSION,
+          checkout: {
+            step: 'RESULT',
+            productId: 'p1',
+            quantity: 1,
+            customer: { fullName: 'Jane Doe', email: 'jane@example.com', phone: '+573001234567' },
+            delivery: { address: 'Cra 1 # 2-3', city: 'Bogota', region: 'Cundinamarca' },
+            installments: 1,
+            idempotencyKey: 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f',
+            cardSummary: null,
+            submitAttempted: false,
+          },
+          transaction: { id: 't1', status: 'APPROVED', pollStartedAt: 123 },
+        }),
+      );
+      const RESTOCKED_PRODUCT = {
+        id: 'p1',
+        name: 'Wireless Headphones',
+        description: 'Noise-cancelling',
+        price: 150_000,
+        currency: 'COP' as const,
+        stock: 9,
+        imageUrl: 'https://img.test/p1.png',
+      };
+      mockedFetchProducts.mockReset();
+      mockedFetchProducts.mockResolvedValueOnce([]).mockResolvedValueOnce([RESTOCKED_PRODUCT]);
+
+      const store = createAppStore();
+      render(
+        <Provider store={store}>
+          <App />
+        </Provider>,
+      );
+      const user = userEvent.setup();
+      await screen.findByRole('heading', { name: /approved/i });
+
+      await user.click(screen.getByRole('button', { name: /back to store/i }));
+
+      await waitFor(() => expect(store.getState().checkout.step).toBe('PRODUCT'));
+      expect(store.getState().transaction.id).toBeNull();
+      expect(store.getState().checkout.productId).toBeNull();
+      // persistMiddleware re-persists on every subsequent action (including
+      // fetchProducts' own pending/fulfilled actions dispatched right after
+      // Back to store), so clearPersistedState() can't leave the STORAGE KEY
+      // permanently absent -- what it guarantees is that whatever gets
+      // re-persisted reflects the fully-reset (all-default) state, with no
+      // stale checkout/transaction data surviving the reset.
+      const persisted = JSON.parse(localStorage.getItem(STORAGE_KEY) as string);
+      expect(persisted.checkout).toMatchObject({ step: 'PRODUCT', productId: null, customer: null, delivery: null });
+      expect(persisted.transaction).toMatchObject({ id: null, status: null });
+      expect(mockedFetchProducts).toHaveBeenCalledTimes(2);
+      expect(await screen.findByText(RESTOCKED_PRODUCT.name)).toBeInTheDocument();
     });
   });
 });
