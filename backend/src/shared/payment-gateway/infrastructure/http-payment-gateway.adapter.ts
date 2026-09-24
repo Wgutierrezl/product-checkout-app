@@ -11,6 +11,8 @@ import {
   CreateCardTransactionInput,
   GatewayTransactionResult,
   GatewayTransactionStatus,
+  isGatewayTransactionStatus,
+  isRecord,
 } from '../domain/payment-gateway.types';
 
 interface AcceptanceTokenInfoShape {
@@ -29,19 +31,30 @@ interface GatewayTransactionResponse {
   data: {
     id: string;
     status: GatewayTransactionStatus;
+    amount_in_cents?: number;
+    currency?: string;
   };
 }
 
-const KNOWN_GATEWAY_STATUSES: readonly string[] = [
-  'PENDING',
-  'APPROVED',
-  'DECLINED',
-  'VOIDED',
-  'ERROR',
-];
+interface GatewayTransactionListResponse {
+  data: Array<{ id: string; status: GatewayTransactionStatus }>;
+}
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+/**
+ * Thrown by `fetchJson` for a non-2xx HTTP response, carrying whether the
+ * status is a DEFINITE client-side rejection (4xx — the gateway explicitly
+ * rejected the request before processing it) or an AMBIGUOUS one (5xx — the
+ * gateway may have processed the request before failing to respond
+ * correctly). Any other thrown error (network failure, timeout/abort) has no
+ * HTTP status at all and is always treated as ambiguous — see `request()`.
+ */
+class GatewayHttpStatusError extends Error {
+  constructor(
+    message: string,
+    readonly ambiguous: boolean,
+  ) {
+    super(message);
+  }
 }
 
 function isAcceptanceTokenInfoShape(value: unknown): value is AcceptanceTokenInfoShape {
@@ -63,16 +76,30 @@ function isMerchantAcceptanceResponse(value: unknown): value is MerchantAcceptan
   );
 }
 
-function isGatewayTransactionStatus(value: unknown): value is GatewayTransactionStatus {
-  return typeof value === 'string' && KNOWN_GATEWAY_STATUSES.includes(value);
-}
-
 function isGatewayTransactionResponse(value: unknown): value is GatewayTransactionResponse {
   if (!isRecord(value) || !isRecord(value.data)) {
     return false;
   }
+  const { id, status, amount_in_cents: amountInCents, currency } = value.data;
 
-  return typeof value.data.id === 'string' && isGatewayTransactionStatus(value.data.status);
+  if (typeof id !== 'string' || !isGatewayTransactionStatus(status)) {
+    return false;
+  }
+  if (amountInCents !== undefined && typeof amountInCents !== 'number') {
+    return false;
+  }
+  if (currency !== undefined && typeof currency !== 'string') {
+    return false;
+  }
+  return true;
+}
+
+function isGatewayTransactionListItem(value: unknown): value is { id: string; status: GatewayTransactionStatus } {
+  return isRecord(value) && typeof value.id === 'string' && isGatewayTransactionStatus(value.status);
+}
+
+function isGatewayTransactionListResponse(value: unknown): value is GatewayTransactionListResponse {
+  return isRecord(value) && Array.isArray(value.data) && value.data.every(isGatewayTransactionListItem);
 }
 
 /**
@@ -143,8 +170,37 @@ export class HttpPaymentGatewayAdapter implements PaymentGatewayPort {
       .map((response) => this.toGatewayResult(response));
   }
 
+  /**
+   * `GET /transactions?reference={reference}` — live-confirmed against the
+   * sandbox to return `{ data: [...], meta: {} }`, an ARRAY (empty when no
+   * transaction matches that reference yet). Used for lazy-poll when a
+   * PENDING transaction has no `gatewayTransactionId` (see
+   * `PaymentGatewayPort.getTransactionByReference`).
+   */
+  getTransactionByReference(reference: string): AppResultAsync<GatewayTransactionResult | null> {
+    return this.request(
+      `${this.config.url}/transactions?reference=${encodeURIComponent(reference)}`,
+      { method: 'GET', headers: { Authorization: `Bearer ${this.config.privateKey}` } },
+    )
+      .andThen((body) => this.validate(body, isGatewayTransactionListResponse, 'transaction list'))
+      .map((response) => {
+        if (response.data.length > 1) {
+          this.logger.warn(
+            `Gateway returned multiple transactions for one reference lookup (reference=${reference}), ` +
+              'expected at most one. Using the first match.',
+          );
+        }
+        return response.data.length > 0 ? this.toGatewayResult({ data: response.data[0] }) : null;
+      });
+  }
+
   private toGatewayResult(response: GatewayTransactionResponse): GatewayTransactionResult {
-    return { gatewayTransactionId: response.data.id, status: response.data.status };
+    return {
+      gatewayTransactionId: response.data.id,
+      status: response.data.status,
+      amountInCents: response.data.amount_in_cents,
+      currency: response.data.currency,
+    };
   }
 
   /**
@@ -155,6 +211,11 @@ export class HttpPaymentGatewayAdapter implements PaymentGatewayPort {
    * body MUST be validated with a type guard via `.andThen()` (which DOES
    * short-circuit on `err`) before any `.map()` is allowed to destructure it.
    */
+  /**
+   * A malformed body arriving after an otherwise-successful (2xx) HTTP
+   * response is always AMBIGUOUS: the gateway responded, which suggests it
+   * did process the request, we just couldn't parse its confirmation.
+   */
   private validate<T>(
     body: unknown,
     guard: (value: unknown) => value is T,
@@ -162,7 +223,7 @@ export class HttpPaymentGatewayAdapter implements PaymentGatewayPort {
   ): AppResult<T> {
     if (!guard(body)) {
       this.logger.error(`Payment gateway returned a malformed ${context} response`);
-      return err(new PaymentGatewayError(`Payment gateway returned a malformed ${context} response`));
+      return err(new PaymentGatewayError(`Payment gateway returned a malformed ${context} response`, true));
     }
 
     return ok(body);
@@ -172,7 +233,12 @@ export class HttpPaymentGatewayAdapter implements PaymentGatewayPort {
     return ResultAsync.fromPromise(this.fetchJson(url, init), (error) => {
       const message = (error as Error).message;
       this.logger.error(`Payment gateway request to ${url} failed: ${message}`);
-      return new PaymentGatewayError(`Payment gateway request failed: ${message}`);
+      // A `GatewayHttpStatusError` carries its own classification (4xx =
+      // definite, 5xx = ambiguous). Anything else (network failure, abort/
+      // timeout) has no HTTP status to reason about at all — always
+      // ambiguous, since we genuinely don't know if the gateway received it.
+      const ambiguous = error instanceof GatewayHttpStatusError ? error.ambiguous : true;
+      return new PaymentGatewayError(`Payment gateway request failed: ${message}`, ambiguous);
     });
   }
 
@@ -184,7 +250,11 @@ export class HttpPaymentGatewayAdapter implements PaymentGatewayPort {
       const response = await fetch(url, { ...init, signal: controller.signal });
 
       if (!response.ok) {
-        throw new Error(`Payment gateway responded with status ${response.status}`);
+        const isDefiniteRejection = response.status >= 400 && response.status < 500;
+        throw new GatewayHttpStatusError(
+          `Payment gateway responded with status ${response.status}`,
+          !isDefiniteRejection,
+        );
       }
 
       return await response.json();

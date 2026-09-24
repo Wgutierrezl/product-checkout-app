@@ -21,6 +21,15 @@ export interface PaymentGatewayPort {
 
   /** `GET /transactions/{gatewayTransactionId}` — used for lazy-poll (PR6). */
   getTransaction(gatewayTransactionId: string): AppResultAsync<GatewayTransactionResult>;
+
+  /**
+   * `GET /transactions?reference={reference}` — live-confirmed to exist on
+   * the sandbox. Used for lazy-poll when a PENDING transaction has no
+   * `gatewayTransactionId` yet (an ambiguous synchronous charge failure left
+   * it that way — see `CreateTransactionUseCase`). Returns `null`, never an
+   * error, when no matching gateway transaction is found.
+   */
+  getTransactionByReference(reference: string): AppResultAsync<GatewayTransactionResult | null>;
 }
 
 export const PAYMENT_GATEWAY_PORT = Symbol('PAYMENT_GATEWAY_PORT');

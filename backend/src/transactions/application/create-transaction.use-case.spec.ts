@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 
+import { buildDelivery, FakeDeliveryRepository } from '../../deliveries/test/delivery.fixtures';
 import { DomainError, PaymentGatewayError, UnexpectedError } from '../../shared/errors/domain-error';
 import { ClockPort } from '../../shared/ports/clock.port';
 import { IdGeneratorPort } from '../../shared/ports/id-generator.port';
@@ -11,9 +12,10 @@ import { buildCustomer, FakeCustomerRepository } from '../../customers/test/cust
 import { buildProduct, FakeProductRepository } from '../../products/test/product.fixtures';
 import { Stock } from '../../products/domain/value-objects/stock.vo';
 import { Transaction } from '../domain/transaction.entity';
-import { UpdateGatewayResultInput } from '../domain/transaction.repository.port';
+import { FinalizeNonApprovedInput, SettleApprovedInput, UpdateGatewayResultInput } from '../domain/transaction.repository.port';
 import { FakeTransactionRepository } from '../test/transaction.fixtures';
 import { CreateTransactionCommand, CreateTransactionUseCase } from './create-transaction.use-case';
+import { SettleTransactionUseCase } from './settle-transaction.use-case';
 
 function buildFakeClock(initialTimeMs: number): ClockPort {
   return { now: () => new Date(initialTimeMs) };
@@ -53,24 +55,49 @@ class RecordingGatewayPort implements PaymentGatewayPort {
   getTransaction(): never {
     throw new Error('not used in this suite');
   }
+
+  getTransactionByReference(): never {
+    throw new Error('not used in this suite');
+  }
 }
 
 /**
  * Wraps a real `FakeTransactionRepository` but lets a test queue scripted
- * `updateGatewayResult` outcomes (consumed in call order) before falling
- * back to the real delegate — used to simulate a transient DB failure
- * followed by a successful retry, or a persistent failure.
+ * outcomes for `updateGatewayResult`/`settleApproved`/`finalizeNonApproved`
+ * (consumed in call order) before falling back to the real delegate — used
+ * to simulate a transient DB failure followed by a successful retry, or a
+ * persistent failure.
  */
 class FlakyTransactionRepository extends FakeTransactionRepository {
   private readonly updateGatewayResultQueue: Array<() => AppResultAsync<Transaction>> = [];
+  private readonly settleApprovedQueue: Array<() => AppResultAsync<Transaction>> = [];
+  private readonly finalizeNonApprovedQueue: Array<() => AppResultAsync<Transaction>> = [];
 
   queueUpdateGatewayResultFailure(error: DomainError): void {
     this.updateGatewayResultQueue.push(() => errAsync(error));
   }
 
+  queueSettleApprovedFailure(error: DomainError): void {
+    this.settleApprovedQueue.push(() => errAsync(error));
+  }
+
+  queueFinalizeNonApprovedFailure(error: DomainError): void {
+    this.finalizeNonApprovedQueue.push(() => errAsync(error));
+  }
+
   updateGatewayResult(id: string, input: UpdateGatewayResultInput): AppResultAsync<Transaction> {
     const next = this.updateGatewayResultQueue.shift();
     return next ? next() : super.updateGatewayResult(id, input);
+  }
+
+  settleApproved(input: SettleApprovedInput): AppResultAsync<Transaction> {
+    const next = this.settleApprovedQueue.shift();
+    return next ? next() : super.settleApproved(input);
+  }
+
+  finalizeNonApproved(input: FinalizeNonApprovedInput): AppResultAsync<Transaction> {
+    const next = this.finalizeNonApprovedQueue.shift();
+    return next ? next() : super.finalizeNonApproved(input);
   }
 }
 
@@ -98,17 +125,25 @@ function buildUseCase(options: {
   products?: FakeProductRepository;
   customers?: FakeCustomerRepository;
   transactions?: FakeTransactionRepository;
+  deliveries?: FakeDeliveryRepository;
   gateway: PaymentGatewayPort;
   clock?: ClockPort;
   ids?: IdGeneratorPort;
 }) {
+  const transactions = options.transactions ?? new FakeTransactionRepository();
+  const clock = options.clock ?? buildFakeClock(0);
+  const ids = options.ids ?? new SequentialIdGenerator();
+  const settleTransaction = new SettleTransactionUseCase(transactions, ids, clock);
+
   return new CreateTransactionUseCase(
     options.products ?? new FakeProductRepository([buildProduct({ id: 'prod-1', stock: Stock.create(10)._unsafeUnwrap() })]),
     options.customers ?? new FakeCustomerRepository(),
-    options.transactions ?? new FakeTransactionRepository(),
+    transactions,
+    options.deliveries ?? new FakeDeliveryRepository(),
     options.gateway,
-    options.clock ?? buildFakeClock(0),
-    options.ids ?? new SequentialIdGenerator(),
+    settleTransaction,
+    clock,
+    ids,
     FEES,
     INTEGRITY_SECRET,
   );
@@ -123,10 +158,70 @@ describe('CreateTransactionUseCase', () => {
     const result = await useCase.execute(buildCommand());
 
     expect(result.isOk()).toBe(true);
-    const transaction = result._unsafeUnwrap();
+    const { transaction } = result._unsafeUnwrap();
     expect(transaction.status).toBe('APPROVED');
     expect(transaction.gatewayTransactionId).toBe('gw-1');
     expect(transaction.totalAmount.valueInCents).toBe(150_000 * 2 + 250_000 + 800_000);
+  });
+
+  it('routes a synchronous APPROVED gateway result through SettleTransaction (stock decrement + delivery)', async () => {
+    const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } });
+    const transactions = new FakeTransactionRepository();
+    const useCase = buildUseCase({ transactions, gateway });
+
+    const result = await useCase.execute(buildCommand());
+
+    expect(result.isOk()).toBe(true);
+    expect(transactions.settleApprovedCalls).toHaveLength(1);
+    expect(transactions.settleApprovedCalls[0]).toMatchObject({
+      transactionId: IDEMPOTENCY_KEY,
+      productId: 'prod-1',
+      gatewayTransactionId: 'gw-1',
+    });
+  });
+
+  it('embeds the delivery in the response when the synchronous result is APPROVED', async () => {
+    const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } });
+    const delivery = buildDelivery({ transactionId: IDEMPOTENCY_KEY });
+    const deliveries = new FakeDeliveryRepository([delivery]);
+    const useCase = buildUseCase({ gateway, deliveries });
+
+    const result = await useCase.execute(buildCommand());
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap().delivery).toEqual(delivery);
+  });
+
+  it('does not embed a delivery when the synchronous result is not APPROVED', async () => {
+    const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'PENDING' } });
+    const useCase = buildUseCase({ gateway });
+
+    const result = await useCase.execute(buildCommand());
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap().delivery).toBeNull();
+  });
+
+  it('does NOT route a synchronous DECLINED gateway result through settleApproved', async () => {
+    const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'DECLINED' } });
+    const transactions = new FakeTransactionRepository();
+    const useCase = buildUseCase({ transactions, gateway });
+
+    await useCase.execute(buildCommand());
+
+    expect(transactions.settleApprovedCalls).toHaveLength(0);
+  });
+
+  it('routes a synchronous PENDING gateway result through SettleTransaction too (no unconditioned write)', async () => {
+    const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'PENDING' } });
+    const transactions = new FakeTransactionRepository();
+    const useCase = buildUseCase({ transactions, gateway });
+
+    const result = await useCase.execute(buildCommand());
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap().transaction.status).toBe('PENDING');
+    expect(result._unsafeUnwrap().transaction.gatewayTransactionId).toBe('gw-1');
   });
 
   it('creates a new customer when none exists for the given email', async () => {
@@ -154,7 +249,7 @@ describe('CreateTransactionUseCase', () => {
 
     const result = await useCase.execute(buildCommand());
 
-    expect(result._unsafeUnwrap().customerId).toBe('cust-existing');
+    expect(result._unsafeUnwrap().transaction.customerId).toBe('cust-existing');
   });
 
   it('returns NotFoundError for an unknown product and makes no gateway call', async () => {
@@ -193,18 +288,53 @@ describe('CreateTransactionUseCase', () => {
     expect(gateway.lastCreateCardTransactionInput).toBeUndefined();
   });
 
-  it('marks the transaction as ERROR and propagates the error when the gateway call fails', async () => {
-    const gatewayError = new PaymentGatewayError('Payment gateway request failed: network down');
-    const gateway = new RecordingGatewayPort({ ok: false, error: gatewayError });
-    const transactions = new FakeTransactionRepository();
-    const useCase = buildUseCase({ transactions, gateway });
+  describe('gateway CALL failure classification (definite vs ambiguous)', () => {
+    it('marks the transaction ERROR and propagates the error for a DEFINITE gateway rejection (ambiguous: false)', async () => {
+      const gatewayError = new PaymentGatewayError('Payment gateway request failed: 422', false);
+      const gateway = new RecordingGatewayPort({ ok: false, error: gatewayError });
+      const transactions = new FakeTransactionRepository();
+      const useCase = buildUseCase({ transactions, gateway });
 
-    const result = await useCase.execute(buildCommand());
+      const result = await useCase.execute(buildCommand());
 
-    expect(result.isErr()).toBe(true);
-    expect(result._unsafeUnwrapErr()).toBe(gatewayError);
-    const stored = await transactions.findById(IDEMPOTENCY_KEY);
-    expect(stored._unsafeUnwrap().status).toBe('ERROR');
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr()).toBe(gatewayError);
+      const stored = await transactions.findById(IDEMPOTENCY_KEY);
+      expect(stored._unsafeUnwrap().status).toBe('ERROR');
+    });
+
+    it('leaves the transaction PENDING (no gatewayTransactionId) and resolves Ok for an AMBIGUOUS gateway failure (ambiguous: true)', async () => {
+      const gatewayError = new PaymentGatewayError('Payment gateway request failed: timeout', true);
+      const gateway = new RecordingGatewayPort({ ok: false, error: gatewayError });
+      const transactions = new FakeTransactionRepository();
+      const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      const useCase = buildUseCase({ transactions, gateway });
+
+      const result = await useCase.execute(buildCommand());
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap().transaction.status).toBe('PENDING');
+      expect(result._unsafeUnwrap().transaction.gatewayTransactionId).toBeUndefined();
+      const stored = await transactions.findById(IDEMPOTENCY_KEY);
+      expect(stored._unsafeUnwrap().status).toBe('PENDING');
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Ambiguous'));
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(IDEMPOTENCY_KEY));
+      errorSpy.mockRestore();
+    });
+
+    it('never calls settleApproved/finalizeNonApproved for an ambiguous failure', async () => {
+      const gatewayError = new PaymentGatewayError('timeout', true);
+      const gateway = new RecordingGatewayPort({ ok: false, error: gatewayError });
+      const transactions = new FakeTransactionRepository();
+      const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      const useCase = buildUseCase({ transactions, gateway });
+
+      await useCase.execute(buildCommand());
+
+      expect(transactions.settleApprovedCalls).toHaveLength(0);
+      expect(transactions.finalizeNonApprovedCalls).toHaveLength(0);
+      errorSpy.mockRestore();
+    });
   });
 
   it('stores a synchronously DECLINED gateway status as a successful (non-error) result', async () => {
@@ -214,7 +344,7 @@ describe('CreateTransactionUseCase', () => {
     const result = await useCase.execute(buildCommand());
 
     expect(result.isOk()).toBe(true);
-    expect(result._unsafeUnwrap().status).toBe('DECLINED');
+    expect(result._unsafeUnwrap().transaction.status).toBe('DECLINED');
   });
 
   it('builds the integrity signature from the persisted reference and computed total', async () => {
@@ -244,7 +374,7 @@ describe('CreateTransactionUseCase', () => {
 
     const result = await useCase.execute(buildCommand());
 
-    expect(result._unsafeUnwrap().id).toBe(IDEMPOTENCY_KEY);
+    expect(result._unsafeUnwrap().transaction.id).toBe(IDEMPOTENCY_KEY);
   });
 
   describe('idempotent replay (same idempotencyKey)', () => {
@@ -262,7 +392,7 @@ describe('CreateTransactionUseCase', () => {
 
       expect(second.isOk()).toBe(true);
       expect(second._unsafeUnwrap()).toEqual(first._unsafeUnwrap());
-      expect(second._unsafeUnwrap().gatewayTransactionId).toBe('gw-1');
+      expect(second._unsafeUnwrap().transaction.gatewayTransactionId).toBe('gw-1');
       expect(replayGateway.lastCreateCardTransactionInput).toBeUndefined();
     });
   });
@@ -278,16 +408,16 @@ describe('CreateTransactionUseCase', () => {
       errorSpy.mockRestore();
     });
 
-    it('retries updateGatewayResult once and succeeds after a transient DB failure', async () => {
+    it('retries settlement once and succeeds after a transient DB failure (APPROVED routes through settleApproved)', async () => {
       const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } });
       const transactions = new FlakyTransactionRepository();
-      transactions.queueUpdateGatewayResultFailure(new UnexpectedError('DynamoDB throttled'));
+      transactions.queueSettleApprovedFailure(new UnexpectedError('DynamoDB throttled'));
       const useCase = buildUseCase({ transactions, gateway });
 
       const result = await useCase.execute(buildCommand());
 
       expect(result.isOk()).toBe(true);
-      expect(result._unsafeUnwrap().status).toBe('APPROVED');
+      expect(result._unsafeUnwrap().transaction.status).toBe('APPROVED');
       const stored = await transactions.findById(IDEMPOTENCY_KEY);
       expect(stored._unsafeUnwrap().status).toBe('APPROVED');
       expect(errorSpy).toHaveBeenCalledTimes(1);
@@ -300,28 +430,69 @@ describe('CreateTransactionUseCase', () => {
       expect(logged).not.toContain('tok_test_card');
     });
 
-    it('returns the persistence error when the retry also fails too', async () => {
+    it('returns the persistence error when the retry also fails too, and NEVER marks the transaction ERROR (the gateway already approved and charged the card)', async () => {
       const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } });
       const transactions = new FlakyTransactionRepository();
       const secondFailure = new UnexpectedError('DynamoDB still throttled');
-      transactions.queueUpdateGatewayResultFailure(new UnexpectedError('DynamoDB throttled'));
-      transactions.queueUpdateGatewayResultFailure(secondFailure);
+      transactions.queueSettleApprovedFailure(new UnexpectedError('DynamoDB throttled'));
+      transactions.queueSettleApprovedFailure(secondFailure);
       const useCase = buildUseCase({ transactions, gateway });
 
       const result = await useCase.execute(buildCommand());
 
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr()).toBe(secondFailure);
-      expect(errorSpy).toHaveBeenCalledTimes(1);
+      // CRITICAL: the persisted row must stay PENDING, never ERROR — the
+      // gateway call itself succeeded (APPROVED), only OUR write failed.
+      // Misclassifying this as a gateway rejection would falsely mark a
+      // successfully-charged transaction as ERROR.
+      const stored = await transactions.findById(IDEMPOTENCY_KEY);
+      expect(stored._unsafeUnwrap().status).toBe('PENDING');
+      // Best-effort: the gatewayTransactionId is still recorded via the
+      // lightweight conditioned write so lazy-poll/webhook can resolve it later.
+      expect(stored._unsafeUnwrap().gatewayTransactionId).toBe('gw-1');
+      expect(transactions.finalizeNonApprovedCalls).toHaveLength(0);
+      expect(errorSpy).toHaveBeenCalledTimes(2);
       expect(errorSpy.mock.calls[0][0] as string).toContain('retrying once');
+      const secondLog = errorSpy.mock.calls[1][0] as string;
+      expect(secondLog).toContain(IDEMPOTENCY_KEY);
+      expect(secondLog).toContain('leaving transaction PENDING');
     });
 
-    it('propagates the ORIGINAL PaymentGatewayError and logs the secondary DB error when persisting ERROR status also fails', async () => {
-      const gatewayError = new PaymentGatewayError('Payment gateway request failed: network down');
+    it('swallows a secondary failure when even the best-effort fallback write fails, and still returns the original retry error', async () => {
+      const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } });
+      const transactions = new FlakyTransactionRepository();
+      const secondFailure = new UnexpectedError('DynamoDB still throttled');
+      transactions.queueSettleApprovedFailure(new UnexpectedError('DynamoDB throttled'));
+      transactions.queueSettleApprovedFailure(secondFailure);
+      transactions.queueUpdateGatewayResultFailure(new UnexpectedError('fallback write also failed'));
+      const useCase = buildUseCase({ transactions, gateway });
+
+      const result = await useCase.execute(buildCommand());
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr()).toBe(secondFailure);
+    });
+
+    it('never routes a persistence failure through the definite-gateway-rejection path (settleApproved is never re-invoked as a call-failure handler)', async () => {
+      const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } });
+      const transactions = new FlakyTransactionRepository();
+      transactions.queueSettleApprovedFailure(new UnexpectedError('DynamoDB throttled'));
+      transactions.queueSettleApprovedFailure(new UnexpectedError('DynamoDB still throttled'));
+      const useCase = buildUseCase({ transactions, gateway });
+
+      await useCase.execute(buildCommand());
+
+      expect(gateway.lastCreateCardTransactionInput).toBeDefined();
+      expect(transactions.settleApprovedCalls).toHaveLength(0); // both attempts were intercepted by the queue, never reached real logic
+    });
+
+    it('propagates the ORIGINAL PaymentGatewayError and logs the secondary DB error when finalizing ERROR status also fails (definite rejection)', async () => {
+      const gatewayError = new PaymentGatewayError('Payment gateway request failed: 422', false);
       const gateway = new RecordingGatewayPort({ ok: false, error: gatewayError });
       const transactions = new FlakyTransactionRepository();
       const persistError = new UnexpectedError('DynamoDB unavailable');
-      transactions.queueUpdateGatewayResultFailure(persistError);
+      transactions.queueFinalizeNonApprovedFailure(persistError);
       const useCase = buildUseCase({ transactions, gateway });
 
       const result = await useCase.execute(buildCommand());
@@ -331,7 +502,7 @@ describe('CreateTransactionUseCase', () => {
       expect(errorSpy).toHaveBeenCalledTimes(1);
       const logged = errorSpy.mock.calls[0][0] as string;
       expect(logged).toContain('DynamoDB unavailable');
-      expect(logged).toContain('after a gateway failure');
+      expect(logged).toContain('after a definite gateway rejection');
     });
   });
 });

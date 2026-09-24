@@ -46,4 +46,8 @@ export class FakePaymentGatewayPort implements PaymentGatewayPort {
   getTransaction(_gatewayTransactionId: string): AppResultAsync<GatewayTransactionResult> {
     return okAsync(this.transactionResult);
   }
+
+  getTransactionByReference(_reference: string): AppResultAsync<GatewayTransactionResult | null> {
+    return okAsync(this.transactionResult);
+  }
 }
