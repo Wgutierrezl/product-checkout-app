@@ -1,26 +1,35 @@
-import { useEffect, useRef } from 'react';
-import { useAppDispatch, useAppSelector } from '../../app/hooks';
+import { useEffect } from 'react';
+import { useAppDispatch, useAppStore } from '../../app/hooks';
 import { resumeInFlightPayment } from './resumeInFlightPayment';
 
 /**
- * Runs once per app boot: if the persisted state shows a payment attempt
- * was still in flight when the page was last unloaded (`Pay` was pressed,
- * but this session never observed the outcome — see
- * `checkoutSlice.submitAttempted`), resolves the ambiguity via
- * `resumeInFlightPayment` instead of leaving the buyer on a silently
- * incorrect DETAILS step while a transaction may already exist.
+ * Runs EXACTLY once per app boot, reading `submitAttempted`/`idempotencyKey`
+ * from `store.getState()` at that single moment rather than subscribing to
+ * them via `useAppSelector` — subscribing would re-run this effect the
+ * moment a LIVE `Pay` click sets `submitAttempted` true THIS session
+ * (`SummaryContainer.handlePay` dispatches `paymentAttemptStarted()`
+ * before its own `createTransaction` POST resolves), racing this hook's
+ * `GET /transactions/:idempotencyKey` against that in-flight POST. Found
+ * running the real checkout against a live gateway: the race's most
+ * common outcome is a spurious 404 (the record doesn't exist yet), and on
+ * a 404 `resumeInFlightPayment` dispatches `paymentAttemptResolved()`,
+ * which prematurely clears `submitAttempted` — defeating the exact
+ * safety net a refresh mid-POST is supposed to rely on. Only a
+ * REHYDRATED-FROM-A-PREVIOUS-SESSION `submitAttempted` (true at the
+ * moment this hook first mounts) should ever trigger a resume check.
  */
 export function useResumeInFlightPayment(): void {
   const dispatch = useAppDispatch();
-  const submitAttempted = useAppSelector((state) => state.checkout.submitAttempted);
-  const idempotencyKey = useAppSelector((state) => state.checkout.idempotencyKey);
-  const hasRunRef = useRef(false);
+  const store = useAppStore();
 
   useEffect(() => {
-    if (hasRunRef.current || !submitAttempted || !idempotencyKey) {
+    const { submitAttempted, idempotencyKey } = store.getState().checkout;
+    if (!submitAttempted || !idempotencyKey) {
       return;
     }
-    hasRunRef.current = true;
     void resumeInFlightPayment({ idempotencyKey, dispatch });
-  }, [submitAttempted, idempotencyKey, dispatch]);
+    // Intentionally empty: this must run exactly once, using the state as
+    // it existed at mount — never react to live changes afterward.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 }
