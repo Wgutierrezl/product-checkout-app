@@ -18,6 +18,9 @@ cdk.out/
 *.log
 npm-debug.log*
 
+# Local tooling
+.atl/
+
 # OS / editors
 .DS_Store
 .idea/
