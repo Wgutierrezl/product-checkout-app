@@ -12,6 +12,9 @@ jest.mock('../api/backendClient');
 const mockedFetchProducts = backendClient.fetchProducts as jest.MockedFunction<
   typeof backendClient.fetchProducts
 >;
+const mockedFetchPaymentAcceptance = backendClient.fetchPaymentAcceptance as jest.MockedFunction<
+  typeof backendClient.fetchPaymentAcceptance
+>;
 
 function renderApp(checkoutOverrides: Partial<CheckoutState> = {}) {
   const store = configureStore({
@@ -28,6 +31,8 @@ function renderApp(checkoutOverrides: Partial<CheckoutState> = {}) {
 describe('App', () => {
   beforeEach(() => {
     mockedFetchProducts.mockReset();
+    mockedFetchPaymentAcceptance.mockReset();
+    mockedFetchPaymentAcceptance.mockReturnValue(new Promise(() => {}));
   });
 
   it('renders the store name in a banner landmark', () => {
@@ -62,5 +67,21 @@ describe('App', () => {
     renderApp({ step: 'DETAILS', productId: 'p1', quantity: 1 });
 
     expect(screen.getByRole('dialog', { name: 'Payment details' })).toBeInTheDocument();
+  });
+
+  it('renders the order summary when the checkout step is SUMMARY', () => {
+    mockedFetchProducts.mockReturnValue(new Promise(() => {}));
+
+    renderApp({ step: 'SUMMARY', productId: 'p1', quantity: 1 });
+
+    expect(screen.getByRole('region', { name: 'Order summary' })).toBeInTheDocument();
+  });
+
+  it('does not render the order summary while on the PRODUCT step', () => {
+    mockedFetchProducts.mockReturnValue(new Promise(() => {}));
+
+    renderApp();
+
+    expect(screen.queryByRole('region', { name: 'Order summary' })).not.toBeInTheDocument();
   });
 });

@@ -1,5 +1,6 @@
 import { configureStore } from '@reduxjs/toolkit';
 import {
+  cardTokenConsumed,
   cardTokenized,
   checkoutReducer,
   checkoutReset,
@@ -7,8 +8,11 @@ import {
   idempotencyKeyEnsured,
   idempotencyKeyRotated,
   installmentsSet,
+  paymentAttemptResolved,
+  paymentAttemptStarted,
   productSelected,
   stepChangeRequested,
+  stepForced,
   submitErrorSet,
   submitStatusSet,
   tokenizeFailed,
@@ -38,6 +42,7 @@ describe('checkoutSlice', () => {
       cardToken: null,
       submitStatus: 'idle',
       submitError: null,
+      submitAttempted: false,
     });
   });
 
@@ -163,6 +168,26 @@ describe('checkoutSlice', () => {
     });
   });
 
+  it('nulls only the cardToken via cardTokenConsumed, keeping cardSummary/customer/delivery intact', () => {
+    const store = buildStore();
+    const CARD_SUMMARY = { brand: 'visa' as const, last4: '1111', holder: 'Jane Doe' };
+    store.dispatch(cardTokenized({ cardToken: 'tok_test_card', cardSummary: CARD_SUMMARY }));
+    store.dispatch(
+      customerAndDeliverySet({
+        customer: { fullName: 'Jane Doe', email: 'jane@example.com', phone: '+573001234567' },
+        delivery: { address: 'Cra 1 # 2-3', city: 'Bogota', region: 'Cundinamarca' },
+      }),
+    );
+
+    store.dispatch(cardTokenConsumed());
+
+    const state = store.getState().checkout;
+    expect(state.cardToken).toBeNull();
+    expect(state.cardSummary).toEqual(CARD_SUMMARY);
+    expect(state.customer).not.toBeNull();
+    expect(state.delivery).not.toBeNull();
+  });
+
   it('sets submitStatus via submitStatusSet', () => {
     const store = buildStore();
 
@@ -208,6 +233,46 @@ describe('checkoutSlice', () => {
       cardToken: null,
       submitStatus: 'idle',
       submitError: null,
+      submitAttempted: false,
+    });
+  });
+
+  describe('in-flight payment attempt tracking (submitAttempted)', () => {
+    it('marks submitAttempted true via paymentAttemptStarted', () => {
+      const store = buildStore();
+
+      store.dispatch(paymentAttemptStarted());
+
+      expect(store.getState().checkout.submitAttempted).toBe(true);
+    });
+
+    it('marks submitAttempted false via paymentAttemptResolved', () => {
+      const store = buildStore();
+      store.dispatch(paymentAttemptStarted());
+
+      store.dispatch(paymentAttemptResolved());
+
+      expect(store.getState().checkout.submitAttempted).toBe(false);
+    });
+  });
+
+  describe('stepForced (bypasses canEnterStep prerequisites)', () => {
+    it('sets the step directly, even when normal prerequisites are not met', () => {
+      const store = buildStore();
+      expect(store.getState().checkout.cardToken).toBeNull();
+
+      store.dispatch(stepForced('RESULT'));
+
+      expect(store.getState().checkout.step).toBe('RESULT');
+    });
+
+    it('can force any step, e.g. back to DETAILS', () => {
+      const store = buildStore();
+      store.dispatch(stepForced('RESULT'));
+
+      store.dispatch(stepForced('DETAILS'));
+
+      expect(store.getState().checkout.step).toBe('DETAILS');
     });
   });
 });

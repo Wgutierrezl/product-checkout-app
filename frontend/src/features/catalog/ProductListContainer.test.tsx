@@ -4,7 +4,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ProductListContainer } from './ProductListContainer';
 import { catalogReducer } from './catalogSlice';
-import { checkoutReducer } from '../checkout/checkoutSlice';
+import { checkoutReducer, initialCheckoutState, type CheckoutState } from '../checkout/checkoutSlice';
 import { transactionReducer } from '../transaction/transactionSlice';
 import * as backendClient from '../../api/backendClient';
 import { BackendApiError } from '../../api/types';
@@ -26,9 +26,10 @@ const PRODUCT: Product = {
   imageUrl: 'https://img.test/p1.png',
 };
 
-function buildStore() {
+function buildStore(checkoutOverrides: Partial<CheckoutState> = {}) {
   return configureStore({
     reducer: { catalog: catalogReducer, checkout: checkoutReducer, transaction: transactionReducer },
+    preloadedState: { checkout: { ...initialCheckoutState, ...checkoutOverrides } },
   });
 }
 
@@ -120,5 +121,34 @@ describe('ProductListContainer', () => {
     expect(checkout.productId).toBe(PRODUCT.id);
     expect(checkout.quantity).toBe(1);
     expect(checkout.step).toBe('DETAILS');
+  });
+
+  describe('stock-conflict banner (checkout.submitError while on PRODUCT)', () => {
+    it('shows the checkout submitError as a dismissible banner while on the PRODUCT step', async () => {
+      mockedFetchProducts.mockResolvedValue([PRODUCT]);
+      renderWithStore(buildStore({ step: 'PRODUCT', submitError: 'Insufficient stock' }));
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Insufficient stock');
+    });
+
+    it('dismisses the banner and clears checkout.submitError when the dismiss button is clicked', async () => {
+      mockedFetchProducts.mockResolvedValue([PRODUCT]);
+      const user = userEvent.setup();
+      const { store } = renderWithStore(buildStore({ step: 'PRODUCT', submitError: 'Insufficient stock' }));
+      await screen.findByRole('alert');
+
+      await user.click(screen.getByRole('button', { name: /dismiss/i }));
+
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(store.getState().checkout.submitError).toBeNull();
+    });
+
+    it('does not show the banner when there is no checkout submitError', async () => {
+      mockedFetchProducts.mockResolvedValue([PRODUCT]);
+      renderWithStore(buildStore({ step: 'PRODUCT', submitError: null }));
+
+      await screen.findByRole('heading', { name: PRODUCT.name });
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
   });
 });

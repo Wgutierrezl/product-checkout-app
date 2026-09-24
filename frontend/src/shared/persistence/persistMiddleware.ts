@@ -5,7 +5,7 @@ import type { TransactionState } from '../../features/transaction/transactionSli
 import type { CheckoutStep } from '../../domain/checkout/stepMachine';
 
 /** Bumped whenever the persisted shape changes; a mismatch discards it. */
-export const PERSISTED_VERSION = 1;
+export const PERSISTED_VERSION = 2;
 export const STORAGE_KEY = 'checkout-spa:v1';
 
 const CHECKOUT_STEPS: readonly CheckoutStep[] = ['PRODUCT', 'DETAILS', 'SUMMARY', 'RESULT'];
@@ -20,7 +20,15 @@ const UUID_LIKE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 
 type PersistedCheckout = Pick<
   CheckoutState,
-  'step' | 'productId' | 'quantity' | 'customer' | 'delivery' | 'installments' | 'idempotencyKey' | 'cardSummary'
+  | 'step'
+  | 'productId'
+  | 'quantity'
+  | 'customer'
+  | 'delivery'
+  | 'installments'
+  | 'idempotencyKey'
+  | 'cardSummary'
+  | 'submitAttempted'
 >;
 type PersistedTransaction = Pick<TransactionState, 'id' | 'status' | 'pollStartedAt'>;
 
@@ -151,7 +159,8 @@ function isValidPersistedCheckout(value: unknown): value is PersistedCheckout {
     isIntegerInRange(candidate.installments, 1, 36) &&
     isNullableString(candidate.idempotencyKey) &&
     (candidate.idempotencyKey === null || UUID_LIKE.test(candidate.idempotencyKey as string)) &&
-    isValidCardSummary(candidate.cardSummary)
+    isValidCardSummary(candidate.cardSummary) &&
+    typeof candidate.submitAttempted === 'boolean'
   );
 }
 
@@ -246,6 +255,7 @@ export const persistMiddleware: Middleware<Record<string, never>, PersistableSta
         installments: state.checkout.installments,
         idempotencyKey: state.checkout.idempotencyKey,
         cardSummary: state.checkout.cardSummary,
+        submitAttempted: state.checkout.submitAttempted,
       },
       transaction: {
         id: state.transaction.id,

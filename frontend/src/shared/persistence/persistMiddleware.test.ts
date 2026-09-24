@@ -4,12 +4,19 @@ import {
   cardTokenized,
   checkoutReducer,
   customerAndDeliverySet,
+  paymentAttemptStarted,
   productSelected,
   stepChangeRequested,
   submitStatusSet,
 } from '../../features/checkout/checkoutSlice';
 import { pollStarted, transactionReceived, transactionReducer } from '../../features/transaction/transactionSlice';
-import { clearPersistedState, loadPersistedState, persistMiddleware, STORAGE_KEY } from './persistMiddleware';
+import {
+  clearPersistedState,
+  loadPersistedState,
+  PERSISTED_VERSION,
+  persistMiddleware,
+  STORAGE_KEY,
+} from './persistMiddleware';
 
 const CUSTOMER = { fullName: 'Jane Doe', email: 'jane@example.com', phone: '+573001234567' };
 const DELIVERY = { address: 'Cra 1 # 2-3', city: 'Bogota', region: 'Cundinamarca' };
@@ -40,7 +47,7 @@ describe('persistMiddleware', () => {
 
     const persisted = readPersisted();
     expect(persisted).toMatchObject({
-      version: 1,
+      version: PERSISTED_VERSION,
       checkout: expect.objectContaining({
         productId: 'p1',
         quantity: 2,
@@ -48,6 +55,15 @@ describe('persistMiddleware', () => {
         delivery: DELIVERY,
       }),
     });
+  });
+
+  it('persists submitAttempted (needed to resume an in-flight payment after a refresh)', () => {
+    const store = buildStore();
+
+    store.dispatch(paymentAttemptStarted());
+
+    const persisted = readPersisted();
+    expect(persisted.checkout).toMatchObject({ submitAttempted: true });
   });
 
   it('never writes cardToken, submitStatus, submitError, or the catalog slice to storage', () => {
@@ -145,7 +161,7 @@ describe('persistMiddleware', () => {
 
   describe('clearPersistedState', () => {
     it('removes the storage key entirely', () => {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, checkout: {}, transaction: {} }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: PERSISTED_VERSION, checkout: {}, transaction: {} }));
 
       clearPersistedState();
 
@@ -239,7 +255,7 @@ describe('persistMiddleware', () => {
   describe('rehydrate field validation (corrupted same-version payloads)', () => {
     function validPayload() {
       return {
-        version: 1,
+        version: PERSISTED_VERSION,
         checkout: {
           step: 'DETAILS',
           productId: 'p1',
@@ -249,6 +265,7 @@ describe('persistMiddleware', () => {
           installments: 3,
           idempotencyKey: 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f',
           cardSummary: CARD_SUMMARY,
+          submitAttempted: false,
         },
         transaction: { id: 't1', status: 'PENDING', pollStartedAt: 123 },
       };
@@ -322,6 +339,10 @@ describe('persistMiddleware', () => {
       [
         'cardSummary is a non-object, non-null value',
         (p) => ({ ...p, checkout: { ...p.checkout, cardSummary: 'oops' } }),
+      ],
+      [
+        'submitAttempted is not a boolean',
+        (p) => ({ ...p, checkout: { ...p.checkout, submitAttempted: 'oops' } }),
       ],
       ['transaction is a non-object, non-null value', (p) => ({ ...p, transaction: 'oops' })],
     ])('discards the persisted state and clears storage when %s', (_name, corrupt) => {

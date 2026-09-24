@@ -30,6 +30,16 @@ export interface CheckoutState {
   cardToken: string | null;
   submitStatus: SubmitStatus;
   submitError: string | null;
+  /**
+   * True from the moment `POST /transactions` is about to be sent until its
+   * outcome is known. Persisted alongside `idempotencyKey` so a refresh
+   * mid-request can be resolved via `GET /transactions/:idempotencyKey`
+   * (the backend uses the idempotencyKey AS the transaction id) instead of
+   * blindly rotating the key, which could otherwise let a request that DID
+   * reach the backend be charged a second time under a new, untracked key.
+   * See `features/checkout/resumeInFlightPayment.ts`.
+   */
+  submitAttempted: boolean;
 }
 
 export const initialCheckoutState: CheckoutState = {
@@ -44,6 +54,7 @@ export const initialCheckoutState: CheckoutState = {
   cardToken: null,
   submitStatus: 'idle',
   submitError: null,
+  submitAttempted: false,
 };
 
 /**
@@ -75,6 +86,17 @@ const checkoutSlice = createSlice({
         state.step = action.payload;
       }
     },
+    /**
+     * Sets the step directly, bypassing `canEnterStep`. Reserved for
+     * `resumeInFlightPayment`: after a refresh, the in-memory `cardToken`
+     * that `stepChangeRequested('RESULT')` normally requires is legitimately
+     * gone, even though a transaction genuinely exists and was confirmed via
+     * `GET /transactions/:idempotencyKey`. Not a general-purpose escape
+     * hatch — every other transition should go through `stepChangeRequested`.
+     */
+    stepForced: (state, action: PayloadAction<CheckoutStep>) => {
+      state.step = action.payload;
+    },
     customerAndDeliverySet: (
       state,
       action: PayloadAction<{ customer: CustomerInput; delivery: DeliveryInput }>,
@@ -99,6 +121,16 @@ const checkoutSlice = createSlice({
       state.submitStatus = 'idle';
       state.submitError = null;
     },
+    /**
+     * Nulls ONLY the single-use gateway token, leaving `cardSummary` (safe
+     * display data) and everything else untouched. Used once a token has
+     * been spent one way or another: a successful `POST /transactions`, or
+     * any backend response that means the token can no longer be trusted
+     * for a retry (see design Amendment).
+     */
+    cardTokenConsumed: (state) => {
+      state.cardToken = null;
+    },
     tokenizeFailed: (state, action: PayloadAction<string>) => {
       state.cardToken = null;
       state.cardSummary = null;
@@ -111,6 +143,14 @@ const checkoutSlice = createSlice({
     submitErrorSet: (state, action: PayloadAction<string | null>) => {
       state.submitError = action.payload;
     },
+    /** Dispatched right before `POST /transactions` is sent. See `submitAttempted`. */
+    paymentAttemptStarted: (state) => {
+      state.submitAttempted = true;
+    },
+    /** Dispatched once the outcome of that request is known (any resolution), or resolved via `resumeInFlightPayment`. */
+    paymentAttemptResolved: (state) => {
+      state.submitAttempted = false;
+    },
     checkoutReset: () => initialCheckoutState,
   },
 });
@@ -118,14 +158,18 @@ const checkoutSlice = createSlice({
 export const {
   productSelected,
   stepChangeRequested,
+  stepForced,
   customerAndDeliverySet,
   installmentsSet,
   idempotencyKeyEnsured,
   idempotencyKeyRotated,
   cardTokenized,
+  cardTokenConsumed,
   tokenizeFailed,
   submitStatusSet,
   submitErrorSet,
+  paymentAttemptStarted,
+  paymentAttemptResolved,
   checkoutReset,
 } = checkoutSlice.actions;
 
