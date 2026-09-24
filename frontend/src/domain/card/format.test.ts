@@ -1,4 +1,14 @@
-import { formatCardNumberInput } from './format';
+import { digitsOnly, formatCardNumberInput } from './format';
+
+describe('digitsOnly', () => {
+  it('strips every non-digit character', () => {
+    expect(digitsOnly('4111-1111 1111.1111')).toBe('4111111111111111');
+  });
+
+  it('returns an empty string when there are no digits', () => {
+    expect(digitsOnly('abc')).toBe('');
+  });
+});
 
 describe('formatCardNumberInput', () => {
   it('groups digits into blocks of 4 separated by spaces', () => {

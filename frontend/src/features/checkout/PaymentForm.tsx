@@ -6,7 +6,7 @@ import { isValidLuhn } from '../../domain/card/luhn';
 import { detectCardBrand } from '../../domain/card/brand';
 import { isExpiryValid, parseExpiry } from '../../domain/card/expiry';
 import { isValidCvc } from '../../domain/card/cvc';
-import { formatCardNumberInput } from '../../domain/card/format';
+import { digitsOnly, formatCardNumberInput } from '../../domain/card/format';
 import {
   requireNonEmpty,
   validateAddress,
@@ -52,7 +52,7 @@ interface FormValues {
 }
 
 function validateCardNumber(value: string): string | null {
-  const digits = value.replace(/\D/g, '');
+  const digits = digitsOnly(value);
   if (digits.length === 0) {
     return 'Card number is required';
   }
@@ -144,7 +144,7 @@ export function PaymentForm({
   const [errors, setErrors] = useState<Partial<Record<FieldName, string>>>({});
   const fieldRefs = useRef<Partial<Record<FieldName, HTMLInputElement>>>({});
 
-  const cardDigits = values.cardNumber.replace(/\D/g, '');
+  const cardDigits = digitsOnly(values.cardNumber);
   const brand = detectCardBrand(cardDigits);
   const showUnsupportedBrandMessage = cardDigits.length >= 6 && brand === 'unknown';
 
@@ -288,7 +288,7 @@ export function PaymentForm({
                   autoComplete="cc-csc"
                   maxLength={3}
                   value={values.cvc}
-                  onChange={(event) => setField('cvc', event.target.value.replace(/\D/g, '').slice(0, 3))}
+                  onChange={(event) => setField('cvc', digitsOnly(event.target.value).slice(0, 3))}
                   onBlur={handleBlur('cvc')}
                 />
               )}

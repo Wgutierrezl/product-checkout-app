@@ -70,3 +70,17 @@
   gap: var(--space-3);
   justify-content: flex-end;
 }
+
+/* Keeps Cancel/Continue reachable without scrolling through the whole
+   form on small screens, where the sheet (Modal.module.css's .sheet) is
+   the scrolling ancestor these coordinates are relative to. */
+@media (max-width: 767.98px) {
+  .actions {
+    position: sticky;
+    bottom: 0;
+    background: var(--color-surface);
+    margin: 0 calc(var(--space-5) * -1) calc(var(--space-5) * -1);
+    padding: var(--space-4) var(--space-5);
+    border-top: 1px solid var(--color-border);
+  }
+}
