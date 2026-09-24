@@ -58,6 +58,25 @@ describe('ProductListContainer', () => {
     expect(await screen.findByRole('heading', { name: PRODUCT.name })).toBeInTheDocument();
   });
 
+  it('renders an h2 section heading so product names (h3) nest under a proper h1->h2->h3 order', async () => {
+    mockedFetchProducts.mockResolvedValue([PRODUCT]);
+
+    renderWithStore();
+
+    const sectionHeading = await screen.findByRole('heading', { level: 2 });
+    expect(sectionHeading).toBeInTheDocument();
+    const productHeading = screen.getByRole('heading', { level: 3, name: PRODUCT.name });
+    expect(productHeading).toBeInTheDocument();
+  });
+
+  it('renders the h2 section heading even while loading', () => {
+    mockedFetchProducts.mockReturnValue(new Promise(() => {}));
+
+    renderWithStore();
+
+    expect(screen.getByRole('heading', { level: 2 })).toBeInTheDocument();
+  });
+
   it('shows an empty-catalog message when the backend returns zero products', async () => {
     mockedFetchProducts.mockResolvedValue([]);
 

@@ -26,22 +26,33 @@ export function ProductListContainer() {
     dispatch(fetchProducts());
   }
 
-  if (status === 'idle' || status === 'loading') {
-    return <CatalogSkeleton />;
+  function renderContent() {
+    if (status === 'idle' || status === 'loading') {
+      return <CatalogSkeleton />;
+    }
+
+    if (status === 'failed') {
+      return (
+        <div role="alert" className={styles.errorState}>
+          <p>{resolveErrorMessage(error)}</p>
+          <Button onClick={handleRetry}>Retry</Button>
+        </div>
+      );
+    }
+
+    if (items.length === 0) {
+      return <p className={styles.emptyState}>No products available right now.</p>;
+    }
+
+    return <ProductGrid products={items} onBuy={handleBuy} />;
   }
 
-  if (status === 'failed') {
-    return (
-      <div role="alert" className={styles.errorState}>
-        <p>{resolveErrorMessage(error)}</p>
-        <Button onClick={handleRetry}>Retry</Button>
-      </div>
-    );
-  }
-
-  if (items.length === 0) {
-    return <p className={styles.emptyState}>No products available right now.</p>;
-  }
-
-  return <ProductGrid products={items} onBuy={handleBuy} />;
+  return (
+    <section aria-labelledby="catalog-heading">
+      <h2 id="catalog-heading" className={styles.visuallyHidden}>
+        Products
+      </h2>
+      {renderContent()}
+    </section>
+  );
 }

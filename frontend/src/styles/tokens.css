@@ -47,9 +47,11 @@
 
   --color-text: #201d1a;
   --color-text-muted: #6b6459;
-  --color-text-on-primary: #fffaf4;
 
-  --color-primary: #c1502e;
+  /* Slightly darker than the initial pick so button text on this fill
+     reaches >=4.7:1 contrast against --color-primary-contrast, while
+     keeping the terracotta feel. */
+  --color-primary: #bd4c2a;
   --color-primary-hover: #a63f22;
   --color-primary-contrast: #fffaf4;
 
