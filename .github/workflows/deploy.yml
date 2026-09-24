@@ -90,10 +90,7 @@ jobs:
           echo "bucket_name=$(jq -r '.WebStack.BucketName' cdk-outputs.json)" >> "$GITHUB_OUTPUT"
           echo "distribution_id=$(jq -r '.WebStack.DistributionId' cdk-outputs.json)" >> "$GITHUB_OUTPUT"
 
-      # Guarded the same way as ci.yml's frontend job: the SPA scaffold may
-      # not exist on this ref yet. Skipped (not failed) when absent.
       - name: Install and build frontend
-        if: hashFiles('frontend/package.json') != ''
         working-directory: frontend
         run: |
           npm ci
@@ -107,7 +104,6 @@ jobs:
       # index.html is uploaded separately below with no-cache instead of a
       # CloudFront path-based cache behavior (see web-stack.ts).
       - name: Sync hashed assets with long-lived cache
-        if: hashFiles('frontend/package.json') != ''
         run: |
           aws s3 sync frontend/dist "s3://${{ steps.outputs.outputs.bucket_name }}" \
             --delete \
@@ -115,13 +111,11 @@ jobs:
             --cache-control "public,max-age=31536000,immutable"
 
       - name: Upload index.html with no-cache
-        if: hashFiles('frontend/package.json') != ''
         run: |
           aws s3 cp frontend/dist/index.html "s3://${{ steps.outputs.outputs.bucket_name }}/index.html" \
             --cache-control "no-cache"
 
       - name: Invalidate CloudFront cache
-        if: hashFiles('frontend/package.json') != ''
         run: |
           aws cloudfront create-invalidation \
             --distribution-id "${{ steps.outputs.outputs.distribution_id }}" \

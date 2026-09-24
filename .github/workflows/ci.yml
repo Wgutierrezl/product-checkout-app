@@ -5,6 +5,9 @@ on:
     branches:
       - develop
       - main
+  push:
+    branches:
+      - develop
   workflow_dispatch:
 
 concurrency:
@@ -57,11 +60,6 @@ jobs:
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
-    # The frontend SPA scaffold may land in a parallel PR before or after
-    # this one — hashFiles() resolves against the checked-out ref this
-    # workflow run targets, so the job is skipped (not failed) whenever
-    # frontend/package.json doesn't exist yet on that ref.
-    if: hashFiles('frontend/package.json') != ''
     defaults:
       run:
         working-directory: frontend
