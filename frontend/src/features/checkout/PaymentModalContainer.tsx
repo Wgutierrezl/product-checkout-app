@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import { Modal } from '../../shared/ui/Modal';
 import { PaymentForm, type PaymentFormSubmitValues } from './PaymentForm';
@@ -31,8 +32,27 @@ export function PaymentModalContainer() {
   const installments = useAppSelector((state) => state.checkout.installments);
   const submitStatus = useAppSelector((state) => state.checkout.submitStatus);
   const submitError = useAppSelector((state) => state.checkout.submitError);
+  const isTokenizing = submitStatus === 'tokenizing';
+
+  // Guards against a tokenize request that resolves/rejects AFTER this
+  // container has already unmounted (e.g. the step changed away from
+  // DETAILS through some other path while the request was in flight) — a
+  // stale result must never dispatch cardTokenized/customer/step SUMMARY.
+  const isMountedRef = useRef(true);
+  useEffect(
+    () => () => {
+      isMountedRef.current = false;
+    },
+    [],
+  );
 
   function handleCancel() {
+    // Close paths (Cancel button, Escape, backdrop click all route through
+    // here) are disabled while a tokenize request is in flight, so the
+    // buyer can never race a Continue click against a Cancel/Escape.
+    if (isTokenizing) {
+      return;
+    }
     dispatch(stepChangeRequested('PRODUCT'));
   }
 
@@ -50,6 +70,10 @@ export function PaymentModalContainer() {
         cardHolder: values.cardHolder,
       });
 
+      if (!isMountedRef.current) {
+        return;
+      }
+
       dispatch(customerAndDeliverySet({ customer: values.customer, delivery: values.delivery }));
       dispatch(installmentsSet(values.installments));
       dispatch(
@@ -64,6 +88,9 @@ export function PaymentModalContainer() {
       );
       dispatch(stepChangeRequested('SUMMARY'));
     } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
       const message = error instanceof Error ? error.message : 'Card tokenization failed';
       dispatch(tokenizeFailed(message));
     }

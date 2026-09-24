@@ -435,7 +435,7 @@ export function PaymentForm({
       </section>
 
       <div className={styles.actions}>
-        <Button type="button" variant="secondary" onClick={onCancel}>
+        <Button type="button" variant="secondary" onClick={onCancel} disabled={isSubmitting}>
           Cancel
         </Button>
         <Button type="submit" disabled={isSubmitting}>

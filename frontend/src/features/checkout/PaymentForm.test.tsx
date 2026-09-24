@@ -210,6 +210,12 @@ describe('PaymentForm', () => {
       expect(button).toBeDisabled();
     });
 
+    it('disables Cancel while isSubmitting is true, so a close cannot race an in-flight submit', () => {
+      renderForm({ isSubmitting: true });
+
+      expect(screen.getByRole('button', { name: /cancel/i })).toBeDisabled();
+    });
+
     it('does not call onSubmit when Continue is clicked while already submitting', async () => {
       const user = userEvent.setup();
       const { onSubmit } = renderForm({ isSubmitting: true });

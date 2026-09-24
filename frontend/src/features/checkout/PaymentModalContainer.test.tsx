@@ -170,6 +170,90 @@ describe('PaymentModalContainer', () => {
     expect(await screen.findByRole('button', { name: /processing/i })).toBeDisabled();
   });
 
+  describe('closing during an in-flight tokenize request (BLOCKER)', () => {
+    it('disables Cancel while tokenizing', async () => {
+      mockedTokenizeCard.mockReturnValue(new Promise(() => {}));
+      const user = userEvent.setup();
+      renderWithStore();
+
+      await fillValidForm(user);
+      await user.click(screen.getByRole('button', { name: /continue/i }));
+
+      expect(screen.getByRole('button', { name: /cancel/i })).toBeDisabled();
+    });
+
+    it('ignores Escape while tokenizing, leaving the step unchanged', async () => {
+      mockedTokenizeCard.mockReturnValue(new Promise(() => {}));
+      const user = userEvent.setup();
+      const { store } = renderWithStore();
+
+      await fillValidForm(user);
+      await user.click(screen.getByRole('button', { name: /continue/i }));
+      await user.keyboard('{Escape}');
+
+      expect(store.getState().checkout.step).toBe('DETAILS');
+    });
+
+    it('ignores a backdrop click while tokenizing, leaving the step unchanged', async () => {
+      mockedTokenizeCard.mockReturnValue(new Promise(() => {}));
+      const user = userEvent.setup();
+      const { store } = renderWithStore();
+
+      await fillValidForm(user);
+      await user.click(screen.getByRole('button', { name: /continue/i }));
+      await user.click(screen.getByTestId('backdrop'));
+
+      expect(store.getState().checkout.step).toBe('DETAILS');
+    });
+
+    it('ignores a tokenize result that resolves after the container has unmounted', async () => {
+      let resolveTokenize: ((value: { cardToken: string }) => void) | undefined;
+      mockedTokenizeCard.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveTokenize = resolve;
+          }),
+      );
+      const user = userEvent.setup();
+      const { store, unmount } = renderWithStore();
+
+      await fillValidForm(user);
+      await user.click(screen.getByRole('button', { name: /continue/i }));
+
+      unmount();
+      resolveTokenize?.({ cardToken: 'tok_test_card' });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const { checkout } = store.getState();
+      expect(checkout.cardToken).toBeNull();
+      expect(checkout.step).toBe('DETAILS');
+      expect(checkout.customer).toBeNull();
+    });
+
+    it('ignores a tokenize REJECTION that resolves after the container has unmounted', async () => {
+      let rejectTokenize: ((error: Error) => void) | undefined;
+      mockedTokenizeCard.mockImplementation(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectTokenize = reject;
+          }),
+      );
+      const user = userEvent.setup();
+      const { store, unmount } = renderWithStore();
+
+      await fillValidForm(user);
+      await user.click(screen.getByRole('button', { name: /continue/i }));
+
+      unmount();
+      rejectTokenize?.(new Error('boom'));
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(store.getState().checkout.submitStatus).toBe('tokenizing');
+    });
+  });
+
   it('prefills customer/delivery from the store for refresh resilience', () => {
     const savedCustomer = { fullName: 'Jane Doe', email: 'jane@example.com', phone: '+573001234567' };
     renderWithStore(buildStore({ customer: savedCustomer }));
