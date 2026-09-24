@@ -61,7 +61,7 @@ flowchart TB
 
     Browser -->|HTTPS, loads SPA| CF
     CF -->|origin, OAC| S3
-    Browser -->|tokenize card (public key)| Gateway
+    Browser -->|"tokenize card (public key)"| Gateway
     Browser -->|HTTPS + CSP connect-src| HttpApi
     HttpApi --> Lambda
     Lambda -->|create/settle transaction| Gateway
