@@ -98,4 +98,67 @@ describe('verifyWebhookChecksum', () => {
 
     expect(verifyWebhookChecksum(payload, EVENTS_SECRET)).toBe(true);
   });
+
+  describe('malformed payloads (never throw, always reject)', () => {
+    it('returns false when checksum is undefined', () => {
+      const payload = buildPayload({
+        signature: { properties: ['transaction.id'], checksum: undefined as unknown as string },
+      });
+
+      expect(verifyWebhookChecksum(payload, EVENTS_SECRET)).toBe(false);
+    });
+
+    it('returns false when checksum is null', () => {
+      const payload = buildPayload({
+        signature: { properties: ['transaction.id'], checksum: null as unknown as string },
+      });
+
+      expect(verifyWebhookChecksum(payload, EVENTS_SECRET)).toBe(false);
+    });
+
+    it('returns false when checksum is a number, not a string', () => {
+      const payload = buildPayload({
+        signature: { properties: ['transaction.id'], checksum: 123 as unknown as string },
+      });
+
+      expect(verifyWebhookChecksum(payload, EVENTS_SECRET)).toBe(false);
+    });
+
+    it('returns false when signature.properties is missing', () => {
+      const payload = buildPayload({
+        signature: { checksum: 'a'.repeat(64) } as unknown as WebhookEventPayload['signature'],
+      });
+
+      expect(verifyWebhookChecksum(payload, EVENTS_SECRET)).toBe(false);
+    });
+
+    it('returns false when signature.properties is not an array', () => {
+      const payload = buildPayload({
+        signature: {
+          properties: 'transaction.id' as unknown as string[],
+          checksum: 'a'.repeat(64),
+        },
+      });
+
+      expect(verifyWebhookChecksum(payload, EVENTS_SECRET)).toBe(false);
+    });
+
+    it('returns false when signature is missing entirely', () => {
+      const payload = { ...buildPayload(), signature: undefined } as unknown as WebhookEventPayload;
+
+      expect(verifyWebhookChecksum(payload, EVENTS_SECRET)).toBe(false);
+    });
+
+    it('returns false when timestamp is missing', () => {
+      const payload = { ...buildPayload(), timestamp: undefined } as unknown as WebhookEventPayload;
+
+      expect(verifyWebhookChecksum(payload, EVENTS_SECRET)).toBe(false);
+    });
+
+    it('returns false when data is missing', () => {
+      const payload = { ...buildPayload(), data: undefined } as unknown as WebhookEventPayload;
+
+      expect(verifyWebhookChecksum(payload, EVENTS_SECRET)).toBe(false);
+    });
+  });
 });
