@@ -1,4 +1,4 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, ParseUUIDPipe } from '@nestjs/common';
 import { ApiNotFoundResponse, ApiOkResponse, ApiParam, ApiTags } from '@nestjs/swagger';
 
 import { GetProductUseCase } from '../application/get-product.use-case';
@@ -27,10 +27,12 @@ export class ProductsController {
   }
 
   @Get(':id')
-  @ApiParam({ name: 'id', description: 'Product id' })
+  @ApiParam({ name: 'id', description: 'Product id (UUID v4)' })
   @ApiOkResponse({ type: ProductResponseDto })
   @ApiNotFoundResponse({ description: 'Product not found' })
-  async getById(@Param('id') id: string): Promise<ProductResponseDto> {
+  async getById(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+  ): Promise<ProductResponseDto> {
     const result = await this.getProductUseCase.execute(id);
 
     return result.match(

@@ -1,3 +1,7 @@
+import { INestApplication } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import request from 'supertest';
+
 import { NotFoundError } from '../../shared/errors/domain-error';
 import { errAsync, okAsync } from '../../shared/result/result.types';
 import { GetProductUseCase } from '../application/get-product.use-case';
@@ -93,6 +97,37 @@ describe('ProductsController', () => {
       );
 
       await expect(controller.getById('missing-id')).rejects.toBe(notFound);
+    });
+  });
+
+  describe('GET /products/:id route validation (HTTP)', () => {
+    let app: INestApplication;
+
+    beforeAll(async () => {
+      const moduleRef = await Test.createTestingModule({
+        controllers: [ProductsController],
+        providers: [
+          { provide: ListProductsUseCase, useValue: { execute: () => okAsync([]) } },
+          { provide: GetProductUseCase, useValue: { execute: () => okAsync(buildProduct()) } },
+        ],
+      }).compile();
+
+      app = moduleRef.createNestApplication();
+      await app.init();
+    });
+
+    afterAll(async () => {
+      await app.close();
+    });
+
+    it('rejects a malformed (non-UUID) id with 400', async () => {
+      await request(app.getHttpServer()).get('/products/not-a-uuid').expect(400);
+    });
+
+    it('accepts a well-formed UUID id', async () => {
+      await request(app.getHttpServer())
+        .get('/products/e1a6b6b0-6c9e-4a3a-9c1a-6f6f2b6b1a10')
+        .expect(200);
     });
   });
 });
