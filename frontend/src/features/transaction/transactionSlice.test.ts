@@ -1,6 +1,7 @@
 import { configureStore } from '@reduxjs/toolkit';
 import {
   pollStarted,
+  pollStartedNow,
   transactionCleared,
   transactionErrorSet,
   transactionReceived,
@@ -23,31 +24,40 @@ describe('transactionSlice', () => {
       amounts: null,
       error: null,
       pollStartedAt: null,
+      reference: null,
     });
   });
 
   it('stores id/status/amounts on transactionReceived', () => {
     const store = buildStore();
 
-    store.dispatch(transactionReceived({ id: 't1', status: 'PENDING', amounts: AMOUNTS }));
+    store.dispatch(transactionReceived({ id: 't1', status: 'PENDING', amounts: AMOUNTS, reference: 'ref-1' }));
 
     expect(store.getState().transaction).toMatchObject({ id: 't1', status: 'PENDING', amounts: AMOUNTS });
+  });
+
+  it('stores the reference on transactionReceived', () => {
+    const store = buildStore();
+
+    store.dispatch(transactionReceived({ id: 't1', status: 'PENDING', amounts: AMOUNTS, reference: 'ref-1' }));
+
+    expect(store.getState().transaction.reference).toBe('ref-1');
   });
 
   it('clears any prior error when a transaction is received', () => {
     const store = buildStore();
     store.dispatch(transactionErrorSet('network error'));
 
-    store.dispatch(transactionReceived({ id: 't1', status: 'APPROVED', amounts: AMOUNTS }));
+    store.dispatch(transactionReceived({ id: 't1', status: 'APPROVED', amounts: AMOUNTS, reference: 'ref-1' }));
 
     expect(store.getState().transaction.error).toBeNull();
   });
 
   it('updates only the status on a later transactionReceived (poll refresh), keeping amounts', () => {
     const store = buildStore();
-    store.dispatch(transactionReceived({ id: 't1', status: 'PENDING', amounts: AMOUNTS }));
+    store.dispatch(transactionReceived({ id: 't1', status: 'PENDING', amounts: AMOUNTS, reference: 'ref-1' }));
 
-    store.dispatch(transactionReceived({ id: 't1', status: 'APPROVED', amounts: AMOUNTS }));
+    store.dispatch(transactionReceived({ id: 't1', status: 'APPROVED', amounts: AMOUNTS, reference: 'ref-1' }));
 
     expect(store.getState().transaction.status).toBe('APPROVED');
     expect(store.getState().transaction.amounts).toEqual(AMOUNTS);
@@ -61,6 +71,15 @@ describe('transactionSlice', () => {
     expect(store.getState().transaction.pollStartedAt).toBe(123456);
   });
 
+  it('records the current time via the pollStartedNow convenience action (dedupes Date.now() call sites)', () => {
+    const store = buildStore();
+    const before = Date.now();
+
+    store.dispatch(pollStartedNow());
+
+    expect(store.getState().transaction.pollStartedAt).toBeGreaterThanOrEqual(before);
+  });
+
   it('sets an error message via transactionErrorSet', () => {
     const store = buildStore();
 
@@ -71,7 +90,7 @@ describe('transactionSlice', () => {
 
   it('resets to the initial state on transactionCleared', () => {
     const store = buildStore();
-    store.dispatch(transactionReceived({ id: 't1', status: 'APPROVED', amounts: AMOUNTS }));
+    store.dispatch(transactionReceived({ id: 't1', status: 'APPROVED', amounts: AMOUNTS, reference: 'ref-1' }));
     store.dispatch(pollStarted(123456));
 
     store.dispatch(transactionCleared());
@@ -82,6 +101,7 @@ describe('transactionSlice', () => {
       amounts: null,
       error: null,
       pollStartedAt: null,
+      reference: null,
     });
   });
 });

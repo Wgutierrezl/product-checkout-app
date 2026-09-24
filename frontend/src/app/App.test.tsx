@@ -4,7 +4,7 @@ import { render, screen } from '@testing-library/react';
 import { App } from './App';
 import { catalogReducer } from '../features/catalog/catalogSlice';
 import { checkoutReducer, initialCheckoutState, type CheckoutState } from '../features/checkout/checkoutSlice';
-import { transactionReducer } from '../features/transaction/transactionSlice';
+import { initialTransactionState, transactionReducer, type TransactionState } from '../features/transaction/transactionSlice';
 import * as backendClient from '../api/backendClient';
 
 jest.mock('../api/backendClient');
@@ -16,10 +16,13 @@ const mockedFetchPaymentAcceptance = backendClient.fetchPaymentAcceptance as jes
   typeof backendClient.fetchPaymentAcceptance
 >;
 
-function renderApp(checkoutOverrides: Partial<CheckoutState> = {}) {
+function renderApp(checkoutOverrides: Partial<CheckoutState> = {}, transactionOverrides: Partial<TransactionState> = {}) {
   const store = configureStore({
     reducer: { catalog: catalogReducer, checkout: checkoutReducer, transaction: transactionReducer },
-    preloadedState: { checkout: { ...initialCheckoutState, ...checkoutOverrides } },
+    preloadedState: {
+      checkout: { ...initialCheckoutState, ...checkoutOverrides },
+      transaction: { ...initialTransactionState, ...transactionOverrides },
+    },
   });
   return render(
     <Provider store={store}>
@@ -83,5 +86,24 @@ describe('App', () => {
     renderApp();
 
     expect(screen.queryByRole('region', { name: 'Order summary' })).not.toBeInTheDocument();
+  });
+
+  it('renders the result screen when the checkout step is RESULT', () => {
+    mockedFetchProducts.mockReturnValue(new Promise(() => {}));
+
+    renderApp(
+      { step: 'RESULT', productId: 'p1', quantity: 1 },
+      { id: 't1', status: 'APPROVED', reference: 'REF-1' },
+    );
+
+    expect(screen.getByRole('heading', { name: /approved/i })).toBeInTheDocument();
+  });
+
+  it('does not render the result screen while on the PRODUCT step', () => {
+    mockedFetchProducts.mockReturnValue(new Promise(() => {}));
+
+    renderApp();
+
+    expect(screen.queryByRole('heading', { name: /approved/i })).not.toBeInTheDocument();
   });
 });

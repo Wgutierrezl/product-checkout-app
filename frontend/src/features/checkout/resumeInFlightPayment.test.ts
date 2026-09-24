@@ -3,6 +3,7 @@ import { BackendApiError } from '../../api/types';
 import { resumeInFlightPayment } from './resumeInFlightPayment';
 import { cardTokenConsumed, paymentAttemptResolved, stepForced } from './checkoutSlice';
 import { pollStarted, transactionReceived } from '../transaction/transactionSlice';
+import { buildTransactionFixture } from '../transaction/transactionFixtures';
 
 jest.mock('../../api/backendClient');
 
@@ -12,27 +13,13 @@ const mockedFetchTransaction = backendClient.fetchTransaction as jest.MockedFunc
 
 const KEY = 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f';
 
-function transaction(overrides: Partial<Awaited<ReturnType<typeof backendClient.fetchTransaction>>> = {}) {
-  return {
-    id: KEY,
-    reference: 'REF-1',
-    status: 'PENDING' as const,
-    productAmount: 300_000,
-    baseFee: 250_000,
-    deliveryFee: 800_000,
-    total: 1_350_000,
-    currency: 'COP' as const,
-    ...overrides,
-  };
-}
-
 describe('resumeInFlightPayment', () => {
   beforeEach(() => {
     mockedFetchTransaction.mockReset();
   });
 
   it('on 200 (the request reached the backend): stores the transaction, starts a poll window, clears the token, resolves the attempt, and forces RESULT', async () => {
-    mockedFetchTransaction.mockResolvedValue(transaction({ status: 'PENDING' }));
+    mockedFetchTransaction.mockResolvedValue(buildTransactionFixture({ id: KEY, status: 'PENDING' }));
     const dispatch = jest.fn();
     const before = Date.now();
 
@@ -43,6 +30,7 @@ describe('resumeInFlightPayment', () => {
       transactionReceived({
         id: KEY,
         status: 'PENDING',
+        reference: 'REF-1',
         amounts: { productAmount: 300_000, baseFee: 250_000, deliveryFee: 800_000, total: 1_350_000, currency: 'COP' },
       }),
     );
@@ -54,7 +42,7 @@ describe('resumeInFlightPayment', () => {
   });
 
   it('on 200 with an already-final status: still resumes to RESULT (ResultContainer will not poll a final status)', async () => {
-    mockedFetchTransaction.mockResolvedValue(transaction({ status: 'DECLINED' }));
+    mockedFetchTransaction.mockResolvedValue(buildTransactionFixture({ id: KEY, status: 'DECLINED' }));
     const dispatch = jest.fn();
 
     await resumeInFlightPayment({ idempotencyKey: KEY, dispatch });

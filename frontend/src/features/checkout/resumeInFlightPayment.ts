@@ -1,7 +1,7 @@
 import { fetchTransaction } from '../../api/backendClient';
 import { BackendApiError } from '../../api/types';
 import { cardTokenConsumed, paymentAttemptResolved, stepForced } from './checkoutSlice';
-import { pollStarted, transactionReceived } from '../transaction/transactionSlice';
+import { pollStartedNow, transactionReceived } from '../transaction/transactionSlice';
 
 /**
  * Only the actions this module ever dispatches -- kept narrow (rather than
@@ -11,7 +11,7 @@ import { pollStarted, transactionReceived } from '../transaction/transactionSlic
 type ResumeDispatch = (
   action:
     | ReturnType<typeof transactionReceived>
-    | ReturnType<typeof pollStarted>
+    | ReturnType<typeof pollStartedNow>
     | ReturnType<typeof cardTokenConsumed>
     | ReturnType<typeof paymentAttemptResolved>
     | ReturnType<typeof stepForced>,
@@ -52,12 +52,11 @@ export async function resumeInFlightPayment({ idempotencyKey, dispatch }: Resume
   try {
     const transaction = await fetchTransaction(idempotencyKey);
 
-    // NOTE: once transactionSlice gains a `reference` field (RESULT-step
-    // work), thread `transaction.reference` through here too.
     dispatch(
       transactionReceived({
         id: transaction.id,
         status: transaction.status,
+        reference: transaction.reference,
         amounts: {
           productAmount: transaction.productAmount,
           baseFee: transaction.baseFee,
@@ -67,7 +66,7 @@ export async function resumeInFlightPayment({ idempotencyKey, dispatch }: Resume
         },
       }),
     );
-    dispatch(pollStarted(Date.now()));
+    dispatch(pollStartedNow());
     dispatch(cardTokenConsumed());
     dispatch(paymentAttemptResolved());
     dispatch(stepForced('RESULT'));

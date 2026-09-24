@@ -182,9 +182,34 @@ describe('SummaryContainer', () => {
     const { checkout, transaction } = store.getState();
     expect(transaction.id).toBe('t1');
     expect(transaction.status).toBe('PENDING');
+    expect(transaction.reference).toBe('REF-1');
     expect(checkout.cardToken).toBeNull();
     expect(checkout.idempotencyKey).toBe(sentKey);
     expect(checkout.submitAttempted).toBe(false);
+  });
+
+  it('on success: records a pollStartedAt timestamp so the RESULT step can poll/resume', async () => {
+    mockedCreateTransaction.mockResolvedValue({
+      id: 't1',
+      reference: 'REF-1',
+      status: 'PENDING',
+      productAmount: 300_000,
+      baseFee: 250_000,
+      deliveryFee: 800_000,
+      total: 1_350_000,
+      currency: 'COP',
+    });
+    const user = userEvent.setup();
+    const { store } = renderWithStore();
+    await acceptBoth(user);
+    const before = Date.now();
+
+    await user.click(screen.getByRole('button', { name: /^pay$/i }));
+
+    await waitFor(() => expect(store.getState().checkout.step).toBe('RESULT'));
+    const { pollStartedAt } = store.getState().transaction;
+    expect(pollStartedAt).not.toBeNull();
+    expect(pollStartedAt as number).toBeGreaterThanOrEqual(before);
   });
 
   it('disables Pay (double-submit guard) while a submission is in flight', async () => {

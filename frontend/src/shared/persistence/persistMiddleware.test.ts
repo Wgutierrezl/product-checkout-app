@@ -93,7 +93,7 @@ describe('persistMiddleware', () => {
   it('persists whitelisted transaction fields, not amounts/error', () => {
     const store = buildStore();
 
-    store.dispatch(transactionReceived({ id: 't1', status: 'PENDING', amounts: AMOUNTS }));
+    store.dispatch(transactionReceived({ id: 't1', status: 'PENDING', amounts: AMOUNTS, reference: 'ref-1' }));
     store.dispatch(pollStarted(123456));
 
     const persisted = readPersisted();
