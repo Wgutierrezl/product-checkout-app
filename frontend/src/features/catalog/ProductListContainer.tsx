@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import { fetchProducts } from './catalogThunks';
-import { productSelected, stepChangeRequested } from '../checkout/checkoutSlice';
+import { productSelected, stepChangeRequested, submitErrorSet } from '../checkout/checkoutSlice';
 import { ProductGrid } from './ProductGrid';
 import { CatalogSkeleton } from './CatalogSkeleton';
 import { resolveErrorMessage } from './resolveErrorMessage';
@@ -12,6 +12,8 @@ import styles from './ProductListContainer.module.css';
 export function ProductListContainer() {
   const dispatch = useAppDispatch();
   const { items, status, error } = useAppSelector((state) => state.catalog);
+  const checkoutStep = useAppSelector((state) => state.checkout.step);
+  const checkoutSubmitError = useAppSelector((state) => state.checkout.submitError);
 
   useEffect(() => {
     dispatch(fetchProducts());
@@ -24,6 +26,10 @@ export function ProductListContainer() {
 
   function handleRetry() {
     dispatch(fetchProducts());
+  }
+
+  function handleDismissStockError() {
+    dispatch(submitErrorSet(null));
   }
 
   function renderContent() {
@@ -52,6 +58,14 @@ export function ProductListContainer() {
       <h2 id="catalog-heading" className={styles.visuallyHidden}>
         Products
       </h2>
+      {checkoutStep === 'PRODUCT' && checkoutSubmitError && (
+        <div role="alert" className={styles.stockAlert}>
+          <p>{checkoutSubmitError}</p>
+          <button type="button" onClick={handleDismissStockError} aria-label="Dismiss" className={styles.dismissButton}>
+            ×
+          </button>
+        </div>
+      )}
       {renderContent()}
     </section>
   );
