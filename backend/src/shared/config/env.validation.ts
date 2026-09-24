@@ -1,5 +1,15 @@
 import { plainToInstance } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Min, validateSync } from 'class-validator';
+import {
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Max,
+  Min,
+  validateSync,
+} from 'class-validator';
 
 export class EnvironmentVariables {
   @IsOptional()
@@ -8,23 +18,31 @@ export class EnvironmentVariables {
 
   @IsOptional()
   @IsInt()
+  @Min(1)
+  @Max(65_535)
   PORT: number = 3000;
 
-  @IsString()
+  @IsNotEmpty()
+  @IsUrl({ require_tld: false })
   PAYMENT_GATEWAY_URL!: string;
 
+  @IsNotEmpty()
   @IsString()
   PAYMENT_GATEWAY_PUBLIC_KEY!: string;
 
+  @IsNotEmpty()
   @IsString()
   PAYMENT_GATEWAY_PRIVATE_KEY!: string;
 
+  @IsNotEmpty()
   @IsString()
   PAYMENT_GATEWAY_INTEGRITY_SECRET!: string;
 
+  @IsNotEmpty()
   @IsString()
   PAYMENT_GATEWAY_EVENTS_SECRET!: string;
 
+  @IsNotEmpty()
   @IsString()
   CORS_ALLOWED_ORIGINS!: string;
 

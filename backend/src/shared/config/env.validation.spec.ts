@@ -39,4 +39,37 @@ describe('validateEnv', () => {
     expect(result.PORT).toBe(4000);
     expect(result.BASE_FEE_CENTS).toBe(999);
   });
+
+  it.each([
+    'PAYMENT_GATEWAY_URL',
+    'PAYMENT_GATEWAY_PUBLIC_KEY',
+    'PAYMENT_GATEWAY_PRIVATE_KEY',
+    'PAYMENT_GATEWAY_INTEGRITY_SECRET',
+    'PAYMENT_GATEWAY_EVENTS_SECRET',
+    'CORS_ALLOWED_ORIGINS',
+  ] as const)('rejects an empty string for required var %s', (key) => {
+    expect(() => validateEnv({ ...requiredEnv, [key]: '' })).toThrow();
+  });
+
+  it('rejects a PAYMENT_GATEWAY_URL that is not a valid URL', () => {
+    expect(() =>
+      validateEnv({ ...requiredEnv, PAYMENT_GATEWAY_URL: 'not a valid url' }),
+    ).toThrow();
+  });
+
+  it('accepts a PAYMENT_GATEWAY_URL without a TLD (local/sandbox hosts)', () => {
+    const result = validateEnv({ ...requiredEnv, PAYMENT_GATEWAY_URL: 'http://localhost:4000' });
+
+    expect(result.PAYMENT_GATEWAY_URL).toBe('http://localhost:4000');
+  });
+
+  it.each(['0', '-1', '70000'])('rejects an out-of-range PORT value %s', (port) => {
+    expect(() => validateEnv({ ...requiredEnv, PORT: port })).toThrow();
+  });
+
+  it.each(['1', '65535'])('accepts a boundary-valid PORT value %s', (port) => {
+    const result = validateEnv({ ...requiredEnv, PORT: port });
+
+    expect(result.PORT).toBe(Number(port));
+  });
 });
