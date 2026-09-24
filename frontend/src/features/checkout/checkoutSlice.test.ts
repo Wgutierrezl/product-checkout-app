@@ -1,5 +1,6 @@
 import { configureStore } from '@reduxjs/toolkit';
 import {
+  cardTokenConsumed,
   cardTokenized,
   checkoutReducer,
   checkoutReset,
@@ -161,6 +162,26 @@ describe('checkoutSlice', () => {
       expect(state.cardToken).toBeNull();
       expect(state.cardSummary).toBeNull();
     });
+  });
+
+  it('nulls only the cardToken via cardTokenConsumed, keeping cardSummary/customer/delivery intact', () => {
+    const store = buildStore();
+    const CARD_SUMMARY = { brand: 'visa' as const, last4: '1111', holder: 'Jane Doe' };
+    store.dispatch(cardTokenized({ cardToken: 'tok_test_card', cardSummary: CARD_SUMMARY }));
+    store.dispatch(
+      customerAndDeliverySet({
+        customer: { fullName: 'Jane Doe', email: 'jane@example.com', phone: '+573001234567' },
+        delivery: { address: 'Cra 1 # 2-3', city: 'Bogota', region: 'Cundinamarca' },
+      }),
+    );
+
+    store.dispatch(cardTokenConsumed());
+
+    const state = store.getState().checkout;
+    expect(state.cardToken).toBeNull();
+    expect(state.cardSummary).toEqual(CARD_SUMMARY);
+    expect(state.customer).not.toBeNull();
+    expect(state.delivery).not.toBeNull();
   });
 
   it('sets submitStatus via submitStatusSet', () => {

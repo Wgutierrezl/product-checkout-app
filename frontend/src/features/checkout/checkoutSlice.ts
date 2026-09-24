@@ -99,6 +99,16 @@ const checkoutSlice = createSlice({
       state.submitStatus = 'idle';
       state.submitError = null;
     },
+    /**
+     * Nulls ONLY the single-use gateway token, leaving `cardSummary` (safe
+     * display data) and everything else untouched. Used once a token has
+     * been spent one way or another: a successful `POST /transactions`, or
+     * any backend response that means the token can no longer be trusted
+     * for a retry (see design Amendment).
+     */
+    cardTokenConsumed: (state) => {
+      state.cardToken = null;
+    },
     tokenizeFailed: (state, action: PayloadAction<string>) => {
       state.cardToken = null;
       state.cardSummary = null;
@@ -123,6 +133,7 @@ export const {
   idempotencyKeyEnsured,
   idempotencyKeyRotated,
   cardTokenized,
+  cardTokenConsumed,
   tokenizeFailed,
   submitStatusSet,
   submitErrorSet,
