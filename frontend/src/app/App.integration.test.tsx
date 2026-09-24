@@ -2,7 +2,7 @@ import { Provider } from 'react-redux';
 import { render, screen } from '@testing-library/react';
 import { App } from './App';
 import { createAppStore } from './store';
-import { STORAGE_KEY } from '../shared/persistence/persistMiddleware';
+import { PERSISTED_VERSION, STORAGE_KEY } from '../shared/persistence/persistMiddleware';
 import * as backendClient from '../api/backendClient';
 
 jest.mock('../api/backendClient');
@@ -33,7 +33,7 @@ describe('App refresh resilience (integration)', () => {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
-        version: 1,
+        version: PERSISTED_VERSION,
         checkout: {
           step: 'SUMMARY',
           productId: 'p1',
@@ -43,6 +43,7 @@ describe('App refresh resilience (integration)', () => {
           installments: 1,
           idempotencyKey: 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f',
           cardSummary: { brand: 'visa', last4: '1111', holder: 'Jane Doe' },
+          submitAttempted: false,
         },
         transaction: { id: null, status: null, pollStartedAt: null },
       }),
@@ -66,7 +67,7 @@ describe('App refresh resilience (integration)', () => {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
-        version: 1,
+        version: PERSISTED_VERSION,
         checkout: {
           step: 'SUMMARY',
           productId: 'p1',
@@ -76,6 +77,7 @@ describe('App refresh resilience (integration)', () => {
           installments: 1,
           idempotencyKey: 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f',
           cardSummary: { brand: 'visa', last4: '1111', holder: 'Jane Doe' },
+          submitAttempted: false,
         },
         transaction: { id: null, status: null, pollStartedAt: null },
       }),

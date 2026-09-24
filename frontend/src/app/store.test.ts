@@ -1,5 +1,5 @@
 import { productSelected } from '../features/checkout/checkoutSlice';
-import { STORAGE_KEY } from '../shared/persistence/persistMiddleware';
+import { PERSISTED_VERSION, STORAGE_KEY } from '../shared/persistence/persistMiddleware';
 import { createAppStore } from './store';
 
 describe('createAppStore', () => {
@@ -21,7 +21,7 @@ describe('createAppStore', () => {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
-        version: 1,
+        version: PERSISTED_VERSION,
         checkout: {
           step: 'DETAILS',
           productId: 'p1',
@@ -31,6 +31,7 @@ describe('createAppStore', () => {
           installments: 1,
           idempotencyKey: 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f',
           cardSummary: null,
+          submitAttempted: false,
         },
         transaction: { id: null, status: null, pollStartedAt: null },
       }),
