@@ -56,6 +56,16 @@ describe('fetchAndDispatchTransaction', () => {
     expect(dispatch).toHaveBeenCalledWith(transactionErrorSet('Transaction not found'));
   });
 
+  it('falls back to a generic message on a non-BackendApiError rejection', async () => {
+    mockedFetchTransaction.mockRejectedValue(new Error('boom'));
+    const dispatch = jest.fn();
+
+    const status = await fetchAndDispatchTransaction({ transactionId: 't1', dispatch });
+
+    expect(status).toBeNull();
+    expect(dispatch).toHaveBeenCalledWith(transactionErrorSet('Could not check payment status.'));
+  });
+
   it('skips dispatch entirely when isCancelled is already true by the time the response arrives', async () => {
     mockedFetchTransaction.mockResolvedValue(transaction({ status: 'APPROVED' }));
     const dispatch = jest.fn();
@@ -180,6 +190,56 @@ describe('pollTransaction', () => {
     await jest.advanceTimersByTimeAsync(5_000);
     await promise;
 
+    expect(mockedFetchTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('discards a successful result that resolves AFTER isCancelled flips true mid-flight, never dispatching or continuing the loop', async () => {
+    let resolveFetch: ((value: ReturnType<typeof transaction>) => void) | undefined;
+    mockedFetchTransaction.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+    const dispatch = jest.fn();
+    let cancelled = false;
+
+    const promise = pollTransaction({
+      transactionId: 't1',
+      pollStartedAt: Date.now(),
+      dispatch,
+      isCancelled: () => cancelled,
+    });
+    cancelled = true;
+    resolveFetch?.(transaction({ status: 'PENDING' }));
+    await promise;
+
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(mockedFetchTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('discards a rejection that resolves AFTER isCancelled flips true mid-flight, never dispatching an error', async () => {
+    let rejectFetch: ((error: unknown) => void) | undefined;
+    mockedFetchTransaction.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectFetch = reject;
+        }),
+    );
+    const dispatch = jest.fn();
+    let cancelled = false;
+
+    const promise = pollTransaction({
+      transactionId: 't1',
+      pollStartedAt: Date.now(),
+      dispatch,
+      isCancelled: () => cancelled,
+    });
+    cancelled = true;
+    rejectFetch?.(new BackendApiError('Network error', 0));
+    await promise;
+
+    expect(dispatch).not.toHaveBeenCalled();
     expect(mockedFetchTransaction).toHaveBeenCalledTimes(1);
   });
 });
