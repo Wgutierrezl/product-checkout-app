@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '../../shared/ui/Button';
+import { ResultIcon } from '../../shared/ui/ResultIcon';
 import { Spinner } from '../../shared/ui/Spinner';
 import { useOverlayA11y } from '../../shared/ui/useOverlayA11y';
 import { formatCOP } from '../../domain/money/formatCOP';
@@ -106,6 +107,7 @@ export function ResultScreen({
 
       {isFinal && (
         <div className={styles.card}>
+          <ResultIcon variant={isApproved ? 'approved' : 'failure'} />
           <h2 ref={headingRef} tabIndex={-1} className={styles.heading}>
             {isApproved ? 'Payment approved' : 'Payment not completed'}
           </h2>

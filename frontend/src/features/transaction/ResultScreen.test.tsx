@@ -131,6 +131,12 @@ describe('ResultScreen', () => {
       screen.getByRole('button', { name: /back to store/i }).click();
       expect(onBackToStore).toHaveBeenCalledTimes(1);
     });
+
+    it('shows the approved (checkmark) result icon', () => {
+      renderResult({ status: 'APPROVED', reference: 'REF-1', amounts: AMOUNTS });
+
+      expect(screen.getByTestId('result-icon-check')).toBeInTheDocument();
+    });
   });
 
   describe.each(['DECLINED', 'ERROR', 'VOIDED'] as const)('%s (failure outcomes)', (status) => {
@@ -141,6 +147,12 @@ describe('ResultScreen', () => {
       expect(heading).toHaveFocus();
       expect(heading).toHaveTextContent(/payment/i);
       expect(screen.getAllByText(/payment/i).length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('shows the failure (cross) result icon', () => {
+      renderResult({ status, reference: 'REF-1' });
+
+      expect(screen.getByTestId('result-icon-cross')).toBeInTheDocument();
     });
 
     it('offers both "Try again" and "Back to store"', () => {
