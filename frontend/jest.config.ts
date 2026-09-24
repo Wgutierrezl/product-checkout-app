@@ -13,6 +13,7 @@ const config: Config = {
     '\\.css$': 'identity-obj-proxy',
     '\\.(png|jpg|jpeg|gif|svg)$': '<rootDir>/test/fileMock.js',
   },
+  setupFiles: ['<rootDir>/jest.env.setup.ts'],
   setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
   collectCoverageFrom: [
     'src/**/*.{ts,tsx}',
