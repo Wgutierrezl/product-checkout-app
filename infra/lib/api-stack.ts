@@ -49,7 +49,7 @@ export class ApiStack extends Stack {
 
     const fn = new LambdaFunction(this, 'CheckoutFunction', {
       functionName: 'checkout-api',
-      runtime: Runtime.NODEJS_20_X,
+      runtime: Runtime.NODEJS_22_X,
       architecture: Architecture.ARM_64,
       memorySize: 1024,
       timeout: Duration.seconds(15),

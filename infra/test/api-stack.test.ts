@@ -51,11 +51,11 @@ function synthApiStack(): Template {
 }
 
 describe('ApiStack', () => {
-  it('configures the Lambda with NODEJS_20_X, ARM_64, 1024MB, and a 15s timeout', () => {
+  it('configures the Lambda with NODEJS_22_X, ARM_64, 1024MB, and a 15s timeout', () => {
     const template = synthApiStack();
 
     template.hasResourceProperties('AWS::Lambda::Function', {
-      Runtime: 'nodejs20.x',
+      Runtime: 'nodejs22.x',
       Architectures: ['arm64'],
       MemorySize: 1024,
       Timeout: 15,
