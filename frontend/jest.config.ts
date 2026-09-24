@@ -18,7 +18,7 @@ const config: Config = {
   collectCoverageFrom: [
     'src/**/*.{ts,tsx}',
     '!src/main.tsx',
-    '!src/vite-env.d.ts',
+    '!src/**/*.d.ts',
   ],
   coverageDirectory: './coverage',
   coverageThreshold: {
