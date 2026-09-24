@@ -11,6 +11,7 @@
     "start:prod": "node dist/src/main",
     "test": "jest",
     "test:watch": "jest --watch",
+    "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
     "seed": "ts-node scripts/seed-products.ts"
   },
   "dependencies": {
