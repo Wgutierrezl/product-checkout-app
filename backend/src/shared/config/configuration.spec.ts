@@ -76,6 +76,30 @@ describe('configuration', () => {
     expect(config.paymentGateway.timeoutMs).toBe(5000);
   });
 
+  it('strips a single trailing slash from PAYMENT_GATEWAY_URL', () => {
+    const env = buildEnv({ PAYMENT_GATEWAY_URL: 'https://sandbox.payment-gateway.test/' });
+
+    const config = configuration(env);
+
+    expect(config.paymentGateway.url).toBe('https://sandbox.payment-gateway.test');
+  });
+
+  it('strips multiple trailing slashes from PAYMENT_GATEWAY_URL', () => {
+    const env = buildEnv({ PAYMENT_GATEWAY_URL: 'https://sandbox.payment-gateway.test///' });
+
+    const config = configuration(env);
+
+    expect(config.paymentGateway.url).toBe('https://sandbox.payment-gateway.test');
+  });
+
+  it('leaves a PAYMENT_GATEWAY_URL without a trailing slash unchanged', () => {
+    const env = buildEnv({ PAYMENT_GATEWAY_URL: 'https://sandbox.payment-gateway.test/v1' });
+
+    const config = configuration(env);
+
+    expect(config.paymentGateway.url).toBe('https://sandbox.payment-gateway.test/v1');
+  });
+
   it('defaults to validating process.env when called without an explicit EnvironmentVariables instance', () => {
     const originalEnv = { ...process.env };
     delete process.env.NODE_ENV;
