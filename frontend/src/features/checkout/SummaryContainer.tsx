@@ -12,7 +12,7 @@ import {
   submitErrorSet,
   submitStatusSet,
 } from './checkoutSlice';
-import { pollStarted, transactionReceived } from '../transaction/transactionSlice';
+import { pollStartedNow, transactionReceived } from '../transaction/transactionSlice';
 import { createTransaction, fetchPaymentAcceptance } from '../../api/backendClient';
 import { BackendApiError } from '../../api/types';
 import type { PaymentAcceptance } from '../../api/types';
@@ -158,7 +158,7 @@ export function SummaryContainer() {
       // Marks the start of the RESULT step's polling window; the RESULT
       // container resumes from this timestamp even across a refresh (see
       // pollTransactionThunk.ts).
-      dispatch(pollStarted(Date.now()));
+      dispatch(pollStartedNow());
       // MUST fire before cardTokenConsumed(): checkoutSlice's RESULT
       // prerequisite checks `cardToken !== null` (see checkoutSlice.ts).
       dispatch(stepChangeRequested('RESULT'));

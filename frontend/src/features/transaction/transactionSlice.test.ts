@@ -1,6 +1,7 @@
 import { configureStore } from '@reduxjs/toolkit';
 import {
   pollStarted,
+  pollStartedNow,
   transactionCleared,
   transactionErrorSet,
   transactionReceived,
@@ -68,6 +69,15 @@ describe('transactionSlice', () => {
     store.dispatch(pollStarted(123456));
 
     expect(store.getState().transaction.pollStartedAt).toBe(123456);
+  });
+
+  it('records the current time via the pollStartedNow convenience action (dedupes Date.now() call sites)', () => {
+    const store = buildStore();
+    const before = Date.now();
+
+    store.dispatch(pollStartedNow());
+
+    expect(store.getState().transaction.pollStartedAt).toBeGreaterThanOrEqual(before);
   });
 
   it('sets an error message via transactionErrorSet', () => {

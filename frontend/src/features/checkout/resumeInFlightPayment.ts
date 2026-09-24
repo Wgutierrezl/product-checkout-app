@@ -1,7 +1,7 @@
 import { fetchTransaction } from '../../api/backendClient';
 import { BackendApiError } from '../../api/types';
 import { cardTokenConsumed, paymentAttemptResolved, stepForced } from './checkoutSlice';
-import { pollStarted, transactionReceived } from '../transaction/transactionSlice';
+import { pollStartedNow, transactionReceived } from '../transaction/transactionSlice';
 
 /**
  * Only the actions this module ever dispatches -- kept narrow (rather than
@@ -11,7 +11,7 @@ import { pollStarted, transactionReceived } from '../transaction/transactionSlic
 type ResumeDispatch = (
   action:
     | ReturnType<typeof transactionReceived>
-    | ReturnType<typeof pollStarted>
+    | ReturnType<typeof pollStartedNow>
     | ReturnType<typeof cardTokenConsumed>
     | ReturnType<typeof paymentAttemptResolved>
     | ReturnType<typeof stepForced>,
@@ -66,7 +66,7 @@ export async function resumeInFlightPayment({ idempotencyKey, dispatch }: Resume
         },
       }),
     );
-    dispatch(pollStarted(Date.now()));
+    dispatch(pollStartedNow());
     dispatch(cardTokenConsumed());
     dispatch(paymentAttemptResolved());
     dispatch(stepForced('RESULT'));

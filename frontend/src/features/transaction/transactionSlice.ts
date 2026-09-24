@@ -56,3 +56,14 @@ export const { transactionReceived, pollStarted, transactionErrorSet, transactio
   transactionSlice.actions;
 
 export const transactionReducer = transactionSlice.reducer;
+
+/**
+ * Convenience wrapper around `pollStarted(Date.now())` — the single place
+ * every call site (`SummaryContainer` after a successful submission,
+ * `resumeInFlightPayment` after discovering a transaction post-refresh,
+ * `ResultContainer`'s defensive fallback) gets the current timestamp from,
+ * instead of each repeating `pollStarted(Date.now())` independently.
+ */
+export function pollStartedNow() {
+  return pollStarted(Date.now());
+}
