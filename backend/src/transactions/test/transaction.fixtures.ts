@@ -1,7 +1,7 @@
 import { Money } from '../../products/domain/value-objects/money.vo';
 import { Quantity } from '../../products/domain/value-objects/quantity.vo';
 import { NotFoundError } from '../../shared/errors/domain-error';
-import { errAsync, okAsync } from '../../shared/result/result.types';
+import { AppResultAsync, errAsync, okAsync } from '../../shared/result/result.types';
 import { Transaction } from '../domain/transaction.entity';
 import {
   CreatePendingTransactionInput,
@@ -36,7 +36,7 @@ export function buildTransaction(overrides: Partial<Transaction> = {}): Transact
 export class FakeTransactionRepository implements TransactionRepositoryPort {
   constructor(private readonly transactions: Transaction[] = []) {}
 
-  createPending(input: CreatePendingTransactionInput) {
+  createPending(input: CreatePendingTransactionInput): AppResultAsync<Transaction> {
     const transaction: Transaction = {
       id: input.id,
       reference: input.reference,
@@ -56,7 +56,7 @@ export class FakeTransactionRepository implements TransactionRepositoryPort {
     return okAsync(transaction);
   }
 
-  updateGatewayResult(id: string, input: UpdateGatewayResultInput) {
+  updateGatewayResult(id: string, input: UpdateGatewayResultInput): AppResultAsync<Transaction> {
     const index = this.transactions.findIndex((transaction) => transaction.id === id);
     if (index === -1) {
       return errAsync(new NotFoundError(`Transaction ${id} not found`));
@@ -73,7 +73,7 @@ export class FakeTransactionRepository implements TransactionRepositoryPort {
     return okAsync(updated);
   }
 
-  findById(id: string) {
+  findById(id: string): AppResultAsync<Transaction> {
     const found = this.transactions.find((transaction) => transaction.id === id);
     return found ? okAsync(found) : errAsync(new NotFoundError(`Transaction ${id} not found`));
   }

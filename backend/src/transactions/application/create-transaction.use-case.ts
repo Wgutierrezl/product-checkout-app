@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 
 import { Customer } from '../../customers/domain/customer.entity';
 import { CUSTOMER_REPOSITORY_PORT, CustomerRepositoryPort } from '../../customers/domain/customer.repository.port';
@@ -6,9 +6,10 @@ import { Product } from '../../products/domain/product.entity';
 import { PRODUCT_REPOSITORY_PORT, ProductRepositoryPort } from '../../products/domain/product.repository.port';
 import { Money } from '../../products/domain/value-objects/money.vo';
 import { Quantity } from '../../products/domain/value-objects/quantity.vo';
-import { InsufficientStockError } from '../../shared/errors/domain-error';
+import { DomainError, InsufficientStockError } from '../../shared/errors/domain-error';
 import { buildIntegritySignature } from '../../shared/payment-gateway/domain/integrity-signature';
 import { PAYMENT_GATEWAY_PORT, PaymentGatewayPort } from '../../shared/payment-gateway/domain/payment-gateway.port';
+import { GatewayTransactionResult } from '../../shared/payment-gateway/domain/payment-gateway.types';
 import { CLOCK_PORT, ClockPort } from '../../shared/ports/clock.port';
 import { ID_GENERATOR_PORT, IdGeneratorPort } from '../../shared/ports/id-generator.port';
 import { AppResult, AppResultAsync, err, errAsync, ok, okAsync } from '../../shared/result/result.types';
@@ -75,6 +76,8 @@ interface PendingState extends PricedProduct {
  */
 @Injectable()
 export class CreateTransactionUseCase {
+  private readonly logger = new Logger(CreateTransactionUseCase.name);
+
   constructor(
     @Inject(PRODUCT_REPOSITORY_PORT) private readonly products: ProductRepositoryPort,
     @Inject(CUSTOMER_REPOSITORY_PORT) private readonly customers: CustomerRepositoryPort,
@@ -178,17 +181,55 @@ export class CreateTransactionUseCase {
         cardToken: command.cardToken,
         installments: command.installments,
       })
-      .andThen((gatewayResult) =>
-        this.transactions.updateGatewayResult(transaction.id, {
-          gatewayTransactionId: gatewayResult.gatewayTransactionId,
-          status: gatewayResult.status,
-          updatedAt: this.clock.now().toISOString(),
-        }),
-      )
-      .orElse((error) =>
-        this.transactions
-          .updateGatewayResult(transaction.id, { status: 'ERROR', updatedAt: this.clock.now().toISOString() })
-          .andThen(() => errAsync(error)),
+      .andThen((gatewayResult) => this.persistGatewayResult(transaction, gatewayResult))
+      .orElse((error) => this.persistErrorStatus(transaction, error));
+  }
+
+  /**
+   * The gateway charge already succeeded by the time this runs — an
+   * "orphaned charge" (money moved, our own record never updated) is the
+   * worst possible outcome here. Log enough to manually reconcile (never
+   * PII, never the card token) and retry the write once before giving up.
+   */
+  private persistGatewayResult(
+    transaction: Transaction,
+    gatewayResult: GatewayTransactionResult,
+  ): AppResultAsync<Transaction> {
+    const input = {
+      gatewayTransactionId: gatewayResult.gatewayTransactionId,
+      status: gatewayResult.status,
+      updatedAt: this.clock.now().toISOString(),
+    };
+
+    return this.transactions.updateGatewayResult(transaction.id, input).orElse((persistError) => {
+      this.logger.error(
+        `Failed to persist gateway result, retrying once: transactionId=${transaction.id} ` +
+          `reference=${transaction.reference} gatewayTransactionId=${gatewayResult.gatewayTransactionId} ` +
+          `gatewayStatus=${gatewayResult.status}: ${persistError.message}`,
       );
+      return this.transactions.updateGatewayResult(transaction.id, input);
+    });
+  }
+
+  /**
+   * The gateway call itself failed (network/timeout/malformed response) —
+   * the transaction is marked ERROR and the ORIGINAL gateway error is
+   * always what gets returned to the caller, even if persisting the ERROR
+   * status also fails (that secondary failure is only logged, never
+   * swallows or replaces the real cause of the 502).
+   */
+  private persistErrorStatus(transaction: Transaction, error: DomainError): AppResultAsync<Transaction> {
+    return this.transactions
+      .updateGatewayResult(transaction.id, { status: 'ERROR', updatedAt: this.clock.now().toISOString() })
+      .andThen(() => errAsync(error))
+      .orElse((finalError) => {
+        if (finalError !== error) {
+          this.logger.error(
+            `Failed to persist ERROR status after a gateway failure: transactionId=${transaction.id} ` +
+              `reference=${transaction.reference}: ${finalError.message}`,
+          );
+        }
+        return errAsync(error);
+      });
   }
 }

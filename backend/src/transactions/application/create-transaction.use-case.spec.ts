@@ -1,4 +1,6 @@
-import { PaymentGatewayError } from '../../shared/errors/domain-error';
+import { Logger } from '@nestjs/common';
+
+import { DomainError, PaymentGatewayError, UnexpectedError } from '../../shared/errors/domain-error';
 import { ClockPort } from '../../shared/ports/clock.port';
 import { IdGeneratorPort } from '../../shared/ports/id-generator.port';
 import { buildIntegritySignature } from '../../shared/payment-gateway/domain/integrity-signature';
@@ -8,6 +10,8 @@ import { CreateCardTransactionInput, GatewayTransactionResult } from '../../shar
 import { buildCustomer, FakeCustomerRepository } from '../../customers/test/customer.fixtures';
 import { buildProduct, FakeProductRepository } from '../../products/test/product.fixtures';
 import { Stock } from '../../products/domain/value-objects/stock.vo';
+import { Transaction } from '../domain/transaction.entity';
+import { UpdateGatewayResultInput } from '../domain/transaction.repository.port';
 import { FakeTransactionRepository } from '../test/transaction.fixtures';
 import { CreateTransactionCommand, CreateTransactionUseCase } from './create-transaction.use-case';
 
@@ -48,6 +52,25 @@ class RecordingGatewayPort implements PaymentGatewayPort {
 
   getTransaction(): never {
     throw new Error('not used in this suite');
+  }
+}
+
+/**
+ * Wraps a real `FakeTransactionRepository` but lets a test queue scripted
+ * `updateGatewayResult` outcomes (consumed in call order) before falling
+ * back to the real delegate — used to simulate a transient DB failure
+ * followed by a successful retry, or a persistent failure.
+ */
+class FlakyTransactionRepository extends FakeTransactionRepository {
+  private readonly updateGatewayResultQueue: Array<() => AppResultAsync<Transaction>> = [];
+
+  queueUpdateGatewayResultFailure(error: DomainError): void {
+    this.updateGatewayResultQueue.push(() => errAsync(error));
+  }
+
+  updateGatewayResult(id: string, input: UpdateGatewayResultInput): AppResultAsync<Transaction> {
+    const next = this.updateGatewayResultQueue.shift();
+    return next ? next() : super.updateGatewayResult(id, input);
   }
 }
 
@@ -209,6 +232,74 @@ describe('CreateTransactionUseCase', () => {
       signature: expectedSignature,
       cardToken: 'tok_test_card',
       installments: 1,
+    });
+  });
+
+  describe('gateway-result persistence hardening', () => {
+    let errorSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+    });
+
+    afterEach(() => {
+      errorSpy.mockRestore();
+    });
+
+    it('retries updateGatewayResult once and succeeds after a transient DB failure', async () => {
+      const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } });
+      const transactions = new FlakyTransactionRepository();
+      transactions.queueUpdateGatewayResultFailure(new UnexpectedError('DynamoDB throttled'));
+      const useCase = buildUseCase({ transactions, gateway });
+
+      const result = await useCase.execute(buildCommand());
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap().status).toBe('APPROVED');
+      const stored = await transactions.findById('generated-id-2');
+      expect(stored._unsafeUnwrap().status).toBe('APPROVED');
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      const logged = errorSpy.mock.calls[0][0] as string;
+      expect(logged).toContain('generated-id-2');
+      expect(logged).toContain('REF-generated');
+      expect(logged).toContain('gw-1');
+      expect(logged).toContain('APPROVED');
+      expect(logged).not.toContain('jane.doe@example.com');
+      expect(logged).not.toContain('tok_test_card');
+    });
+
+    it('returns the persistence error when the retry also fails too', async () => {
+      const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } });
+      const transactions = new FlakyTransactionRepository();
+      const secondFailure = new UnexpectedError('DynamoDB still throttled');
+      transactions.queueUpdateGatewayResultFailure(new UnexpectedError('DynamoDB throttled'));
+      transactions.queueUpdateGatewayResultFailure(secondFailure);
+      const useCase = buildUseCase({ transactions, gateway });
+
+      const result = await useCase.execute(buildCommand());
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr()).toBe(secondFailure);
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy.mock.calls[0][0] as string).toContain('retrying once');
+    });
+
+    it('propagates the ORIGINAL PaymentGatewayError and logs the secondary DB error when persisting ERROR status also fails', async () => {
+      const gatewayError = new PaymentGatewayError('Payment gateway request failed: network down');
+      const gateway = new RecordingGatewayPort({ ok: false, error: gatewayError });
+      const transactions = new FlakyTransactionRepository();
+      const persistError = new UnexpectedError('DynamoDB unavailable');
+      transactions.queueUpdateGatewayResultFailure(persistError);
+      const useCase = buildUseCase({ transactions, gateway });
+
+      const result = await useCase.execute(buildCommand());
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr()).toBe(gatewayError);
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      const logged = errorSpy.mock.calls[0][0] as string;
+      expect(logged).toContain('DynamoDB unavailable');
+      expect(logged).toContain('after a gateway failure');
     });
   });
 });
