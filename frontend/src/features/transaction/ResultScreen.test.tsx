@@ -113,6 +113,17 @@ describe('ResultScreen', () => {
       expect(screen.getByText(/Cundinamarca/)).toBeInTheDocument();
     });
 
+    it('includes the postal code in the address when present', () => {
+      renderResult({
+        status: 'APPROVED',
+        reference: 'REF-1',
+        amounts: AMOUNTS,
+        delivery: { ...DELIVERY, postalCode: '110111' },
+      });
+
+      expect(screen.getByText(/110111/)).toBeInTheDocument();
+    });
+
     it('offers "Back to store" but NOT "Try again"', async () => {
       const { onBackToStore } = renderResult({ status: 'APPROVED', reference: 'REF-1', amounts: AMOUNTS });
 
