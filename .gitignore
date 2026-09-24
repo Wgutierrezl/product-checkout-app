@@ -5,6 +5,7 @@ node_modules/
 dist/
 build/
 coverage/
+openapi.json
 
 # CDK
 cdk.out/

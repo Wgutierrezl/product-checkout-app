@@ -1,7 +1,7 @@
 import { SwaggerModule } from '@nestjs/swagger';
 import type { INestApplication } from '@nestjs/common';
 
-import { setupSwagger } from './swagger.setup';
+import { buildSwaggerDocument, setupSwagger } from './swagger.setup';
 
 jest.mock('@nestjs/swagger', () => {
   const actual = jest.requireActual('@nestjs/swagger');
@@ -25,5 +25,19 @@ describe('setupSwagger', () => {
       expect.objectContaining({ info: expect.objectContaining({ title: 'Product Checkout API' }) }),
     );
     expect(SwaggerModule.setup).toHaveBeenCalledWith('docs', app, { paths: {} });
+  });
+});
+
+describe('buildSwaggerDocument', () => {
+  it('builds the same document setupSwagger mounts, for reuse by an export script', () => {
+    const app = {} as INestApplication;
+
+    const document = buildSwaggerDocument(app);
+
+    expect(SwaggerModule.createDocument).toHaveBeenCalledWith(
+      app,
+      expect.objectContaining({ info: expect.objectContaining({ title: 'Product Checkout API' }) }),
+    );
+    expect(document).toEqual({ paths: {} });
   });
 });
