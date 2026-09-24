@@ -9,6 +9,7 @@ export interface AppConfig {
     privateKey: string;
     integritySecret: string;
     eventsSecret: string;
+    timeoutMs: number;
   };
   aws: {
     region: string;
@@ -46,6 +47,7 @@ export default function configuration(
       privateKey: env.PAYMENT_GATEWAY_PRIVATE_KEY,
       integritySecret: env.PAYMENT_GATEWAY_INTEGRITY_SECRET,
       eventsSecret: env.PAYMENT_GATEWAY_EVENTS_SECRET,
+      timeoutMs: env.PAYMENT_GATEWAY_TIMEOUT_MS,
     },
     aws: {
       region: env.AWS_REGION,

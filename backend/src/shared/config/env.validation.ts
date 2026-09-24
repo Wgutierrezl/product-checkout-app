@@ -42,6 +42,11 @@ export class EnvironmentVariables {
   @IsString()
   PAYMENT_GATEWAY_EVENTS_SECRET!: string;
 
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  PAYMENT_GATEWAY_TIMEOUT_MS: number = 8000;
+
   @IsNotEmpty()
   @IsString()
   CORS_ALLOWED_ORIGINS!: string;
