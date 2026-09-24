@@ -430,7 +430,7 @@ describe('CreateTransactionUseCase', () => {
       expect(logged).not.toContain('tok_test_card');
     });
 
-    it('returns the persistence error when the retry also fails too', async () => {
+    it('returns the persistence error when the retry also fails too, and NEVER marks the transaction ERROR (the gateway already approved and charged the card)', async () => {
       const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } });
       const transactions = new FlakyTransactionRepository();
       const secondFailure = new UnexpectedError('DynamoDB still throttled');
@@ -442,8 +442,49 @@ describe('CreateTransactionUseCase', () => {
 
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr()).toBe(secondFailure);
-      expect(errorSpy).toHaveBeenCalledTimes(1);
+      // CRITICAL: the persisted row must stay PENDING, never ERROR — the
+      // gateway call itself succeeded (APPROVED), only OUR write failed.
+      // Misclassifying this as a gateway rejection would falsely mark a
+      // successfully-charged transaction as ERROR.
+      const stored = await transactions.findById(IDEMPOTENCY_KEY);
+      expect(stored._unsafeUnwrap().status).toBe('PENDING');
+      // Best-effort: the gatewayTransactionId is still recorded via the
+      // lightweight conditioned write so lazy-poll/webhook can resolve it later.
+      expect(stored._unsafeUnwrap().gatewayTransactionId).toBe('gw-1');
+      expect(transactions.finalizeNonApprovedCalls).toHaveLength(0);
+      expect(errorSpy).toHaveBeenCalledTimes(2);
       expect(errorSpy.mock.calls[0][0] as string).toContain('retrying once');
+      const secondLog = errorSpy.mock.calls[1][0] as string;
+      expect(secondLog).toContain(IDEMPOTENCY_KEY);
+      expect(secondLog).toContain('leaving transaction PENDING');
+    });
+
+    it('swallows a secondary failure when even the best-effort fallback write fails, and still returns the original retry error', async () => {
+      const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } });
+      const transactions = new FlakyTransactionRepository();
+      const secondFailure = new UnexpectedError('DynamoDB still throttled');
+      transactions.queueSettleApprovedFailure(new UnexpectedError('DynamoDB throttled'));
+      transactions.queueSettleApprovedFailure(secondFailure);
+      transactions.queueUpdateGatewayResultFailure(new UnexpectedError('fallback write also failed'));
+      const useCase = buildUseCase({ transactions, gateway });
+
+      const result = await useCase.execute(buildCommand());
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr()).toBe(secondFailure);
+    });
+
+    it('never routes a persistence failure through the definite-gateway-rejection path (settleApproved is never re-invoked as a call-failure handler)', async () => {
+      const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } });
+      const transactions = new FlakyTransactionRepository();
+      transactions.queueSettleApprovedFailure(new UnexpectedError('DynamoDB throttled'));
+      transactions.queueSettleApprovedFailure(new UnexpectedError('DynamoDB still throttled'));
+      const useCase = buildUseCase({ transactions, gateway });
+
+      await useCase.execute(buildCommand());
+
+      expect(gateway.lastCreateCardTransactionInput).toBeDefined();
+      expect(transactions.settleApprovedCalls).toHaveLength(0); // both attempts were intercepted by the queue, never reached real logic
     });
 
     it('propagates the ORIGINAL PaymentGatewayError and logs the secondary DB error when finalizing ERROR status also fails (definite rejection)', async () => {
