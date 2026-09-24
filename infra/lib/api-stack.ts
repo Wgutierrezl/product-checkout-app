@@ -31,7 +31,7 @@ export interface ApiStackProps extends StackProps {
 /**
  * Lambda (zip of `nest build` output + pruned prod `node_modules`) behind an
  * HTTP API `$default` stage. IAM is least-privilege: read/write on the 4
- * DataStack tables (+ their GSIs), `ssm:GetParameter` on exactly the 3
+ * DataStack tables (+ their GSIs), `ssm:GetParameters` on exactly the 3
  * payment-gateway SecureString params, and `kms:Decrypt` on the account's
  * default `aws/ssm` managed key. No secret values are ever set as plain
  * Lambda env vars — they are fetched from SSM at cold start instead.
@@ -106,7 +106,7 @@ export class ApiStack extends Stack {
     fn.addToRolePolicy(
       new PolicyStatement({
         effect: Effect.ALLOW,
-        actions: ['ssm:GetParameter'],
+        actions: ['ssm:GetParameters'],
         resources: ssmParamArns,
       }),
     );

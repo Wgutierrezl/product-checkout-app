@@ -97,10 +97,10 @@ describe('ApiStack', () => {
     expect((envVars.PAYMENT_GATEWAY_PUBLIC_KEY as string).length).toBeGreaterThan(0);
   });
 
-  it('scopes ssm:GetParameter to exactly the 3 gateway SecureString param ARNs — no wildcard resource', () => {
+  it('scopes ssm:GetParameters (the batch action the backend calls) to exactly the 3 gateway SecureString param ARNs — no wildcard resource', () => {
     const template = synthApiStack();
 
-    const statement = findStatementByAction(template, 'ssm:GetParameter');
+    const statement = findStatementByAction(template, 'ssm:GetParameters');
     expect(statement.Effect).toBe('Allow');
     expect(statement.Resource).not.toBe('*');
     expect(Array.isArray(statement.Resource)).toBe(true);
