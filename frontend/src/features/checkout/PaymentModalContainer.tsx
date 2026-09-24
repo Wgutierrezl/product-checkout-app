@@ -38,13 +38,21 @@ export function PaymentModalContainer() {
   // container has already unmounted (e.g. the step changed away from
   // DETAILS through some other path while the request was in flight) — a
   // stale result must never dispatch cardTokenized/customer/step SUMMARY.
-  const isMountedRef = useRef(true);
-  useEffect(
-    () => () => {
+  //
+  // Starts `false` and is set `true` INSIDE the effect body (not at
+  // `useRef` init time) so it re-arms on every REAL mount — required for
+  // React 18 StrictMode's dev-only mount -> cleanup -> mount cycle: the
+  // simulated cleanup sets it `false`, and without resetting it here on
+  // the second (real) mount, it would stay permanently `false` for the
+  // rest of the component's actual lifetime, silently discarding every
+  // future tokenize result (see the identical fix in `ResultContainer`).
+  const isMountedRef = useRef(false);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
       isMountedRef.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
 
   function handleCancel() {
     // Close paths (Cancel button, Escape, backdrop click all route through
