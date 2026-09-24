@@ -4,6 +4,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 
 import { CustomersModule } from './customers/customers.module';
+import { DeliveriesModule } from './deliveries/deliveries.module';
 import { HealthController } from './health/health.controller';
 import { ProductsModule } from './products/products.module';
 import type { AppConfig } from './shared/config/configuration';
@@ -27,6 +28,7 @@ import { ID_GENERATOR_PORT } from './shared/ports/id-generator.port';
     DynamoModule,
     ProductsModule,
     CustomersModule,
+    DeliveriesModule,
   ],
   controllers: [HealthController],
   providers: [
