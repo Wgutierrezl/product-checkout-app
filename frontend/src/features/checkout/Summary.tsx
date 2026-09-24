@@ -1,5 +1,8 @@
+import { useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from '../../shared/ui/Button';
 import { CardBrandIcon } from '../../shared/ui/CardBrandIcon';
+import { useOverlayA11y } from '../../shared/ui/useOverlayA11y';
 import { formatCOP } from '../../domain/money/formatCOP';
 import { computeOrderPreview } from '../../domain/checkout/orderPreview';
 import type { DeliveryInput } from '../../api/types';
@@ -42,6 +45,15 @@ export interface SummaryProps {
  * is always a CLIENT-COMPUTED ESTIMATE (see `computeOrderPreview`) — the
  * real `Transaction` amounts from the backend are the only authoritative
  * source, shown on the RESULT screen after a successful submission.
+ *
+ * Behaves like a full-screen modal (focus trap, initial focus on the
+ * heading, Escape returns to "Edit details", background inert while
+ * mounted) via the same `useOverlayA11y` hook `Modal` uses — rendered
+ * through a portal so the hook's "every other child of document.body"
+ * background-hiding logic applies correctly. This is deliberately NOT the
+ * `shared/ui/Backdrop` component: that one is a click-to-dismiss overlay
+ * for a transient dialog, while this step is non-dismissible by
+ * backdrop-click ("Edit details" is the only way back).
  */
 export function Summary({
   product,
@@ -61,8 +73,14 @@ export function Summary({
   const preview = product ? computeOrderPreview({ unitPrice: product.price, quantity: product.quantity }) : null;
   const canPay = termsAccepted && personalDataAccepted && acceptanceLinks !== null && !isSubmitting;
 
-  return (
-    <div className={styles.overlay}>
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const sheetRef = useRef<HTMLElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+
+  useOverlayA11y({ overlayRef, containerRef: sheetRef, onClose: onEditDetails, initialFocusRef: headingRef });
+
+  return createPortal(
+    <div className={styles.overlay} ref={overlayRef}>
       <div className={styles.backLayer}>
         {product && (
           <>
@@ -75,8 +93,10 @@ export function Summary({
         )}
       </div>
 
-      <section className={styles.sheet} aria-label="Order summary">
-        <h2 className={styles.sectionTitle}>Order summary</h2>
+      <section className={styles.sheet} aria-label="Order summary" ref={sheetRef}>
+        <h2 ref={headingRef} tabIndex={-1} className={styles.sectionTitle}>
+          Order summary
+        </h2>
 
         {submitError && (
           <p role="alert" className={styles.alert}>
@@ -167,7 +187,7 @@ export function Summary({
         </label>
 
         <div className={styles.actions}>
-          <Button type="button" variant="secondary" onClick={onEditDetails}>
+          <Button type="button" variant="secondary" onClick={onEditDetails} disabled={isSubmitting}>
             Edit details
           </Button>
           <Button type="button" disabled={!canPay} onClick={onPay}>
@@ -175,6 +195,7 @@ export function Summary({
           </Button>
         </div>
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -78,6 +78,12 @@ export function SummaryContainer() {
   const isSubmitting = submitStatus === 'submitting' || submitStatus === 'fetchingAcceptance';
 
   function handleEditDetails() {
+    // Click (button `disabled`), Escape, and any future close path all
+    // route through here — mirrors PaymentModalContainer's `handleCancel`
+    // guard against closing while a request is in flight.
+    if (isSubmitting) {
+      return;
+    }
     dispatch(stepChangeRequested('DETAILS'));
   }
 

@@ -194,4 +194,53 @@ describe('Summary', () => {
     await user.click(screen.getByRole('button', { name: /edit details/i }));
     expect(onEditDetails).toHaveBeenCalledTimes(1);
   });
+
+  it('disables Edit details while isSubmitting is true', () => {
+    renderSummary({ isSubmitting: true });
+
+    expect(screen.getByRole('button', { name: /edit details/i })).toBeDisabled();
+  });
+
+  describe('overlay behavior (shared with Modal via useOverlayA11y)', () => {
+    it('focuses the "Order summary" heading on mount', () => {
+      renderSummary();
+
+      expect(screen.getByRole('heading', { name: 'Order summary' })).toHaveFocus();
+    });
+
+    it('calls onEditDetails when Escape is pressed', async () => {
+      const user = userEvent.setup();
+      const { onEditDetails } = renderSummary();
+
+      await user.keyboard('{Escape}');
+
+      expect(onEditDetails).toHaveBeenCalledTimes(1);
+    });
+
+    it('traps Tab focus: cycles from the last focusable control back to the first', async () => {
+      const user = userEvent.setup();
+      renderSummary({ termsAccepted: true, personalDataAccepted: true });
+
+      screen.getByRole('button', { name: /^pay$/i }).focus();
+      await user.tab();
+
+      expect(screen.getByRole('checkbox', { name: /terms/i })).toHaveFocus();
+    });
+
+    it('marks sibling app content aria-hidden and inert while mounted, restoring on unmount', () => {
+      const sibling = document.createElement('div');
+      document.body.appendChild(sibling);
+
+      const { unmount } = renderSummary();
+
+      expect(sibling).toHaveAttribute('aria-hidden', 'true');
+      expect(sibling).toHaveAttribute('inert');
+
+      unmount();
+
+      expect(sibling).not.toHaveAttribute('aria-hidden');
+      expect(sibling).not.toHaveAttribute('inert');
+      document.body.removeChild(sibling);
+    });
+  });
 });

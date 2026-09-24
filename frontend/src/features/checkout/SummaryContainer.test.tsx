@@ -367,6 +367,31 @@ describe('SummaryContainer', () => {
     expect(store.getState().checkout.step).toBe('DETAILS');
   });
 
+  it('moves the step back to DETAILS when Escape is pressed', async () => {
+    const user = userEvent.setup();
+    const { store } = renderWithStore();
+    await screen.findByRole('heading', { name: 'Order summary' });
+
+    await user.keyboard('{Escape}');
+
+    expect(store.getState().checkout.step).toBe('DETAILS');
+  });
+
+  it('ignores "Edit details" (click or Escape) while a submission is in flight, leaving the step unchanged', async () => {
+    mockedCreateTransaction.mockReturnValue(new Promise(() => {}));
+    const user = userEvent.setup();
+    const { store } = renderWithStore();
+    await acceptBoth(user);
+    await user.click(screen.getByRole('button', { name: /^pay$/i }));
+    await screen.findByRole('button', { name: /processing/i });
+
+    expect(screen.getByRole('button', { name: /edit details/i })).toBeDisabled();
+
+    await user.keyboard('{Escape}');
+
+    expect(store.getState().checkout.step).toBe('SUMMARY');
+  });
+
   it('ignores a createTransaction result that resolves after the container has unmounted', async () => {
     let resolveCreate: ((value: Awaited<ReturnType<typeof backendClient.createTransaction>>) => void) | undefined;
     mockedCreateTransaction.mockImplementation(
