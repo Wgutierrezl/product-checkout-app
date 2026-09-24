@@ -1,4 +1,5 @@
 import { getEnv } from '../config/env';
+import { redactCardNumbers } from '../domain/card/redact';
 import { GatewayTokenizeError, type TokenizeCardInput, type TokenizeCardResult } from './types';
 
 interface TokenizeCardResponse {
@@ -26,11 +27,41 @@ function isTokenizeCardResponse(value: unknown): value is TokenizeCardResponse {
 const REQUEST_TIMEOUT_MS = 15_000;
 
 /**
- * Best-effort extraction of the gateway's own validation feedback, so the
- * buyer sees e.g. "number: is invalid" instead of a bare status code.
- * Shape-guarded against an untrusted error body — either field is optional
- * and any unexpected shape falls back to `undefined` (caller supplies the
- * generic message in that case).
+ * A FIXED, frontend-owned set of messages — the gateway's own error text is
+ * NEVER rendered to the buyer verbatim. Third-party error text could echo
+ * back input (in the worst case, fragments of the card number itself) or
+ * simply be worded in a way we don't control; classifying by field NAME
+ * only (never by message CONTENT) keeps this a closed, auditable set.
+ */
+const SAFE_GATEWAY_MESSAGES = {
+  invalidCardNumber: 'The card number appears to be invalid.',
+  expiredCard: 'The card has expired.',
+  invalidCvc: 'The security code (CVC) appears to be invalid.',
+  generic: 'The card was rejected by the payment provider. Please check your details and try again.',
+} as const;
+
+function classifyGatewayFieldNames(fieldNames: string[]): string {
+  const lowered = fieldNames.map((name) => name.toLowerCase());
+
+  if (lowered.some((name) => name.includes('number'))) {
+    return SAFE_GATEWAY_MESSAGES.invalidCardNumber;
+  }
+  if (lowered.some((name) => name.includes('exp'))) {
+    return SAFE_GATEWAY_MESSAGES.expiredCard;
+  }
+  if (lowered.some((name) => name.includes('cvc'))) {
+    return SAFE_GATEWAY_MESSAGES.invalidCvc;
+  }
+  return SAFE_GATEWAY_MESSAGES.generic;
+}
+
+/**
+ * Best-effort classification of the gateway's error body into one of the
+ * allowlisted `SAFE_GATEWAY_MESSAGES` — shape-guarded against an untrusted
+ * error body; any unexpected shape falls back to `undefined` (caller
+ * supplies the generic status-code message in that case). The gateway's own
+ * message TEXT (`messages[field]` values, `reason`) is deliberately never
+ * read — only field NAMES and the mere presence of `reason` are inspected.
  */
 function extractGatewayErrorMessage(body: unknown): string | undefined {
   if (typeof body !== 'object' || body === null) {
@@ -44,23 +75,14 @@ function extractGatewayErrorMessage(body: unknown): string | undefined {
   const errorFields = error as Record<string, unknown>;
 
   if (typeof errorFields.messages === 'object' && errorFields.messages !== null) {
-    const parts: string[] = [];
-    for (const [field, value] of Object.entries(errorFields.messages as Record<string, unknown>)) {
-      if (Array.isArray(value)) {
-        for (const item of value) {
-          if (typeof item === 'string') {
-            parts.push(`${field}: ${item}`);
-          }
-        }
-      }
-    }
-    if (parts.length > 0) {
-      return parts.join('; ');
+    const fieldNames = Object.keys(errorFields.messages as Record<string, unknown>);
+    if (fieldNames.length > 0) {
+      return classifyGatewayFieldNames(fieldNames);
     }
   }
 
   if (typeof errorFields.reason === 'string' && errorFields.reason.length > 0) {
-    return errorFields.reason;
+    return SAFE_GATEWAY_MESSAGES.generic;
   }
 
   return undefined;
@@ -99,7 +121,7 @@ export async function tokenizeCard(input: TokenizeCardInput): Promise<TokenizeCa
       throw new GatewayTokenizeError('Card tokenization request timed out');
     }
     throw new GatewayTokenizeError(
-      `Card tokenization request failed: ${(error as Error).message}`,
+      redactCardNumbers(`Card tokenization request failed: ${(error as Error).message}`),
     );
   } finally {
     clearTimeout(timeout);
@@ -109,7 +131,9 @@ export async function tokenizeCard(input: TokenizeCardInput): Promise<TokenizeCa
 
   if (!response.ok) {
     throw new GatewayTokenizeError(
-      extractGatewayErrorMessage(body) ?? `Payment gateway rejected the card (status ${response.status})`,
+      redactCardNumbers(
+        extractGatewayErrorMessage(body) ?? `Payment gateway rejected the card (status ${response.status})`,
+      ),
     );
   }
 

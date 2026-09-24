@@ -61,44 +61,73 @@ describe('paymentGatewayClient', () => {
     await expect(tokenizeCard(input)).rejects.toBeInstanceOf(GatewayTokenizeError);
   });
 
-  it('surfaces the gateway-provided field messages when the gateway rejects the card', async () => {
+  it('maps a "number" field error to the allowlisted invalid-card-number message, never the raw gateway text', async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse(
-        { error: { type: 'INVALID_REQUEST_ERROR', messages: { number: ['is invalid'], cvc: ['is too short'] } } },
+        { error: { type: 'INVALID_REQUEST_ERROR', messages: { number: ['4111111111111111 is invalid'] } } },
         { ok: false, status: 422 },
       ),
     );
 
     await expect(tokenizeCard(input)).rejects.toMatchObject({
-      message: 'number: is invalid; cvc: is too short',
+      message: 'The card number appears to be invalid.',
     });
   });
 
-  it('ignores non-array or non-string message entries while still using the valid ones', async () => {
+  it('maps an "exp_month"/"exp_year" field error to the allowlisted expired-card message', async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse(
-        { error: { messages: { number: ['is invalid', 42], cvc: 'not an array' } } },
+        { error: { messages: { exp_year: ['is in the past'] } } },
         { ok: false, status: 422 },
       ),
     );
 
-    await expect(tokenizeCard(input)).rejects.toMatchObject({ message: 'number: is invalid' });
+    await expect(tokenizeCard(input)).rejects.toMatchObject({ message: 'The card has expired.' });
   });
 
-  it('falls back to the reason when messages is present but yields no usable entries', async () => {
+  it('maps a "cvc" field error to the allowlisted invalid-CVC message', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ error: { messages: { cvc: ['is too short'] } } }, { ok: false, status: 422 }),
+    );
+
+    await expect(tokenizeCard(input)).rejects.toMatchObject({
+      message: 'The security code (CVC) appears to be invalid.',
+    });
+  });
+
+  it('maps an unrecognized field name to the generic allowlisted message', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ error: { messages: { card_holder: ['is required'] } } }, { ok: false, status: 422 }),
+    );
+
+    await expect(tokenizeCard(input)).rejects.toMatchObject({
+      message: 'The card was rejected by the payment provider. Please check your details and try again.',
+    });
+  });
+
+  it('falls back to the generic message when messages is present but yields no field names', async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({ error: { messages: {}, reason: 'invalid card token' } }, { ok: false, status: 422 }),
     );
 
-    await expect(tokenizeCard(input)).rejects.toMatchObject({ message: 'invalid card token' });
+    await expect(tokenizeCard(input)).rejects.toMatchObject({
+      message: 'The card was rejected by the payment provider. Please check your details and try again.',
+    });
   });
 
-  it('surfaces the gateway-provided reason when there are no field messages', async () => {
+  it('never renders the raw "reason" text verbatim, even when it looks safe', async () => {
     fetchMock.mockResolvedValueOnce(
-      jsonResponse({ error: { type: 'INVALID_REQUEST_ERROR', reason: 'invalid card token' } }, { ok: false, status: 422 }),
+      jsonResponse(
+        { error: { type: 'INVALID_REQUEST_ERROR', reason: 'card 4111111111111111 was rejected by issuer' } },
+        { ok: false, status: 422 },
+      ),
     );
 
-    await expect(tokenizeCard(input)).rejects.toMatchObject({ message: 'invalid card token' });
+    const rejection = tokenizeCard(input);
+    await expect(rejection).rejects.toMatchObject({
+      message: 'The card was rejected by the payment provider. Please check your details and try again.',
+    });
+    await expect(rejection).rejects.not.toMatchObject({ message: expect.stringContaining('4111111111111111') });
   });
 
   it('falls back to a generic message when there is no error field at all', async () => {
