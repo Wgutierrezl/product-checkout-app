@@ -35,6 +35,7 @@ describe('ProductsController', () => {
           name: 'Wireless Headphones',
           description: 'Noise-cancelling over-ear headphones',
           price: 150_000,
+          currency: 'COP',
           stock: 10,
           imageUrl: 'https://images.unsplash.com/photo-1',
         },
@@ -80,6 +81,7 @@ describe('ProductsController', () => {
 
       expect(result.id).toBe('prod-1');
       expect(result.price).toBe(150_000);
+      expect(result.currency).toBe('COP');
     });
 
     it('throws the DomainError when the product is not found', async () => {
