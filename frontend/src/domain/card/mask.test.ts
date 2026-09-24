@@ -18,4 +18,16 @@ describe('maskCardNumber', () => {
   it('returns an empty string for an empty card number', () => {
     expect(maskCardNumber('')).toBe('');
   });
+
+  it('shows the trailing group of exactly 4 digits unmasked', () => {
+    expect(maskCardNumber('1234')).toBe('1234');
+  });
+
+  it('fully masks input shorter than 4 digits instead of revealing partial digits', () => {
+    expect(maskCardNumber('123')).toBe('•••');
+  });
+
+  it('fully masks a single typed digit', () => {
+    expect(maskCardNumber('1')).toBe('•');
+  });
 });
