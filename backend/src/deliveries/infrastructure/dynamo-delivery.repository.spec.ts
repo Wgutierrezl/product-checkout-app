@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { DynamoDBDocumentClient, GetCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { mockClient } from 'aws-sdk-client-mock';
 
@@ -89,6 +90,18 @@ describe('DynamoDeliveryRepository', () => {
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr().type).toBe('Unexpected');
     });
+
+    it('returns ValidationError when the stored item has corrupt data', async () => {
+      ddbMock.on(GetCommand).resolves({ Item: { ...item, status: 'SHIPPED' } });
+      const repository = new DynamoDeliveryRepository(
+        ddbMock as unknown as DynamoDBDocumentClient,
+      );
+
+      const result = await repository.findById('delivery-1');
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('Validation');
+    });
   });
 
   describe('findByTransactionId', () => {
@@ -106,6 +119,7 @@ describe('DynamoDeliveryRepository', () => {
       expect(call.TableName).toBe(DELIVERIES_TABLE_NAME);
       expect(call.IndexName).toBe(DELIVERIES_TRANSACTION_ID_INDEX_NAME);
       expect(call.ExpressionAttributeValues).toEqual({ ':transactionId': 'txn-1' });
+      expect(call.Limit).toBe(2);
     });
 
     it('returns null when no delivery matches the transaction id', async () => {
@@ -130,6 +144,38 @@ describe('DynamoDeliveryRepository', () => {
 
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr().type).toBe('Unexpected');
+    });
+
+    it('returns ValidationError when the matched item has corrupt data', async () => {
+      ddbMock.on(QueryCommand).resolves({ Items: [{ ...item, status: 'SHIPPED' }] });
+      const repository = new DynamoDeliveryRepository(
+        ddbMock as unknown as DynamoDBDocumentClient,
+      );
+
+      const result = await repository.findByTransactionId('txn-1');
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('Validation');
+    });
+
+    it('logs a warning (ids only) and returns the first match when more than one item is found', async () => {
+      const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+      ddbMock.on(QueryCommand).resolves({
+        Items: [item, { ...item, deliveryId: 'delivery-2' }],
+      });
+      const repository = new DynamoDeliveryRepository(
+        ddbMock as unknown as DynamoDBDocumentClient,
+      );
+
+      const result = await repository.findByTransactionId('txn-1');
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()?.id).toBe('delivery-1');
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('delivery-1, delivery-2'),
+      );
+
+      warnSpy.mockRestore();
     });
   });
 });
