@@ -47,8 +47,17 @@ export class WebStack extends Stack {
       "default-src 'self'",
       `connect-src 'self' ${apiOriginPattern} ${gatewaySandboxOrigin}`,
       "img-src 'self' data: https://images.unsplash.com",
-      "style-src 'self' 'unsafe-inline'",
+      // 'unsafe-inline' is required by Vite's dev-time injected styles and
+      // several component libraries; Google Fonts' stylesheet host is
+      // allow-listed alongside it for web font loading.
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "font-src 'self' https://fonts.gstatic.com",
       "frame-ancestors 'none'",
+      // Hardening trio: no <base> tag hijacking, no cross-origin form
+      // submission, no legacy plugin content (Flash/Java/etc).
+      "base-uri 'self'",
+      "form-action 'self'",
+      "object-src 'none'",
     ].join('; ');
 
     const securityHeadersPolicy = new ResponseHeadersPolicy(this, 'SecurityHeadersPolicy', {

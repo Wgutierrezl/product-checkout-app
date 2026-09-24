@@ -115,11 +115,22 @@ describe('WebStack', () => {
       Override: true,
     });
 
+    // Exact match (not just `toContain`) so a dropped/malformed directive
+    // fails loudly instead of slipping through a partial-substring check.
     const csp: string = securityHeaders.ContentSecurityPolicy.ContentSecurityPolicy;
-    expect(csp).toContain("default-src 'self'");
-    expect(csp).toContain("connect-src 'self' https://*.execute-api.us-east-1.amazonaws.com");
-    expect(csp).toContain("img-src 'self' data: https://images.unsplash.com");
-    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).toBe(
+      [
+        "default-src 'self'",
+        "connect-src 'self' https://*.execute-api.us-east-1.amazonaws.com https://payment-gateway-sandbox.invalid",
+        "img-src 'self' data: https://images.unsplash.com",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' https://fonts.gstatic.com",
+        "frame-ancestors 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "object-src 'none'",
+      ].join('; '),
+    );
   });
 
   it('includes the payment gateway sandbox origin in connect-src from env, with a safe placeholder default', () => {
