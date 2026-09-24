@@ -8,7 +8,7 @@ import { DYNAMO_DOCUMENT_CLIENT } from '../../shared/infrastructure/dynamo/dynam
 import { Product } from '../domain/product.entity';
 import { ProductRepositoryPort } from '../domain/product.repository.port';
 import { Money } from '../domain/value-objects/money.vo';
-import { Quantity } from '../domain/value-objects/quantity.vo';
+import { Stock } from '../domain/value-objects/stock.vo';
 
 export const PRODUCTS_TABLE_NAME = 'Products';
 
@@ -22,7 +22,7 @@ interface ProductItem {
 }
 
 function toProduct(item: ProductItem): AppResult<Product> {
-  return Result.combine([Money.create(item.priceCents), Quantity.create(item.stock)]).map(
+  return Result.combine([Money.create(item.priceCents), Stock.create(item.stock)]).map(
     ([price, stock]) => ({
       id: item.productId,
       name: item.name,

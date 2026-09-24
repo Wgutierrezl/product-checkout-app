@@ -4,17 +4,18 @@ import { GetProductUseCase } from '../application/get-product.use-case';
 import { ListProductsUseCase } from '../application/list-products.use-case';
 import { Product } from '../domain/product.entity';
 import { Money } from '../domain/value-objects/money.vo';
-import { Quantity } from '../domain/value-objects/quantity.vo';
+import { Stock } from '../domain/value-objects/stock.vo';
 import { ProductsController } from './products.controller';
 
-function buildProduct(): Product {
+function buildProduct(overrides: Partial<Product> = {}): Product {
   return {
     id: 'prod-1',
     name: 'Wireless Headphones',
     description: 'Noise-cancelling over-ear headphones',
     price: Money.create(150_000)._unsafeUnwrap(),
-    stock: Quantity.create(10)._unsafeUnwrap(),
+    stock: Stock.create(10)._unsafeUnwrap(),
     imageUrl: 'https://images.unsplash.com/photo-1',
+    ...overrides,
   };
 }
 
@@ -38,6 +39,22 @@ describe('ProductsController', () => {
           imageUrl: 'https://images.unsplash.com/photo-1',
         },
       ]);
+    });
+
+    it('includes an out-of-stock product (stock 0) via GET /products', async () => {
+      const outOfStock = buildProduct({
+        id: 'prod-oos',
+        name: 'Sold Out Gadget',
+        stock: Stock.create(0)._unsafeUnwrap(),
+      });
+      const listProducts = {
+        execute: () => okAsync([outOfStock]),
+      } as unknown as ListProductsUseCase;
+      const controller = new ProductsController(listProducts, {} as unknown as GetProductUseCase);
+
+      const result = await controller.list();
+
+      expect(result).toEqual([expect.objectContaining({ id: 'prod-oos', stock: 0 })]);
     });
 
     it('throws the DomainError when the use case fails', async () => {

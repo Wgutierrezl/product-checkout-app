@@ -58,6 +58,29 @@ describe('DynamoProductRepository', () => {
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr().type).toBe('Unexpected');
     });
+
+    it('maps and returns an out-of-stock product (stock 0)', async () => {
+      ddbMock.on(ScanCommand).resolves({
+        Items: [
+          {
+            productId: 'prod-oos',
+            name: 'Sold Out Gadget',
+            description: 'Temporarily unavailable',
+            priceCents: 50_000,
+            stock: 0,
+            imageUrl: 'https://images.example.com/sold-out.webp',
+          },
+        ],
+      });
+      const repository = new DynamoProductRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.findAll();
+
+      expect(result.isOk()).toBe(true);
+      const products = result._unsafeUnwrap();
+      expect(products).toHaveLength(1);
+      expect(products[0].stock.value).toBe(0);
+    });
   });
 
   describe('findById', () => {

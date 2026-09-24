@@ -2,8 +2,10 @@
  * Idempotent local seed script for the Products table.
  *
  * Creates the `Products` table on DynamoDB Local (if it doesn't already exist)
- * and puts a fixed catalog of 6 sample products keyed by stable UUIDs, so
- * re-running the script overwrites the same items instead of duplicating them.
+ * and puts a fixed catalog of 7 sample products (including one out-of-stock
+ * item, stock 0, to demo the catalog's "sold out" UI state) keyed by stable
+ * UUIDs, so re-running the script overwrites the same items instead of
+ * duplicating them.
  *
  * Only the Products table is created here — Customers/Deliveries/Transactions
  * table creation is deferred to the PRs that introduce those repositories
@@ -82,6 +84,15 @@ const SEED_PRODUCTS: SeedProductItem[] = [
     priceCents: 9_990_000,
     stock: 20,
     imageUrl: 'https://images.unsplash.com/photo-1609091839311-d5365f9ff1c5?w=600&fm=webp',
+  },
+  {
+    // Stock 0 on purpose: demos the "out of stock" UI state on the product page.
+    productId: 'ead7e452-2120-419d-b923-82ead9700648',
+    name: 'RetroPlay Handheld Console',
+    description: 'Limited-edition handheld console, currently sold out.',
+    priceCents: 24_990_000,
+    stock: 0,
+    imageUrl: 'https://images.unsplash.com/photo-1606144042614-b2417e99c4e3?w=600&fm=webp',
   },
 ];
 

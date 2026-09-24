@@ -3,7 +3,7 @@ import { errAsync, okAsync } from '../../shared/result/result.types';
 import { Product } from '../domain/product.entity';
 import { ProductRepositoryPort } from '../domain/product.repository.port';
 import { Money } from '../domain/value-objects/money.vo';
-import { Quantity } from '../domain/value-objects/quantity.vo';
+import { Stock } from '../domain/value-objects/stock.vo';
 import { GetProductUseCase } from './get-product.use-case';
 
 function buildProduct(overrides: Partial<Product> = {}): Product {
@@ -12,7 +12,7 @@ function buildProduct(overrides: Partial<Product> = {}): Product {
     name: 'Wireless Headphones',
     description: 'Noise-cancelling over-ear headphones',
     price: Money.create(150_000)._unsafeUnwrap(),
-    stock: Quantity.create(10)._unsafeUnwrap(),
+    stock: Stock.create(10)._unsafeUnwrap(),
     imageUrl: 'https://images.example.com/headphones.webp',
     ...overrides,
   };
