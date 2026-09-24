@@ -156,7 +156,7 @@ describe('SummaryContainer', () => {
     });
   });
 
-  it('on success: stores the transaction, moves to RESULT, clears cardToken, and rotates the idempotency key', async () => {
+  it('on success: stores the transaction, moves to RESULT, clears the card token, and KEEPS the same idempotencyKey used in the request', async () => {
     mockedCreateTransaction.mockResolvedValue({
       id: 't1',
       reference: 'REF-1',
@@ -170,16 +170,20 @@ describe('SummaryContainer', () => {
     const user = userEvent.setup();
     const { store } = renderWithStore();
     await acceptBoth(user);
-    const keyBeforeSubmit = store.getState().checkout.idempotencyKey;
 
     await user.click(screen.getByRole('button', { name: /^pay$/i }));
 
     await waitFor(() => expect(store.getState().checkout.step).toBe('RESULT'));
+    // A 201/PENDING response is not yet a "definitive outcome" (the transaction
+    // may still settle to DECLINED/ERROR via polling) -- the key is rotated only
+    // on a definite outcome (400, or an explicit "Try again" after a final
+    // DECLINED/ERROR/VOIDED), never right after a successful submission.
+    const sentKey = mockedCreateTransaction.mock.calls[0][0].idempotencyKey;
     const { checkout, transaction } = store.getState();
     expect(transaction.id).toBe('t1');
     expect(transaction.status).toBe('PENDING');
     expect(checkout.cardToken).toBeNull();
-    expect(checkout.idempotencyKey).not.toBe(keyBeforeSubmit);
+    expect(checkout.idempotencyKey).toBe(sentKey);
   });
 
   it('disables Pay (double-submit guard) while a submission is in flight', async () => {
@@ -235,7 +239,7 @@ describe('SummaryContainer', () => {
       expect(checkout.idempotencyKey).not.toBe(existingKey);
     });
 
-    it('5xx/network: keeps the SAME idempotencyKey and stays on SUMMARY for a retry', async () => {
+    it('network (status 0): never reached the backend -- keeps the SAME key and the SAME card token, stays on SUMMARY for a retry', async () => {
       mockedCreateTransaction.mockRejectedValue(new BackendApiError('Network error: timeout', 0));
       const user = userEvent.setup();
       const existingKey = 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f';
@@ -249,6 +253,22 @@ describe('SummaryContainer', () => {
       expect(checkout.step).toBe('SUMMARY');
       expect(checkout.idempotencyKey).toBe(existingKey);
       expect(checkout.cardToken).toBe('tok_test_card');
+    });
+
+    it('5xx: the backend received the request -- treats the token as spent and routes to DETAILS to re-tokenize, but KEEPS the same key (safe idempotent replay on retry)', async () => {
+      mockedCreateTransaction.mockRejectedValue(new BackendApiError('Payment provider unavailable', 502));
+      const user = userEvent.setup();
+      const existingKey = 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f';
+      const { store } = renderWithStore(buildStore({ idempotencyKey: existingKey }));
+      await acceptBoth(user);
+
+      await user.click(screen.getByRole('button', { name: /^pay$/i }));
+
+      await waitFor(() => expect(store.getState().checkout.step).toBe('DETAILS'));
+      const { checkout } = store.getState();
+      expect(checkout.submitError).toBe('Payment provider unavailable');
+      expect(checkout.cardToken).toBeNull();
+      expect(checkout.idempotencyKey).toBe(existingKey);
     });
 
     it('falls back to a generic acceptance-fetch-before-pay error, staying on SUMMARY with the same key', async () => {

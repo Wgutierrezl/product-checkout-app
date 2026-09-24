@@ -15,11 +15,6 @@ import { createTransaction, fetchPaymentAcceptance } from '../../api/backendClie
 import { BackendApiError } from '../../api/types';
 import type { PaymentAcceptance } from '../../api/types';
 
-/** A definite backend rejection: the request was received and processed to a negative, final conclusion. */
-function isDefiniteRejection(status: number): boolean {
-  return status === 400 || status === 409;
-}
-
 /**
  * The SUMMARY step: a Material-style backdrop (dimmed selected-product
  * context behind a sliding-up summary sheet). Fetches payment-acceptance
@@ -157,7 +152,11 @@ export function SummaryContainer() {
       // prerequisite checks `cardToken !== null` (see checkoutSlice.ts).
       dispatch(stepChangeRequested('RESULT'));
       dispatch(cardTokenConsumed());
-      dispatch(idempotencyKeyRotated());
+      // NOT rotated here: a 201/PENDING response is not yet a definitive
+      // outcome (the transaction may still settle to DECLINED/ERROR via
+      // polling). The idempotencyKey is only rotated on a definite outcome
+      // -- a 400 rejection, or an explicit "Try again" after a final
+      // DECLINED/ERROR/VOIDED -- see the RESULT step's retry handling.
     } catch (error) {
       if (!isMountedRef.current) {
         return;
@@ -172,7 +171,10 @@ export function SummaryContainer() {
           dispatch(submitStatusSet('failed'));
           return;
         }
-        if (isDefiniteRejection(error.status)) {
+        if (error.status === 400) {
+          // DEFINITE rejection: the backend validated and rejected the
+          // request outright. Safe to rotate -- the backend already
+          // recorded a definitive outcome under the old key.
           dispatch(submitErrorSet(error.message));
           dispatch(cardTokenConsumed());
           dispatch(idempotencyKeyRotated());
@@ -180,10 +182,25 @@ export function SummaryContainer() {
           dispatch(submitStatusSet('failed'));
           return;
         }
-        // status 0 (network) or 5xx: AMBIGUOUS — the backend may never have
-        // received the request, so the same idempotencyKey is safe (and
-        // required) to reuse on retry; stay on SUMMARY.
+        if (error.status === 0) {
+          // Network/client-side failure: the request never reached the
+          // backend, so the card token was never spent -- keep it (and the
+          // SAME key) for a same-tap retry from SUMMARY, no re-tokenize needed.
+          dispatch(submitErrorSet(error.message));
+          dispatch(submitStatusSet('failed'));
+          return;
+        }
+        // 5xx: the backend DID receive the request and may have forwarded
+        // it to the gateway before failing -- we can't be sure the token
+        // wasn't already spent, so treat it as consumed and route back to
+        // DETAILS to re-tokenize. The idempotencyKey is deliberately KEPT
+        // (not rotated): retrying under the SAME key is an idempotent
+        // replay on the backend (it returns the existing record instead of
+        // charging again -- see create-transaction.use-case.ts), so reuse
+        // here can never cause a double charge.
         dispatch(submitErrorSet(error.message));
+        dispatch(cardTokenConsumed());
+        dispatch(stepChangeRequested('DETAILS'));
         dispatch(submitStatusSet('failed'));
         return;
       }
