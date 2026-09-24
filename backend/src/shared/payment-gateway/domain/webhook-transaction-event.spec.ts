@@ -20,7 +20,46 @@ describe('parseWebhookTransactionEvent', () => {
 
     const event = parseWebhookTransactionEvent(payload);
 
-    expect(event).toEqual({ gatewayTransactionId: 'gw-tx-1', status: 'APPROVED', reference: 'REF-abc' });
+    expect(event).toEqual({
+      gatewayTransactionId: 'gw-tx-1',
+      status: 'APPROVED',
+      reference: 'REF-abc',
+      amountInCents: undefined,
+      currency: undefined,
+    });
+  });
+
+  it('also extracts amount_in_cents and currency when present', () => {
+    const payload = buildPayload({
+      transaction: {
+        id: 'gw-tx-1',
+        status: 'APPROVED',
+        reference: 'REF-abc',
+        amount_in_cents: 1_350_000,
+        currency: 'COP',
+      },
+    });
+
+    const event = parseWebhookTransactionEvent(payload);
+
+    expect(event).toEqual({
+      gatewayTransactionId: 'gw-tx-1',
+      status: 'APPROVED',
+      reference: 'REF-abc',
+      amountInCents: 1_350_000,
+      currency: 'COP',
+    });
+  });
+
+  it('leaves amountInCents/currency undefined when they are the wrong runtime type', () => {
+    const payload = buildPayload({
+      transaction: { id: 'gw-tx-1', status: 'APPROVED', amount_in_cents: 'not-a-number', currency: 123 },
+    });
+
+    const event = parseWebhookTransactionEvent(payload);
+
+    expect(event?.amountInCents).toBeUndefined();
+    expect(event?.currency).toBeUndefined();
   });
 
   it('extracts an event with no reference field as undefined reference', () => {

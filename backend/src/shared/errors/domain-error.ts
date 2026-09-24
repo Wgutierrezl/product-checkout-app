@@ -29,6 +29,18 @@ export class InsufficientStockError extends DomainError {
 
 export class PaymentGatewayError extends DomainError {
   readonly type: DomainErrorType = 'PaymentGatewayError';
+
+  /**
+   * `true` when it is unknown whether the gateway actually processed the
+   * request (timeout, network error, 5xx, or a malformed body after an
+   * otherwise-successful HTTP response) — the caller must NOT assume the
+   * charge failed. `false` (default) means the gateway explicitly rejected
+   * the request before processing it (e.g. a 4xx validation error) — safe to
+   * treat as a definite, terminal failure.
+   */
+  constructor(message: string, readonly ambiguous: boolean = false) {
+    super(message);
+  }
 }
 
 export class ConflictError extends DomainError {
