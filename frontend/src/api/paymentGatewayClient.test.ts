@@ -31,7 +31,7 @@ describe('paymentGatewayClient', () => {
 
   it('POSTs to /tokens/cards with only the public key, never the private key', async () => {
     fetchMock.mockResolvedValueOnce(
-      jsonResponse({ data: { id: 'tok_test_card', status: 'CREATED' } }, { ok: true, status: 201 }),
+      jsonResponse({ status: 'CREATED', data: { id: 'tok_test_card' } }, { ok: true, status: 201 }),
     );
 
     const result = await tokenizeCard(input);
@@ -155,9 +155,39 @@ describe('paymentGatewayClient', () => {
   });
 
   it('throws GatewayTokenizeError when the response body is missing required fields', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({ data: { status: 'CREATED' } }, { ok: true, status: 201 }));
+    fetchMock.mockResolvedValueOnce(jsonResponse({ status: 'CREATED', data: {} }, { ok: true, status: 201 }));
 
     await expect(tokenizeCard(input)).rejects.toBeInstanceOf(GatewayTokenizeError);
+  });
+
+  it('accepts the REAL sandbox tokenize response shape (top-level status, no nested data.status)', async () => {
+    // Captured verbatim from the sandbox: `status` lives at the TOP level only —
+    // `data` never carries its own `status` field. A type guard that required
+    // `data.status` would reject every real tokenization as "malformed".
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        {
+          status: 'CREATED',
+          data: {
+            id: 'tok_stagtest_5113_8Ea66dd1390eCd7ad07904F16ceF02d3',
+            created_at: '2026-09-24T18:23:13.779+00:00',
+            brand: 'VISA',
+            name: 'VISA-4242',
+            last_four: '4242',
+            bin: '424242',
+            exp_year: '29',
+            exp_month: '12',
+            card_holder: 'ANA RESTREPO',
+            created_with_cvc: true,
+          },
+        },
+        { ok: true, status: 201 },
+      ),
+    );
+
+    await expect(tokenizeCard(input)).resolves.toEqual({
+      cardToken: 'tok_stagtest_5113_8Ea66dd1390eCd7ad07904F16ceF02d3',
+    });
   });
 
   it('throws GatewayTokenizeError when the response body is not an object at all', async () => {
@@ -208,7 +238,7 @@ describe('paymentGatewayClient', () => {
 
     it('passes an AbortSignal to the gateway fetch call', async () => {
       fetchMock.mockResolvedValueOnce(
-        jsonResponse({ data: { id: 'tok_test_card', status: 'CREATED' } }, { ok: true, status: 201 }),
+        jsonResponse({ status: 'CREATED', data: { id: 'tok_test_card' } }, { ok: true, status: 201 }),
       );
 
       await tokenizeCard(input);

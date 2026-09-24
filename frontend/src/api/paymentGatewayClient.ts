@@ -3,24 +3,34 @@ import { redactCardNumbers } from '../domain/card/redact';
 import { GatewayTokenizeError, type TokenizeCardInput, type TokenizeCardResult } from './types';
 
 interface TokenizeCardResponse {
+  status: string;
   data: {
     id: string;
-    status: string;
   };
 }
 
+/**
+ * The REAL sandbox response nests only `id` (plus brand/last_four/etc.,
+ * none of which we read) under `data` — `status` ("CREATED") lives at the
+ * TOP level, never duplicated inside `data`. An earlier version of this
+ * guard required `data.status`, which the real gateway never sends: every
+ * successful tokenization was misclassified as "malformed", silently
+ * discarding a token that had already been created. Confirmed against a
+ * live sandbox response before fixing.
+ */
 function isTokenizeCardResponse(value: unknown): value is TokenizeCardResponse {
   if (typeof value !== 'object' || value === null) {
     return false;
   }
 
+  const status = (value as { status?: unknown }).status;
   const data = (value as { data?: unknown }).data;
 
   return (
+    typeof status === 'string' &&
     typeof data === 'object' &&
     data !== null &&
-    typeof (data as { id?: unknown }).id === 'string' &&
-    typeof (data as { status?: unknown }).status === 'string'
+    typeof (data as { id?: unknown }).id === 'string'
   );
 }
 
