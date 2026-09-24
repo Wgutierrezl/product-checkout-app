@@ -8,8 +8,11 @@ import {
   idempotencyKeyEnsured,
   idempotencyKeyRotated,
   installmentsSet,
+  paymentAttemptResolved,
+  paymentAttemptStarted,
   productSelected,
   stepChangeRequested,
+  stepForced,
   submitErrorSet,
   submitStatusSet,
   tokenizeFailed,
@@ -39,6 +42,7 @@ describe('checkoutSlice', () => {
       cardToken: null,
       submitStatus: 'idle',
       submitError: null,
+      submitAttempted: false,
     });
   });
 
@@ -229,6 +233,46 @@ describe('checkoutSlice', () => {
       cardToken: null,
       submitStatus: 'idle',
       submitError: null,
+      submitAttempted: false,
+    });
+  });
+
+  describe('in-flight payment attempt tracking (submitAttempted)', () => {
+    it('marks submitAttempted true via paymentAttemptStarted', () => {
+      const store = buildStore();
+
+      store.dispatch(paymentAttemptStarted());
+
+      expect(store.getState().checkout.submitAttempted).toBe(true);
+    });
+
+    it('marks submitAttempted false via paymentAttemptResolved', () => {
+      const store = buildStore();
+      store.dispatch(paymentAttemptStarted());
+
+      store.dispatch(paymentAttemptResolved());
+
+      expect(store.getState().checkout.submitAttempted).toBe(false);
+    });
+  });
+
+  describe('stepForced (bypasses canEnterStep prerequisites)', () => {
+    it('sets the step directly, even when normal prerequisites are not met', () => {
+      const store = buildStore();
+      expect(store.getState().checkout.cardToken).toBeNull();
+
+      store.dispatch(stepForced('RESULT'));
+
+      expect(store.getState().checkout.step).toBe('RESULT');
+    });
+
+    it('can force any step, e.g. back to DETAILS', () => {
+      const store = buildStore();
+      store.dispatch(stepForced('RESULT'));
+
+      store.dispatch(stepForced('DETAILS'));
+
+      expect(store.getState().checkout.step).toBe('DETAILS');
     });
   });
 });
