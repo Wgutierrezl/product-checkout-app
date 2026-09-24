@@ -1,10 +1,13 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
-import { ApiBadGatewayResponse, ApiConflictResponse, ApiCreatedResponse, ApiNotFoundResponse, ApiOkResponse, ApiParam, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { ApiBadGatewayResponse, ApiBadRequestResponse, ApiConflictResponse, ApiCreatedResponse, ApiNotFoundResponse, ApiOkResponse, ApiParam, ApiTags } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 
 import { CreateTransactionUseCase } from '../application/create-transaction.use-case';
 import { GetTransactionUseCase } from '../application/get-transaction.use-case';
+import { HandleWebhookUseCase } from '../application/handle-webhook.use-case';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { TransactionResponseDto } from './dto/transaction-response.dto';
+import { WebhookEventDto } from './dto/webhook-event.dto';
 
 @ApiTags('transactions')
 @Controller('transactions')
@@ -12,6 +15,7 @@ export class TransactionsController {
   constructor(
     private readonly createTransactionUseCase: CreateTransactionUseCase,
     private readonly getTransactionUseCase: GetTransactionUseCase,
+    private readonly handleWebhookUseCase: HandleWebhookUseCase,
   ) {}
 
   @Post()
@@ -48,7 +52,12 @@ export class TransactionsController {
 
   @Get(':id')
   @ApiParam({ name: 'id', description: 'Transaction id (UUID v4)' })
-  @ApiOkResponse({ type: TransactionResponseDto })
+  @ApiOkResponse({
+    type: TransactionResponseDto,
+    description:
+      'A stale PENDING transaction is refreshed against the payment gateway before responding ' +
+      '(lazy poll). The delivery is embedded once the transaction is APPROVED.',
+  })
   @ApiNotFoundResponse({ description: 'Transaction not found' })
   async getById(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
@@ -56,7 +65,36 @@ export class TransactionsController {
     const result = await this.getTransactionUseCase.execute(id);
 
     return result.match(
-      (transaction) => TransactionResponseDto.fromDomain(transaction),
+      (view) => TransactionResponseDto.fromDomain(view.transaction, view.delivery),
+      (error) => {
+        throw error;
+      },
+    );
+  }
+
+  /**
+   * Exempt from throttling (`@SkipThrottle`): the payment gateway, not an
+   * end user, calls this endpoint, and legitimate retries under load must
+   * never be rate-limited away. Checksum verification (`HandleWebhookUseCase`)
+   * is the actual security boundary here, not the throttler.
+   *
+   * Always responds 200 for ANY checksum-valid payload — including unknown
+   * or already-final transactions — so the gateway's webhook delivery is
+   * never retried needlessly; only an invalid checksum is rejected (400).
+   */
+  @Post('webhook')
+  @SkipThrottle()
+  @HttpCode(200)
+  @ApiOkResponse({
+    description:
+      'Always 200 for a checksum-valid payload, including unknown or already-final transactions (idempotent).',
+  })
+  @ApiBadRequestResponse({ description: 'Invalid webhook checksum' })
+  async webhook(@Body() payload: WebhookEventDto): Promise<{ received: true }> {
+    const result = await this.handleWebhookUseCase.execute(payload);
+
+    return result.match(
+      () => ({ received: true as const }),
       (error) => {
         throw error;
       },

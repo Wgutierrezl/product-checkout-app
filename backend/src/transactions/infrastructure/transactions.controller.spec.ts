@@ -1,13 +1,33 @@
+import { createHash } from 'node:crypto';
+
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 
-import { NotFoundError } from '../../shared/errors/domain-error';
+import { buildDelivery } from '../../deliveries/test/delivery.fixtures';
+import { NotFoundError, ValidationError } from '../../shared/errors/domain-error';
 import { errAsync, okAsync } from '../../shared/result/result.types';
 import { CreateTransactionUseCase } from '../application/create-transaction.use-case';
 import { GetTransactionUseCase } from '../application/get-transaction.use-case';
+import { HandleWebhookUseCase } from '../application/handle-webhook.use-case';
 import { buildTransaction } from '../test/transaction.fixtures';
 import { TransactionsController } from './transactions.controller';
+
+const EVENTS_SECRET = 'test_events_secret';
+
+function signedWebhookPayload() {
+  const properties = ['transaction.id', 'transaction.status'];
+  const timestamp = 1_700_000_000;
+  const checksum = createHash('sha256').update(`gw-1APPROVED${timestamp}${EVENTS_SECRET}`).digest('hex');
+  return {
+    event: 'transaction.updated',
+    environment: 'test',
+    data: { transaction: { id: 'gw-1', status: 'APPROVED' } },
+    signature: { properties, checksum },
+    timestamp,
+    sent_at: '2023-11-14T22:13:20.000Z',
+  };
+}
 
 function validCreateBody() {
   return {
@@ -23,12 +43,24 @@ function validCreateBody() {
   };
 }
 
+function buildController(overrides: {
+  createTransaction?: CreateTransactionUseCase;
+  getTransaction?: GetTransactionUseCase;
+  handleWebhook?: HandleWebhookUseCase;
+} = {}) {
+  return new TransactionsController(
+    overrides.createTransaction ?? ({} as unknown as CreateTransactionUseCase),
+    overrides.getTransaction ?? ({} as unknown as GetTransactionUseCase),
+    overrides.handleWebhook ?? ({} as unknown as HandleWebhookUseCase),
+  );
+}
+
 describe('TransactionsController', () => {
   describe('create', () => {
     it('returns the mapped transaction DTO with an amounts breakdown', async () => {
       const transaction = buildTransaction({ status: 'APPROVED', gatewayTransactionId: 'gw-1' });
       const createTransaction = { execute: () => okAsync(transaction) } as unknown as CreateTransactionUseCase;
-      const controller = new TransactionsController(createTransaction, {} as unknown as GetTransactionUseCase);
+      const controller = buildController({ createTransaction });
 
       const result = await controller.create(validCreateBody());
 
@@ -47,36 +79,76 @@ describe('TransactionsController', () => {
     it('throws the DomainError when the use case fails', async () => {
       const notFound = new NotFoundError('Product missing-id not found');
       const createTransaction = { execute: () => errAsync(notFound) } as unknown as CreateTransactionUseCase;
-      const controller = new TransactionsController(createTransaction, {} as unknown as GetTransactionUseCase);
+      const controller = buildController({ createTransaction });
 
       await expect(controller.create(validCreateBody())).rejects.toBe(notFound);
     });
   });
 
   describe('getById', () => {
-    it('returns the mapped transaction DTO when found', async () => {
+    it('returns the mapped transaction DTO when found, without a delivery for a PENDING transaction', async () => {
       const transaction = buildTransaction();
-      const getTransaction = { execute: () => okAsync(transaction) } as unknown as GetTransactionUseCase;
-      const controller = new TransactionsController(
-        {} as unknown as CreateTransactionUseCase,
-        getTransaction,
-      );
+      const getTransaction = {
+        execute: () => okAsync({ transaction, delivery: null }),
+      } as unknown as GetTransactionUseCase;
+      const controller = buildController({ getTransaction });
 
       const result = await controller.getById('tx-1');
 
       expect(result.id).toBe('tx-1');
       expect(result.status).toBe('PENDING');
+      expect(result.delivery).toBeUndefined();
+    });
+
+    it('embeds the delivery when the transaction is APPROVED', async () => {
+      const transaction = buildTransaction({ status: 'APPROVED' });
+      const delivery = buildDelivery({ transactionId: 'tx-1' });
+      const getTransaction = {
+        execute: () => okAsync({ transaction, delivery }),
+      } as unknown as GetTransactionUseCase;
+      const controller = buildController({ getTransaction });
+
+      const result = await controller.getById('tx-1');
+
+      expect(result.delivery).toBeDefined();
+      expect(result.delivery?.id).toBe(delivery.id);
     });
 
     it('throws the DomainError when the transaction is not found', async () => {
       const notFound = new NotFoundError('Transaction missing-id not found');
       const getTransaction = { execute: () => errAsync(notFound) } as unknown as GetTransactionUseCase;
-      const controller = new TransactionsController(
-        {} as unknown as CreateTransactionUseCase,
-        getTransaction,
-      );
+      const controller = buildController({ getTransaction });
 
       await expect(controller.getById('missing-id')).rejects.toBe(notFound);
+    });
+  });
+
+  describe('webhook', () => {
+    it('responds with { received: true } for a valid checksum', async () => {
+      const tx = buildTransaction({ id: 'tx-1', status: 'APPROVED' });
+      const handleWebhook = { execute: () => okAsync(tx) } as unknown as HandleWebhookUseCase;
+      const controller = buildController({ handleWebhook });
+
+      const result = await controller.webhook(signedWebhookPayload());
+
+      expect(result).toEqual({ received: true });
+    });
+
+    it('responds with { received: true } even for an unknown/no-op transaction (idempotent)', async () => {
+      const handleWebhook = { execute: () => okAsync(null) } as unknown as HandleWebhookUseCase;
+      const controller = buildController({ handleWebhook });
+
+      const result = await controller.webhook(signedWebhookPayload());
+
+      expect(result).toEqual({ received: true });
+    });
+
+    it('throws (mapped to 400) when the checksum is invalid', async () => {
+      const invalidChecksum = new ValidationError('Webhook checksum verification failed');
+      const handleWebhook = { execute: () => errAsync(invalidChecksum) } as unknown as HandleWebhookUseCase;
+      const controller = buildController({ handleWebhook });
+
+      await expect(controller.webhook(signedWebhookPayload())).rejects.toBe(invalidChecksum);
     });
   });
 
@@ -89,7 +161,11 @@ describe('TransactionsController', () => {
         controllers: [TransactionsController],
         providers: [
           { provide: CreateTransactionUseCase, useValue: { execute: () => okAsync(buildTransaction()) } },
-          { provide: GetTransactionUseCase, useValue: { execute: () => okAsync(buildTransaction()) } },
+          {
+            provide: GetTransactionUseCase,
+            useValue: { execute: () => okAsync({ transaction: buildTransaction(), delivery: null }) },
+          },
+          { provide: HandleWebhookUseCase, useValue: { execute: () => okAsync(null) } },
         ],
       }).compile();
 
@@ -155,6 +231,14 @@ describe('TransactionsController', () => {
       await request(app.getHttpServer())
         .get('/transactions/e1a6b6b0-6c9e-4a3a-9c1a-6f6f2b6b1a10')
         .expect(200);
+    });
+
+    it('accepts a well-formed webhook payload and preserves the arbitrary nested data object', async () => {
+      await request(app.getHttpServer()).post('/transactions/webhook').send(signedWebhookPayload()).expect(200);
+    });
+
+    it('rejects a webhook payload missing required top-level fields with 400', async () => {
+      await request(app.getHttpServer()).post('/transactions/webhook').send({}).expect(400);
     });
   });
 });
