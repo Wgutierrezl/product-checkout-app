@@ -1,0 +1,142 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  # Never cancel an in-flight deploy (could leave infra half-applied) —
+  # queue subsequent runs instead.
+  group: deploy-${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          # frontend/package-lock.json may not exist yet on this ref (SPA
+          # scaffold landing in parallel) — setup-node tolerates a
+          # non-matching path here, same as ci.yml's frontend job guard.
+          cache-dependency-path: |
+            backend/package-lock.json
+            infra/package-lock.json
+            frontend/package-lock.json
+
+      - name: Configure AWS credentials (OIDC — no static keys)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Package backend Lambda asset
+        working-directory: backend
+        run: npm run package:lambda
+
+      - name: Install infra dependencies
+        working-directory: infra
+        run: npm ci
+
+      # CDK_DEFAULT_ACCOUNT/REGION are set automatically by the CDK CLI from
+      # the OIDC-assumed credentials above — bin/app.ts's fallbacks
+      # (000000000000/us-east-1) are only ever used for offline synth/tests.
+      - name: Deploy CDK stacks
+        working-directory: infra
+        run: npx cdk deploy --all --require-approval never --outputs-file cdk-outputs.json
+        env:
+          # Single source of truth: PAYMENT_GATEWAY_URL also feeds the
+          # frontend build's VITE_PAYMENT_GATEWAY_URL AND
+          # PAYMENT_GATEWAY_SANDBOX_ORIGIN below — all three MUST read the
+          # same GH variable. If they ever diverge, the frontend would call
+          # a gateway origin that WebStack's CSP connect-src then blocks
+          # client-side (silent failure, checkout breaks despite CI being
+          # green). See infra/README.md.
+          PAYMENT_GATEWAY_URL: ${{ vars.PAYMENT_GATEWAY_URL }}
+          PAYMENT_GATEWAY_PUBLIC_KEY: ${{ vars.PAYMENT_GATEWAY_PUBLIC_KEY }}
+          PAYMENT_GATEWAY_SANDBOX_ORIGIN: ${{ vars.PAYMENT_GATEWAY_URL }}
+
+      # DYNAMO_ENDPOINT intentionally unset — targets real AWS. The script
+      # (backend/scripts/seed-products.ts) skips CreateTable in that mode:
+      # DataStack already owns the tables, and this role has no
+      # dynamodb:CreateTable grant (least privilege) — only PutItem on
+      # Products (see github-oidc-stack.ts).
+      - name: Seed products (idempotent)
+        working-directory: backend
+        run: npm run seed
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+
+      - name: Read CDK outputs
+        id: outputs
+        working-directory: infra
+        run: |
+          echo "api_url=$(jq -r '.ApiStack.ApiUrl' cdk-outputs.json)" >> "$GITHUB_OUTPUT"
+          echo "bucket_name=$(jq -r '.WebStack.BucketName' cdk-outputs.json)" >> "$GITHUB_OUTPUT"
+          echo "distribution_id=$(jq -r '.WebStack.DistributionId' cdk-outputs.json)" >> "$GITHUB_OUTPUT"
+
+      # Guarded the same way as ci.yml's frontend job: the SPA scaffold may
+      # not exist on this ref yet. Skipped (not failed) when absent.
+      - name: Install and build frontend
+        if: hashFiles('frontend/package.json') != ''
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+        env:
+          VITE_API_URL: ${{ steps.outputs.outputs.api_url }}
+          VITE_PAYMENT_GATEWAY_URL: ${{ vars.PAYMENT_GATEWAY_URL }}
+          VITE_PAYMENT_GATEWAY_PUBLIC_KEY: ${{ vars.PAYMENT_GATEWAY_PUBLIC_KEY }}
+
+      # Vite fingerprints hashed asset filenames — safe to cache for a year.
+      # index.html is uploaded separately below with no-cache instead of a
+      # CloudFront path-based cache behavior (see web-stack.ts).
+      - name: Sync hashed assets with long-lived cache
+        if: hashFiles('frontend/package.json') != ''
+        run: |
+          aws s3 sync frontend/dist "s3://${{ steps.outputs.outputs.bucket_name }}" \
+            --delete \
+            --exclude index.html \
+            --cache-control "public,max-age=31536000,immutable"
+
+      - name: Upload index.html with no-cache
+        if: hashFiles('frontend/package.json') != ''
+        run: |
+          aws s3 cp frontend/dist/index.html "s3://${{ steps.outputs.outputs.bucket_name }}/index.html" \
+            --cache-control "no-cache"
+
+      - name: Invalidate CloudFront cache
+        if: hashFiles('frontend/package.json') != ''
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ steps.outputs.outputs.distribution_id }}" \
+            --paths "/*"
+
+      - name: Smoke test API health
+        run: |
+          API_URL="${{ steps.outputs.outputs.api_url }}"
+          for attempt in 1 2 3 4 5; do
+            if curl -fsS "${API_URL}/health"; then
+              echo "Health check passed on attempt ${attempt}"
+              exit 0
+            fi
+            echo "Attempt ${attempt} failed, retrying in 5s..."
+            sleep 5
+          done
+          echo "Health check failed after 5 attempts"
+          exit 1

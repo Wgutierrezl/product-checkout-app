@@ -1,17 +1,29 @@
 import { App } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 
+import { webBucketName } from '../lib/shared/web-bucket-name';
 import { WebStack } from '../lib/web-stack';
+
+const TEST_ACCOUNT = '123456789012';
+const TEST_REGION = 'us-east-1';
 
 function synthWebStack(): Template {
   const app = new App();
   const stack = new WebStack(app, 'TestWebStack', {
-    env: { account: '123456789012', region: 'us-east-1' },
+    env: { account: TEST_ACCOUNT, region: TEST_REGION },
   });
   return Template.fromStack(stack);
 }
 
 describe('WebStack', () => {
+  it('pins a deterministic bucket name — the same one GithubOidcStack\'s S3 policy scopes to (see github-oidc-stack.test.ts and web-stack-oidc-consistency.test.ts)', () => {
+    const template = synthWebStack();
+
+    template.hasResourceProperties('AWS::S3::Bucket', {
+      BucketName: webBucketName(TEST_ACCOUNT, TEST_REGION),
+    });
+  });
+
   it('blocks all public access on the SPA bucket', () => {
     const template = synthWebStack();
 
