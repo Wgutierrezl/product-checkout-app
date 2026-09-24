@@ -11,6 +11,7 @@ import { CustomersController } from './infrastructure/customers.controller';
     GetCustomerUseCase,
     { provide: CUSTOMER_REPOSITORY_PORT, useClass: DynamoCustomerRepository },
   ],
+  // Exported so PR5's TransactionsModule can inject CUSTOMER_REPOSITORY_PORT for the create-transaction upsert-by-email flow.
   exports: [CUSTOMER_REPOSITORY_PORT],
 })
 export class CustomersModule {}

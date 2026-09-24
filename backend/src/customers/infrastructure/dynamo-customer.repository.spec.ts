@@ -115,6 +115,18 @@ describe('DynamoCustomerRepository', () => {
       expect(call.Limit).toBe(2);
     });
 
+    it('returns null when the query response has no Items array at all', async () => {
+      ddbMock.on(QueryCommand).resolves({});
+      const repository = new DynamoCustomerRepository(
+        ddbMock as unknown as DynamoDBDocumentClient,
+      );
+
+      const result = await repository.findByEmail('unknown@example.com');
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toBeNull();
+    });
+
     it('returns null when no customer matches the email', async () => {
       ddbMock.on(QueryCommand).resolves({ Items: [] });
       const repository = new DynamoCustomerRepository(

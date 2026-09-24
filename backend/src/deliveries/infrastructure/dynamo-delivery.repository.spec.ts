@@ -122,6 +122,18 @@ describe('DynamoDeliveryRepository', () => {
       expect(call.Limit).toBe(2);
     });
 
+    it('returns null when the query response has no Items array at all', async () => {
+      ddbMock.on(QueryCommand).resolves({});
+      const repository = new DynamoDeliveryRepository(
+        ddbMock as unknown as DynamoDBDocumentClient,
+      );
+
+      const result = await repository.findByTransactionId('txn-unknown');
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toBeNull();
+    });
+
     it('returns null when no delivery matches the transaction id', async () => {
       ddbMock.on(QueryCommand).resolves({ Items: [] });
       const repository = new DynamoDeliveryRepository(

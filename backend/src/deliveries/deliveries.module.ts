@@ -11,6 +11,7 @@ import { DeliveriesController } from './infrastructure/deliveries.controller';
     GetDeliveryUseCase,
     { provide: DELIVERY_REPOSITORY_PORT, useClass: DynamoDeliveryRepository },
   ],
+  // Exported so PR6's TransactionsModule can inject DELIVERY_REPOSITORY_PORT to embed the delivery in GET /transactions/:id.
   exports: [DELIVERY_REPOSITORY_PORT],
 })
 export class DeliveriesModule {}
