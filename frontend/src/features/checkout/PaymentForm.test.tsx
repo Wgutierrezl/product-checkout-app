@@ -100,6 +100,26 @@ describe('PaymentForm', () => {
       expect(screen.getByText(/invalid card number/i)).toBeInTheDocument();
     });
 
+    it('shows a length error for a Luhn-valid, Visa-prefixed 15-digit number', async () => {
+      const user = userEvent.setup();
+      renderForm();
+
+      await user.type(screen.getByLabelText(/card number/i), '411111111111116');
+      await user.tab();
+
+      expect(screen.getByText(/card number must be 16 digits/i)).toBeInTheDocument();
+    });
+
+    it('shows a length error for a Luhn-valid, Visa-prefixed 19-digit number', async () => {
+      const user = userEvent.setup();
+      renderForm();
+
+      await user.type(screen.getByLabelText(/card number/i), '4111111111111111110');
+      await user.tab();
+
+      expect(screen.getByText(/card number must be 16 digits/i)).toBeInTheDocument();
+    });
+
     it('shows an error for an expired card', async () => {
       const user = userEvent.setup();
       renderForm();

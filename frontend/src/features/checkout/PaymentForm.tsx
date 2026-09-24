@@ -51,6 +51,9 @@ interface FormValues {
   postalCode: string;
 }
 
+/** Both supported networks (Visa, Mastercard) issue exactly 16-digit PANs. */
+const SUPPORTED_CARD_NUMBER_LENGTH = 16;
+
 function validateCardNumber(value: string): string | null {
   const digits = digitsOnly(value);
   if (digits.length === 0) {
@@ -61,6 +64,9 @@ function validateCardNumber(value: string): string | null {
   }
   if (detectCardBrand(digits) === 'unknown') {
     return 'Unsupported card brand';
+  }
+  if (digits.length !== SUPPORTED_CARD_NUMBER_LENGTH) {
+    return 'Card number must be 16 digits';
   }
   return null;
 }
