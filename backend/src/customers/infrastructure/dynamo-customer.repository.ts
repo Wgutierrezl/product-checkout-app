@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { DynamoDBDocumentClient, GetCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { ResultAsync } from 'neverthrow';
 
 import { UnexpectedError, NotFoundError } from '../../shared/errors/domain-error';
@@ -87,5 +87,23 @@ export class DynamoCustomerRepository implements CustomerRepositoryPort {
       const customer = toCustomer(items[0]);
       return customer.isOk() ? okAsync(customer.value) : errAsync(customer.error);
     });
+  }
+
+  create(customer: Customer): AppResultAsync<Customer> {
+    return ResultAsync.fromPromise(
+      this.client.send(
+        new PutCommand({
+          TableName: CUSTOMERS_TABLE_NAME,
+          Item: {
+            customerId: customer.id,
+            fullName: customer.fullName,
+            email: customer.email,
+            phone: customer.phone,
+          },
+          ConditionExpression: 'attribute_not_exists(customerId)',
+        }),
+      ),
+      (error) => new UnexpectedError(`Failed to create customer ${customer.id}: ${(error as Error).message}`),
+    ).map(() => customer);
   }
 }

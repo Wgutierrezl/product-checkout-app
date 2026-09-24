@@ -1,5 +1,5 @@
 import { Logger } from '@nestjs/common';
-import { DynamoDBDocumentClient, GetCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { mockClient } from 'aws-sdk-client-mock';
 
 import {
@@ -203,6 +203,53 @@ describe('DynamoCustomerRepository', () => {
       );
 
       warnSpy.mockRestore();
+    });
+  });
+
+  describe('create', () => {
+    it('persists the customer and returns it', async () => {
+      ddbMock.on(PutCommand).resolves({});
+      const repository = new DynamoCustomerRepository(
+        ddbMock as unknown as DynamoDBDocumentClient,
+      );
+      const customer = {
+        id: 'cust-1',
+        fullName: 'Jane Doe',
+        email: 'jane.doe@example.com',
+        phone: '+573001234567',
+      };
+
+      const result = await repository.create(customer);
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toEqual(customer);
+      expect(ddbMock.commandCalls(PutCommand)[0].args[0].input).toEqual({
+        TableName: CUSTOMERS_TABLE_NAME,
+        Item: {
+          customerId: 'cust-1',
+          fullName: 'Jane Doe',
+          email: 'jane.doe@example.com',
+          phone: '+573001234567',
+        },
+        ConditionExpression: 'attribute_not_exists(customerId)',
+      });
+    });
+
+    it('returns UnexpectedError when the underlying client call fails', async () => {
+      ddbMock.on(PutCommand).rejects(new Error('network error'));
+      const repository = new DynamoCustomerRepository(
+        ddbMock as unknown as DynamoDBDocumentClient,
+      );
+
+      const result = await repository.create({
+        id: 'cust-1',
+        fullName: 'Jane Doe',
+        email: 'jane.doe@example.com',
+        phone: '+573001234567',
+      });
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('Unexpected');
     });
   });
 });

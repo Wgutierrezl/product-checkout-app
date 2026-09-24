@@ -30,4 +30,9 @@ export class FakeCustomerRepository implements CustomerRepositoryPort {
     const found = this.customers.find((customer) => customer.email === email);
     return okAsync(found ?? null);
   }
+
+  create(customer: Customer) {
+    this.customers.push(customer);
+    return okAsync(customer);
+  }
 }

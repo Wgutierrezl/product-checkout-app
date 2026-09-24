@@ -14,6 +14,16 @@ export interface CustomerRepositoryPort {
    * first match rather than failing the lookup.
    */
   findByEmail(email: string): AppResultAsync<Customer | null>;
+
+  /**
+   * Persists a brand-new customer. Used by `create-transaction`'s
+   * upsert-by-email flow (PR5) after `findByEmail` returns `null`. Callers
+   * MUST have already validated no customer exists for this email — this
+   * method does not itself re-check that invariant beyond a `customerId`
+   * uniqueness guard (a fresh id collision is astronomically unlikely with
+   * `IdGeneratorPort`, but guarded anyway for defense in depth).
+   */
+  create(customer: Customer): AppResultAsync<Customer>;
 }
 
 export const CUSTOMER_REPOSITORY_PORT = Symbol('CUSTOMER_REPOSITORY_PORT');
