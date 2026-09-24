@@ -61,6 +61,70 @@ describe('paymentGatewayClient', () => {
     await expect(tokenizeCard(input)).rejects.toBeInstanceOf(GatewayTokenizeError);
   });
 
+  it('surfaces the gateway-provided field messages when the gateway rejects the card', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        { error: { type: 'INVALID_REQUEST_ERROR', messages: { number: ['is invalid'], cvc: ['is too short'] } } },
+        { ok: false, status: 422 },
+      ),
+    );
+
+    await expect(tokenizeCard(input)).rejects.toMatchObject({
+      message: 'number: is invalid; cvc: is too short',
+    });
+  });
+
+  it('ignores non-array or non-string message entries while still using the valid ones', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        { error: { messages: { number: ['is invalid', 42], cvc: 'not an array' } } },
+        { ok: false, status: 422 },
+      ),
+    );
+
+    await expect(tokenizeCard(input)).rejects.toMatchObject({ message: 'number: is invalid' });
+  });
+
+  it('falls back to the reason when messages is present but yields no usable entries', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ error: { messages: {}, reason: 'invalid card token' } }, { ok: false, status: 422 }),
+    );
+
+    await expect(tokenizeCard(input)).rejects.toMatchObject({ message: 'invalid card token' });
+  });
+
+  it('surfaces the gateway-provided reason when there are no field messages', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ error: { type: 'INVALID_REQUEST_ERROR', reason: 'invalid card token' } }, { ok: false, status: 422 }),
+    );
+
+    await expect(tokenizeCard(input)).rejects.toMatchObject({ message: 'invalid card token' });
+  });
+
+  it('falls back to a generic message when there is no error field at all', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({}, { ok: false, status: 500 }));
+
+    await expect(tokenizeCard(input)).rejects.toMatchObject({
+      message: 'Payment gateway rejected the card (status 500)',
+    });
+  });
+
+  it('falls back to a generic message when the error field has neither reason nor messages', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ error: { type: 'UNKNOWN' } }, { ok: false, status: 500 }));
+
+    await expect(tokenizeCard(input)).rejects.toMatchObject({
+      message: 'Payment gateway rejected the card (status 500)',
+    });
+  });
+
+  it('falls back to a generic message when the error response body is not an object at all', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(null, { ok: false, status: 500 }));
+
+    await expect(tokenizeCard(input)).rejects.toMatchObject({
+      message: 'Payment gateway rejected the card (status 500)',
+    });
+  });
+
   it('throws GatewayTokenizeError when the response body is missing required fields', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ data: { status: 'CREATED' } }, { ok: true, status: 201 }));
 
