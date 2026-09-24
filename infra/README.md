@@ -208,3 +208,21 @@ The main cost risk is `RemovalPolicy.DESTROY` on the DynamoDB tables and
 the SPA bucket (`autoDeleteObjects: true`) — appropriate for a demo/take-home
 stack, NOT for production data you care about keeping across a
 `cdk destroy`.
+
+## Hardening Next Steps
+
+Known, deliberate trade-offs — reasonable for this stack's current scope,
+worth revisiting before treating this as a hardened production setup:
+
+- **GitHub Actions steps are pinned to tags (`@v4`), not commit SHAs.**
+  Tags can be moved by the action's maintainer (or, in a supply-chain
+  attack, by whoever compromises their account); a pinned SHA
+  (`actions/checkout@<full-40-char-sha>`) is immutable and is the stronger
+  guarantee. Left as tags for now for readability/maintainability;
+  consider pinning to SHAs (with Dependabot or Renovate configured to open
+  PRs bumping them) once this deploys real production traffic.
+- **CDK bootstrap role trust** (`cdk-hnb659fds-*-role-*`) is a wildcard
+  match on all 5 default bootstrap roles for this account/region — narrower
+  than granting `iam:*`, but broader than naming each of the 5 exact role
+  ARNs individually. Acceptable since these roles are themselves already
+  scoped by the CDK bootstrap stack's own policies.
