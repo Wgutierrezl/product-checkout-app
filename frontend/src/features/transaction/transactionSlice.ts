@@ -13,6 +13,8 @@ export interface TransactionState {
   id: string | null;
   status: TransactionStatus | null;
   amounts: TransactionAmounts | null;
+  /** Human-facing reference shown on the RESULT screen; always sourced from the API, never persisted. */
+  reference: string | null;
   error: string | null;
   pollStartedAt: number | null;
 }
@@ -21,6 +23,7 @@ export const initialTransactionState: TransactionState = {
   id: null,
   status: null,
   amounts: null,
+  reference: null,
   error: null,
   pollStartedAt: null,
 };
@@ -31,11 +34,12 @@ const transactionSlice = createSlice({
   reducers: {
     transactionReceived: (
       state,
-      action: PayloadAction<{ id: string; status: TransactionStatus; amounts: TransactionAmounts }>,
+      action: PayloadAction<{ id: string; status: TransactionStatus; amounts: TransactionAmounts; reference: string }>,
     ) => {
       state.id = action.payload.id;
       state.status = action.payload.status;
       state.amounts = action.payload.amounts;
+      state.reference = action.payload.reference;
       state.error = null;
     },
     pollStarted: (state, action: PayloadAction<number>) => {
