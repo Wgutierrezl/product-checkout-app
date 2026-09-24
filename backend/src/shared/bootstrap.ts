@@ -20,5 +20,7 @@ export function applyGlobalConfig(app: INestApplication): void {
     }),
   );
   app.useGlobalFilters(new DomainErrorFilter());
+  // Intentionally public in every environment, including production: the take-home
+  // brief requires a publicly reachable Swagger URL in the README.
   setupSwagger(app);
 }

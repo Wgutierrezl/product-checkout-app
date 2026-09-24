@@ -9,6 +9,7 @@ import type { AppConfig } from './shared/config/configuration';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
+  app.enableShutdownHooks();
   applyGlobalConfig(app);
 
   const configService = app.get(ConfigService);
