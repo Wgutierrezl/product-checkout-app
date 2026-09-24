@@ -11,6 +11,7 @@ import { TransactionsController } from './transactions.controller';
 
 function validCreateBody() {
   return {
+    idempotencyKey: 'b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e',
     productId: 'e1a6b6b0-6c9e-4a3a-9c1a-6f6f2b6b1a10',
     quantity: 2,
     customer: { fullName: 'Jane Doe', email: 'jane.doe@example.com', phone: '+573001234567' },
@@ -116,6 +117,15 @@ describe('TransactionsController', () => {
       await request(app.getHttpServer())
         .post('/transactions')
         .send({ ...validCreateBody(), installments: 37 })
+        .expect(400);
+    });
+
+    it('rejects a missing or malformed idempotencyKey with 400', async () => {
+      const { idempotencyKey: _idempotencyKey, ...rest } = validCreateBody();
+      await request(app.getHttpServer()).post('/transactions').send(rest).expect(400);
+      await request(app.getHttpServer())
+        .post('/transactions')
+        .send({ ...validCreateBody(), idempotencyKey: 'not-a-uuid' })
         .expect(400);
     });
 

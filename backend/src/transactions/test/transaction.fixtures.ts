@@ -4,6 +4,7 @@ import { NotFoundError } from '../../shared/errors/domain-error';
 import { AppResultAsync, errAsync, okAsync } from '../../shared/result/result.types';
 import { Transaction } from '../domain/transaction.entity';
 import {
+  CreatePendingResult,
   CreatePendingTransactionInput,
   TransactionRepositoryPort,
   UpdateGatewayResultInput,
@@ -36,7 +37,12 @@ export function buildTransaction(overrides: Partial<Transaction> = {}): Transact
 export class FakeTransactionRepository implements TransactionRepositoryPort {
   constructor(private readonly transactions: Transaction[] = []) {}
 
-  createPending(input: CreatePendingTransactionInput): AppResultAsync<Transaction> {
+  createPending(input: CreatePendingTransactionInput): AppResultAsync<CreatePendingResult> {
+    const existing = this.transactions.find((transaction) => transaction.id === input.id);
+    if (existing) {
+      return okAsync({ transaction: existing, wasCreated: false });
+    }
+
     const transaction: Transaction = {
       id: input.id,
       reference: input.reference,
@@ -53,7 +59,7 @@ export class FakeTransactionRepository implements TransactionRepositoryPort {
       updatedAt: input.createdAt,
     };
     this.transactions.push(transaction);
-    return okAsync(transaction);
+    return okAsync({ transaction, wasCreated: true });
   }
 
   updateGatewayResult(id: string, input: UpdateGatewayResultInput): AppResultAsync<Transaction> {

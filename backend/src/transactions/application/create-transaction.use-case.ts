@@ -14,7 +14,11 @@ import { CLOCK_PORT, ClockPort } from '../../shared/ports/clock.port';
 import { ID_GENERATOR_PORT, IdGeneratorPort } from '../../shared/ports/id-generator.port';
 import { AppResult, AppResultAsync, err, errAsync, ok, okAsync } from '../../shared/result/result.types';
 import { Transaction, TransactionDeliveryInfo } from '../domain/transaction.entity';
-import { TRANSACTION_REPOSITORY_PORT, TransactionRepositoryPort } from '../domain/transaction.repository.port';
+import {
+  CreatePendingResult,
+  TRANSACTION_REPOSITORY_PORT,
+  TransactionRepositoryPort,
+} from '../domain/transaction.repository.port';
 
 export const FEES_CONFIG = Symbol('FEES_CONFIG');
 export const INTEGRITY_SECRET = Symbol('INTEGRITY_SECRET');
@@ -31,6 +35,8 @@ export interface CreateTransactionCustomerInput {
 }
 
 export interface CreateTransactionCommand {
+  /** Client-generated UUID v4, one per checkout attempt. See CreateTransactionDto. */
+  idempotencyKey: string;
   productId: string;
   quantity: number;
   customer: CreateTransactionCustomerInput;
@@ -104,7 +110,13 @@ export class CreateTransactionUseCase {
         this.upsertCustomer(priced.command.customer).map((customer) => ({ ...priced, customer })),
       )
       .andThen((state) => this.persistPending(state))
-      .andThen((transaction) => this.chargeGateway(transaction, command));
+      .andThen(({ transaction, wasCreated }) =>
+        // Idempotent replay: a transaction with this idempotencyKey already
+        // exists (e.g. the frontend retried after a network timeout on its
+        // first attempt). Return it as-is — the gateway must NEVER be
+        // charged twice for the same checkout attempt.
+        wasCreated ? this.chargeGateway(transaction, command) : okAsync(transaction),
+      );
   }
 
   private ensureStock(product: Product, quantity: Quantity): AppResult<void> {
@@ -142,9 +154,9 @@ export class CreateTransactionUseCase {
     });
   }
 
-  private persistPending(state: PendingState): AppResultAsync<Transaction> {
+  private persistPending(state: PendingState): AppResultAsync<CreatePendingResult> {
     return this.transactions.createPending({
-      id: this.ids.newId(),
+      id: state.command.idempotencyKey,
       reference: this.ids.newReference(),
       customerId: state.customer.id,
       productId: state.product.id,

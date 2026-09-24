@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { Result, ResultAsync } from 'neverthrow';
 
@@ -9,6 +10,7 @@ import { AppResult, AppResultAsync, errAsync, okAsync } from '../../shared/resul
 import { DYNAMO_DOCUMENT_CLIENT } from '../../shared/infrastructure/dynamo/dynamo-client.provider';
 import { Transaction } from '../domain/transaction.entity';
 import {
+  CreatePendingResult,
   CreatePendingTransactionInput,
   TransactionRepositoryPort,
   UpdateGatewayResultInput,
@@ -76,7 +78,14 @@ function toTransaction(item: TransactionItem): AppResult<Transaction> {
 export class DynamoTransactionRepository implements TransactionRepositoryPort {
   constructor(@Inject(DYNAMO_DOCUMENT_CLIENT) private readonly client: DynamoDBDocumentClient) {}
 
-  createPending(input: CreatePendingTransactionInput): AppResultAsync<Transaction> {
+  /**
+   * Idempotent on `input.id` (the client-supplied `idempotencyKey`): a
+   * retried checkout request lands on the same row instead of a duplicate.
+   * `ConditionalCheckFailedException` means a transaction with this id
+   * already exists — re-read and return it with `wasCreated: false` rather
+   * than treating the replay as an error.
+   */
+  createPending(input: CreatePendingTransactionInput): AppResultAsync<CreatePendingResult> {
     const item: TransactionItem = {
       transactionId: input.id,
       reference: input.reference,
@@ -97,35 +106,71 @@ export class DynamoTransactionRepository implements TransactionRepositoryPort {
     };
 
     return ResultAsync.fromPromise(
-      this.client.send(
+      this.putPendingOrFindExisting(item, input.id),
+      (error) =>
+        new UnexpectedError(`Failed to create pending transaction ${input.id}: ${(error as Error).message}`),
+    ).andThen((outcome) => {
+      if (outcome.wasCreated) {
+        // `input`'s fields are already validated value objects (Money/
+        // Quantity) plus required delivery strings, so the resulting
+        // Transaction is constructed directly here instead of
+        // round-tripping through `toTransaction()` — there is no way for
+        // this specific mapping to fail given an already-valid
+        // `CreatePendingTransactionInput`.
+        return okAsync({
+          transaction: {
+            id: input.id,
+            reference: input.reference,
+            customerId: input.customerId,
+            productId: input.productId,
+            quantity: input.quantity,
+            unitPrice: input.unitPrice,
+            baseFee: input.baseFee,
+            deliveryFee: input.deliveryFee,
+            totalAmount: input.totalAmount,
+            status: 'PENDING' as const,
+            delivery: input.delivery,
+            createdAt: input.createdAt,
+            updatedAt: input.createdAt,
+          },
+          wasCreated: true,
+        });
+      }
+
+      const transaction = toTransaction(outcome.item);
+      return transaction.isOk()
+        ? okAsync({ transaction: transaction.value, wasCreated: false })
+        : errAsync(transaction.error);
+    });
+  }
+
+  private async putPendingOrFindExisting(
+    item: TransactionItem,
+    id: string,
+  ): Promise<{ wasCreated: true } | { wasCreated: false; item: TransactionItem }> {
+    try {
+      await this.client.send(
         new PutCommand({
           TableName: TRANSACTIONS_TABLE_NAME,
           Item: item,
           ConditionExpression: 'attribute_not_exists(transactionId)',
         }),
-      ),
-      (error) =>
-        new UnexpectedError(`Failed to create pending transaction ${input.id}: ${(error as Error).message}`),
-      // `input`'s fields are already validated value objects (Money/Quantity)
-      // plus required delivery strings, so the resulting Transaction is
-      // constructed directly here instead of round-tripping through
-      // `toTransaction()` — there is no way for this specific mapping to
-      // fail given an already-valid `CreatePendingTransactionInput`.
-    ).map(() => ({
-      id: input.id,
-      reference: input.reference,
-      customerId: input.customerId,
-      productId: input.productId,
-      quantity: input.quantity,
-      unitPrice: input.unitPrice,
-      baseFee: input.baseFee,
-      deliveryFee: input.deliveryFee,
-      totalAmount: input.totalAmount,
-      status: 'PENDING' as const,
-      delivery: input.delivery,
-      createdAt: input.createdAt,
-      updatedAt: input.createdAt,
-    }));
+      );
+      return { wasCreated: true };
+    } catch (error) {
+      if (!(error instanceof ConditionalCheckFailedException)) {
+        throw error;
+      }
+
+      const existing = await this.client.send(
+        new GetCommand({ TableName: TRANSACTIONS_TABLE_NAME, Key: { transactionId: id } }),
+      );
+      if (!existing.Item) {
+        throw error;
+      }
+
+      return { wasCreated: false, item: existing.Item as TransactionItem };
+    }
   }
 
   updateGatewayResult(id: string, input: UpdateGatewayResultInput): AppResultAsync<Transaction> {

@@ -5,6 +5,12 @@ import { Transaction, TransactionDeliveryInfo } from './transaction.entity';
 import { TransactionStatus } from './transaction-status.vo';
 
 export interface CreatePendingTransactionInput {
+  /**
+   * The client-supplied idempotency key (a UUID v4, see
+   * `CreateTransactionDto.idempotencyKey`) — used directly as the
+   * transaction's id so a retried checkout request with the same key always
+   * lands on the same row instead of creating a duplicate.
+   */
   id: string;
   reference: string;
   customerId: string;
@@ -18,6 +24,17 @@ export interface CreatePendingTransactionInput {
   createdAt: string;
 }
 
+export interface CreatePendingResult {
+  transaction: Transaction;
+  /**
+   * `false` means `id` already existed (an idempotent replay of a prior
+   * request with the same `idempotencyKey`) and `transaction` is that
+   * pre-existing row, unchanged — callers MUST NOT charge the gateway again
+   * in that case. `true` means a brand-new PENDING row was just inserted.
+   */
+  wasCreated: boolean;
+}
+
 export interface UpdateGatewayResultInput {
   gatewayTransactionId?: string;
   status: TransactionStatus;
@@ -26,7 +43,13 @@ export interface UpdateGatewayResultInput {
 }
 
 export interface TransactionRepositoryPort {
-  createPending(input: CreatePendingTransactionInput): AppResultAsync<Transaction>;
+  /**
+   * Idempotent by `input.id`: if a transaction with this id already exists
+   * (a replay of a request with the same `idempotencyKey`), returns that
+   * existing row with `wasCreated: false` instead of failing or overwriting
+   * it. Never re-runs any side effect implied by a fresh creation.
+   */
+  createPending(input: CreatePendingTransactionInput): AppResultAsync<CreatePendingResult>;
   /**
    * Updates a transaction's gateway-derived fields (status, and optionally
    * `gatewayTransactionId`/`lastGatewayCheckAt`). `gatewayTransactionId` is

@@ -1,3 +1,4 @@
+import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { mockClient } from 'aws-sdk-client-mock';
 
@@ -45,14 +46,16 @@ describe('DynamoTransactionRepository', () => {
   };
 
   describe('createPending', () => {
-    it('persists a PENDING transaction and returns it', async () => {
+    it('persists a PENDING transaction and reports it as newly created', async () => {
       ddbMock.on(PutCommand).resolves({});
       const repository = new DynamoTransactionRepository(ddbMock as unknown as DynamoDBDocumentClient);
 
       const result = await repository.createPending(createPendingInput);
 
       expect(result.isOk()).toBe(true);
-      expect(result._unsafeUnwrap()).toMatchObject({ id: 'tx-1', status: 'PENDING' });
+      const { transaction, wasCreated } = result._unsafeUnwrap();
+      expect(wasCreated).toBe(true);
+      expect(transaction).toMatchObject({ id: 'tx-1', status: 'PENDING' });
       const call = ddbMock.commandCalls(PutCommand)[0].args[0].input;
       expect(call.TableName).toBe(TRANSACTIONS_TABLE_NAME);
       expect(call.Item).toEqual(storedItem);
@@ -61,6 +64,47 @@ describe('DynamoTransactionRepository', () => {
 
     it('returns UnexpectedError when the underlying client call fails', async () => {
       ddbMock.on(PutCommand).rejects(new Error('network error'));
+      const repository = new DynamoTransactionRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.createPending(createPendingInput);
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('Unexpected');
+    });
+
+    it('returns the existing transaction with wasCreated=false on an idempotent replay (ConditionalCheckFailed)', async () => {
+      ddbMock.on(PutCommand).rejects(
+        new ConditionalCheckFailedException({ message: 'The conditional request failed', $metadata: {} }),
+      );
+      ddbMock.on(GetCommand).resolves({ Item: storedItem });
+      const repository = new DynamoTransactionRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.createPending(createPendingInput);
+
+      expect(result.isOk()).toBe(true);
+      const { transaction, wasCreated } = result._unsafeUnwrap();
+      expect(wasCreated).toBe(false);
+      expect(transaction).toMatchObject({ id: 'tx-1', reference: 'REF-tx-1', status: 'PENDING' });
+    });
+
+    it('returns ValidationError when the replayed existing item has corrupt data', async () => {
+      ddbMock.on(PutCommand).rejects(
+        new ConditionalCheckFailedException({ message: 'The conditional request failed', $metadata: {} }),
+      );
+      ddbMock.on(GetCommand).resolves({ Item: { ...storedItem, unitPriceCents: -1 } });
+      const repository = new DynamoTransactionRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.createPending(createPendingInput);
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('Validation');
+    });
+
+    it('returns UnexpectedError when ConditionalCheckFailed but the existing item cannot be found', async () => {
+      ddbMock.on(PutCommand).rejects(
+        new ConditionalCheckFailedException({ message: 'The conditional request failed', $metadata: {} }),
+      );
+      ddbMock.on(GetCommand).resolves({});
       const repository = new DynamoTransactionRepository(ddbMock as unknown as DynamoDBDocumentClient);
 
       const result = await repository.createPending(createPendingInput);

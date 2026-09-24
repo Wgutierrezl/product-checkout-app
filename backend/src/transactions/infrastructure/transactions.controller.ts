@@ -15,12 +15,19 @@ export class TransactionsController {
   ) {}
 
   @Post()
-  @ApiCreatedResponse({ type: TransactionResponseDto })
+  @ApiCreatedResponse({
+    type: TransactionResponseDto,
+    description:
+      'Always 201, including on an idempotent replay: submitting the same ' +
+      'idempotencyKey again returns the original transaction unchanged and ' +
+      'never calls the gateway a second time.',
+  })
   @ApiNotFoundResponse({ description: 'Product not found' })
   @ApiConflictResponse({ description: 'Insufficient stock' })
   @ApiBadGatewayResponse({ description: 'Payment gateway unreachable or timed out' })
   async create(@Body() dto: CreateTransactionDto): Promise<TransactionResponseDto> {
     const result = await this.createTransactionUseCase.execute({
+      idempotencyKey: dto.idempotencyKey,
       productId: dto.productId,
       quantity: dto.quantity,
       customer: dto.customer,

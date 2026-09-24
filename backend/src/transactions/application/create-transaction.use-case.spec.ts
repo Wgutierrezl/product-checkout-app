@@ -74,8 +74,11 @@ class FlakyTransactionRepository extends FakeTransactionRepository {
   }
 }
 
+const IDEMPOTENCY_KEY = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+
 function buildCommand(overrides: Partial<CreateTransactionCommand> = {}): CreateTransactionCommand {
   return {
+    idempotencyKey: IDEMPOTENCY_KEY,
     productId: 'prod-1',
     quantity: 2,
     customer: { fullName: 'Jane Doe', email: 'jane.doe@example.com', phone: '+573001234567' },
@@ -200,7 +203,7 @@ describe('CreateTransactionUseCase', () => {
 
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr()).toBe(gatewayError);
-    const stored = await transactions.findById('generated-id-2');
+    const stored = await transactions.findById(IDEMPOTENCY_KEY);
     expect(stored._unsafeUnwrap().status).toBe('ERROR');
   });
 
@@ -235,6 +238,35 @@ describe('CreateTransactionUseCase', () => {
     });
   });
 
+  it('uses the idempotencyKey as the transaction id', async () => {
+    const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'PENDING' } });
+    const useCase = buildUseCase({ gateway });
+
+    const result = await useCase.execute(buildCommand());
+
+    expect(result._unsafeUnwrap().id).toBe(IDEMPOTENCY_KEY);
+  });
+
+  describe('idempotent replay (same idempotencyKey)', () => {
+    it('returns the existing transaction without calling the gateway again', async () => {
+      const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } });
+      const transactions = new FakeTransactionRepository();
+      const useCase = buildUseCase({ transactions, gateway });
+
+      const first = await useCase.execute(buildCommand());
+      expect(gateway.lastCreateCardTransactionInput).toBeDefined();
+      const replayGateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-2', status: 'APPROVED' } });
+      const replayUseCase = buildUseCase({ transactions, gateway: replayGateway });
+
+      const second = await replayUseCase.execute(buildCommand());
+
+      expect(second.isOk()).toBe(true);
+      expect(second._unsafeUnwrap()).toEqual(first._unsafeUnwrap());
+      expect(second._unsafeUnwrap().gatewayTransactionId).toBe('gw-1');
+      expect(replayGateway.lastCreateCardTransactionInput).toBeUndefined();
+    });
+  });
+
   describe('gateway-result persistence hardening', () => {
     let errorSpy: jest.SpyInstance;
 
@@ -256,11 +288,11 @@ describe('CreateTransactionUseCase', () => {
 
       expect(result.isOk()).toBe(true);
       expect(result._unsafeUnwrap().status).toBe('APPROVED');
-      const stored = await transactions.findById('generated-id-2');
+      const stored = await transactions.findById(IDEMPOTENCY_KEY);
       expect(stored._unsafeUnwrap().status).toBe('APPROVED');
       expect(errorSpy).toHaveBeenCalledTimes(1);
       const logged = errorSpy.mock.calls[0][0] as string;
-      expect(logged).toContain('generated-id-2');
+      expect(logged).toContain(IDEMPOTENCY_KEY);
       expect(logged).toContain('REF-generated');
       expect(logged).toContain('gw-1');
       expect(logged).toContain('APPROVED');
