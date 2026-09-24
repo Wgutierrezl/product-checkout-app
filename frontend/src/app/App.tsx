@@ -1,5 +1,6 @@
 import { ProductListContainer } from '../features/catalog/ProductListContainer';
 import { PaymentModalContainer } from '../features/checkout/PaymentModalContainer';
+import { SummaryContainer } from '../features/checkout/SummaryContainer';
 import { useAppSelector } from './hooks';
 import styles from './App.module.css';
 
@@ -17,6 +18,7 @@ export function App() {
         <ProductListContainer />
       </main>
       {step === 'DETAILS' && <PaymentModalContainer />}
+      {step === 'SUMMARY' && <SummaryContainer />}
     </div>
   );
 }
