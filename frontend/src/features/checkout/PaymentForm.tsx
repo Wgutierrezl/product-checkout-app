@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Field } from '../../shared/ui/Field';
 import { Button } from '../../shared/ui/Button';
 import { CardBrandIcon } from '../../shared/ui/CardBrandIcon';
@@ -143,6 +143,16 @@ export function PaymentForm({
   });
   const [errors, setErrors] = useState<Partial<Record<FieldName, string>>>({});
   const fieldRefs = useRef<Partial<Record<FieldName, HTMLInputElement>>>({});
+
+  // A failed tokenize attempt means the card was rejected (or the request
+  // failed) — the buyer must re-enter card details from scratch rather
+  // than resubmit the same (now-suspect, or simply stale) PAN/CVC/expiry.
+  // Customer/delivery are untouched since they were valid regardless.
+  useEffect(() => {
+    if (submitError) {
+      setValues((current) => ({ ...current, cardNumber: '', cardHolder: '', expiry: '', cvc: '' }));
+    }
+  }, [submitError]);
 
   const cardDigits = digitsOnly(values.cardNumber);
   const brand = detectCardBrand(cardDigits);

@@ -235,6 +235,37 @@ describe('PaymentForm', () => {
       expect(screen.getByRole('alert')).toHaveTextContent('Card tokenization failed');
     });
 
+    it('clears PAN/CVC (and cardholder/expiry) but keeps customer/delivery when a tokenize attempt fails', async () => {
+      const user = userEvent.setup();
+      const { rerender } = renderForm();
+
+      await user.type(screen.getByLabelText(/card number/i), '4111111111111111');
+      await user.type(screen.getByLabelText(/cardholder name/i), 'Jane Doe');
+      await user.type(screen.getByLabelText(/expiry/i), '09/30');
+      await user.type(screen.getByLabelText(/cvc/i), '123');
+      await user.type(screen.getByLabelText(/full name/i), 'Jane Doe');
+      await user.type(screen.getByLabelText(/^address/i), 'Cra 1 # 2-3');
+
+      rerender(
+        <PaymentForm
+          initialCustomer={null}
+          initialDelivery={null}
+          initialInstallments={1}
+          isSubmitting={false}
+          submitError="Card tokenization failed"
+          onCancel={jest.fn()}
+          onSubmit={jest.fn()}
+        />,
+      );
+
+      expect(screen.getByLabelText(/card number/i)).toHaveValue('');
+      expect(screen.getByLabelText(/cardholder name/i)).toHaveValue('');
+      expect(screen.getByLabelText(/expiry/i)).toHaveValue('');
+      expect(screen.getByLabelText(/cvc/i)).toHaveValue('');
+      expect(screen.getByLabelText(/full name/i)).toHaveValue('Jane Doe');
+      expect(screen.getByLabelText(/^address/i)).toHaveValue('Cra 1 # 2-3');
+    });
+
     it('calls onCancel when Cancel is clicked', async () => {
       const user = userEvent.setup();
       const { onCancel } = renderForm();
