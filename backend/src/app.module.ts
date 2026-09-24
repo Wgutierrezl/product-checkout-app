@@ -4,6 +4,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 
 import { HealthController } from './health/health.controller';
+import { ProductsModule } from './products/products.module';
 import type { AppConfig } from './shared/config/configuration';
 import { AppConfigModule } from './shared/config/config.module';
 import { dynamoDocumentClientProvider } from './shared/infrastructure/dynamo/dynamo-client.provider';
@@ -22,6 +23,7 @@ import { ID_GENERATOR_PORT } from './shared/ports/id-generator.port';
         return [{ ttl: throttle.ttl * 1000, limit: throttle.limit }];
       },
     }),
+    ProductsModule,
   ],
   controllers: [HealthController],
   providers: [

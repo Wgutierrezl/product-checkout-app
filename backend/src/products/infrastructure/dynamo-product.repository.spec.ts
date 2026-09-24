@@ -103,5 +103,24 @@ describe('DynamoProductRepository', () => {
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr().type).toBe('Unexpected');
     });
+
+    it('returns a Validation error when the stored item has corrupt data', async () => {
+      ddbMock.on(GetCommand).resolves({
+        Item: {
+          productId: 'prod-1',
+          name: 'Corrupt Product',
+          description: 'Has a negative price',
+          priceCents: -1,
+          stock: 10,
+          imageUrl: 'https://images.example.com/broken.webp',
+        },
+      });
+      const repository = new DynamoProductRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.findById('prod-1');
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('Validation');
+    });
   });
 });

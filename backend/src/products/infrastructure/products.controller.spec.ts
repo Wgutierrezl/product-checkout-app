@@ -1,0 +1,79 @@
+import { NotFoundError } from '../../shared/errors/domain-error';
+import { errAsync, okAsync } from '../../shared/result/result.types';
+import { GetProductUseCase } from '../application/get-product.use-case';
+import { ListProductsUseCase } from '../application/list-products.use-case';
+import { Product } from '../domain/product.entity';
+import { Money } from '../domain/value-objects/money.vo';
+import { Quantity } from '../domain/value-objects/quantity.vo';
+import { ProductsController } from './products.controller';
+
+function buildProduct(): Product {
+  return {
+    id: 'prod-1',
+    name: 'Wireless Headphones',
+    description: 'Noise-cancelling over-ear headphones',
+    price: Money.create(150_000)._unsafeUnwrap(),
+    stock: Quantity.create(10)._unsafeUnwrap(),
+    imageUrl: 'https://images.unsplash.com/photo-1',
+  };
+}
+
+describe('ProductsController', () => {
+  describe('list', () => {
+    it('returns the mapped product DTOs', async () => {
+      const listProducts = {
+        execute: () => okAsync([buildProduct()]),
+      } as unknown as ListProductsUseCase;
+      const controller = new ProductsController(listProducts, {} as unknown as GetProductUseCase);
+
+      const result = await controller.list();
+
+      expect(result).toEqual([
+        {
+          id: 'prod-1',
+          name: 'Wireless Headphones',
+          description: 'Noise-cancelling over-ear headphones',
+          price: 150_000,
+          stock: 10,
+          imageUrl: 'https://images.unsplash.com/photo-1',
+        },
+      ]);
+    });
+
+    it('throws the DomainError when the use case fails', async () => {
+      const unexpected = new NotFoundError('unexpected');
+      const listProducts = {
+        execute: () => errAsync(unexpected),
+      } as unknown as ListProductsUseCase;
+      const controller = new ProductsController(listProducts, {} as unknown as GetProductUseCase);
+
+      await expect(controller.list()).rejects.toBe(unexpected);
+    });
+  });
+
+  describe('getById', () => {
+    it('returns the mapped product DTO when found', async () => {
+      const getProduct = { execute: () => okAsync(buildProduct()) } as unknown as GetProductUseCase;
+      const controller = new ProductsController(
+        {} as unknown as ListProductsUseCase,
+        getProduct,
+      );
+
+      const result = await controller.getById('prod-1');
+
+      expect(result.id).toBe('prod-1');
+      expect(result.price).toBe(150_000);
+    });
+
+    it('throws the DomainError when the product is not found', async () => {
+      const notFound = new NotFoundError('Product missing-id not found');
+      const getProduct = { execute: () => errAsync(notFound) } as unknown as GetProductUseCase;
+      const controller = new ProductsController(
+        {} as unknown as ListProductsUseCase,
+        getProduct,
+      );
+
+      await expect(controller.getById('missing-id')).rejects.toBe(notFound);
+    });
+  });
+});
