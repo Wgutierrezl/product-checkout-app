@@ -28,6 +28,10 @@ import {
   TRANSACTIONS_REFERENCE_INDEX_NAME,
   TRANSACTIONS_TABLE_NAME,
 } from '../../../src/transactions/infrastructure/dynamo-transaction.repository';
+import {
+  USERS_EMAIL_INDEX_NAME,
+  USERS_TABLE_NAME,
+} from '../../../src/accounts/infrastructure/dynamo-user.repository';
 
 export const E2E_AWS_REGION = process.env.AWS_REGION ?? 'us-east-1';
 export const E2E_DYNAMO_ENDPOINT = process.env.DYNAMO_ENDPOINT ?? 'http://localhost:8000';
@@ -42,6 +46,7 @@ const ALL_TABLE_NAMES = [
   CUSTOMERS_TABLE_NAME,
   DELIVERIES_TABLE_NAME,
   TRANSACTIONS_TABLE_NAME,
+  USERS_TABLE_NAME,
 ];
 
 function createRawClient(): DynamoDBClient {
@@ -167,6 +172,28 @@ async function recreateTransactionsTable(client: DynamoDBClient): Promise<void> 
   );
 }
 
+async function recreateUsersTable(client: DynamoDBClient): Promise<void> {
+  await createTableRetryingInUse(
+    client,
+    new CreateTableCommand({
+      TableName: USERS_TABLE_NAME,
+      AttributeDefinitions: [
+        { AttributeName: 'userId', AttributeType: 'S' },
+        { AttributeName: 'email', AttributeType: 'S' },
+      ],
+      KeySchema: [{ AttributeName: 'userId', KeyType: 'HASH' }],
+      GlobalSecondaryIndexes: [
+        {
+          IndexName: USERS_EMAIL_INDEX_NAME,
+          KeySchema: [{ AttributeName: 'email', KeyType: 'HASH' }],
+          Projection: { ProjectionType: 'ALL' },
+        },
+      ],
+      BillingMode: 'PAY_PER_REQUEST',
+    }),
+  );
+}
+
 async function seedProducts(documentClient: DynamoDBDocumentClient): Promise<void> {
   await documentClient.send(
     new PutCommand({
@@ -211,6 +238,7 @@ export async function cleanAndSeedTables(): Promise<void> {
   await recreateCustomersTable(client);
   await recreateDeliveriesTable(client);
   await recreateTransactionsTable(client);
+  await recreateUsersTable(client);
 
   const documentClient = createE2eDocumentClient();
   await seedProducts(documentClient);

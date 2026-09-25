@@ -25,12 +25,12 @@ describe('seedProducts', () => {
     docMock.on(PutCommand).resolves({});
   });
 
-  it('creates the 4 tables before seeding when manageLocalTables is true (DynamoDB Local)', async () => {
+  it('creates the 5 tables before seeding when manageLocalTables is true (DynamoDB Local)', async () => {
     await seedProducts(ddbMock as unknown as DynamoDBClient, docMock as unknown as DynamoDBDocumentClient, {
       manageLocalTables: true,
     });
 
-    expect(ddbMock.commandCalls(CreateTableCommand)).toHaveLength(4);
+    expect(ddbMock.commandCalls(CreateTableCommand)).toHaveLength(5);
     expect(docMock.commandCalls(PutCommand)).toHaveLength(12);
     expect(docMock.commandCalls(PutCommand)[0].args[0].input.TableName).toBe(PRODUCTS_TABLE_NAME);
   });

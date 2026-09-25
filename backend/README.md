@@ -15,8 +15,10 @@ Oriented Programming (ROP) via [`neverthrow`](https://github.com/supermacro/neve
 
 Copy `.env.example` to `.env` and fill in the values (`PAYMENT_GATEWAY_*` credentials point at a
 sandbox environment for the payment gateway integration; `CORS_ALLOWED_ORIGINS` is a
-comma-separated allowlist). See [`src/shared/config/env.validation.ts`](./src/shared/config/env.validation.ts)
-for the full list of variables, their defaults, and validation rules.
+comma-separated allowlist; `ACCOUNTS_JWT_SECRET` is the accounts module's JWT signing secret —
+any long random string works locally, e.g. `openssl rand -hex 32`). See
+[`src/shared/config/env.validation.ts`](./src/shared/config/env.validation.ts) for the full list
+of variables, their defaults, and validation rules.
 
 ### 3. Start DynamoDB Local
 
@@ -27,11 +29,17 @@ docker compose up -d
 Runs `amazon/dynamodb-local` on `localhost:8000` (in-memory, data is lost on stop — that's
 intentional for local dev).
 
+> If DynamoDB Local was already running from before the accounts feature landed, its
+> `Transactions` table won't have the new `UserIdIndex` GSI yet — `npm run seed` only creates
+> tables that don't exist, it never migrates an existing one. Run
+> `docker compose down -v && docker compose up -d` to start from a clean volume and pick up the
+> new schema (safe: DynamoDB Local's data isn't persisted anyway).
+
 ### 4. Install dependencies and seed the catalog
 
 ```bash
 npm install
-npm run seed   # creates the 4 tables (idempotent) and seeds 12 sample products
+npm run seed   # creates the 5 tables (idempotent) and seeds 12 sample products
 ```
 
 ### 5. Run the API
@@ -75,12 +83,12 @@ mocked `fetch`. The CI gate is 80% (`jest.config.ts`); current numbers:
 
 | Metric | Covered / Total | % |
 |---|---|---|
-| Statements | 1080 / 1080 | 100% |
-| Branches | 296 / 296 | 100% |
-| Functions | 269 / 269 | 100% |
-| Lines | 1007 / 1007 | 100% |
+| Statements | 1278 / 1278 | 100% |
+| Branches | 333 / 333 | 100% |
+| Functions | 309 / 309 | 100% |
+| Lines | 1190 / 1190 | 100% |
 
-391 tests across 47 suites, developed strict-TDD (RED → GREEN → REFACTOR) throughout.
+451 tests across 56 suites, developed strict-TDD (RED → GREEN → REFACTOR) throughout.
 
 ### End-to-end tests
 
@@ -101,13 +109,14 @@ part of the unit coverage gate) and `supertest` against the real `AppModule`, wi
   (mirroring the real sandbox's observed behavior) and resolves APPROVED on the first poll, so the
   suite exercises the actual lazy-poll code path, not just a shortcut.
 
-18 tests cover: catalog listing/detail (400 malformed id, 404 unknown id), the payment-acceptance
+24 tests cover: catalog listing/detail (400 malformed id, 404 unknown id), the payment-acceptance
 proxy, the full happy path (create → PENDING → lazy-polled to APPROVED → stock decremented →
 delivery embedded → idempotent replay → masked customer/delivery reads), the declined path,
 insufficient stock (409), whitelist validation (400 on an unknown extra field), an invalid webhook
-checksum (400), and a hardening block: helmet headers, CORS allowlist behavior, per-route rate
-limiting (429, with `/health` and the webhook explicitly exempt), and "no stack trace in any error
-body".
+checksum (400), a hardening block (helmet headers, CORS allowlist behavior, per-route rate limiting
+with `/health` and the webhook explicitly exempt, and "no stack trace in any error body"), and the
+accounts register → login flow (JWT issuance/claims, duplicate-email 409, bad-credentials 401, and
+its own stricter 5-requests-per-60s throttle).
 
 ## Architecture
 
@@ -128,7 +137,7 @@ src/
 │   ├── payment-gateway/            # generic PaymentGatewayPort + the ONE adapter that knows the vendor's HTTP shape
 │   ├── pii/                         # partial-masking helpers (email/phone/address)
 │   └── swagger/                      # OpenAPI document builder
-├── products/    customers/    deliveries/    transactions/    payment-acceptance/
+├── products/    customers/    deliveries/    transactions/    payment-acceptance/    accounts/
 │   ├── domain/          # entities, value objects, repository port interfaces — zero framework/AWS imports
 │   ├── application/     # use cases: ROP pipelines built with neverthrow (`ResultAsync.andThen` chains)
 │   └── infrastructure/  # DynamoDB repository, HTTP controller, DTOs
@@ -192,8 +201,9 @@ erDiagram
 |---|---|---|---|
 | `Products` | `productId` | — | Direct get; catalog listing via `Scan` (a handful of items) |
 | `Customers` | `customerId` | `EmailIndex` (`email`) | Upsert-by-email dedupe on checkout |
-| `Transactions` | `transactionId` | `ReferenceIndex` (`reference`), `GatewayTxIndex` (`gatewayTransactionId`) | Idempotency on create; webhook lookup by gateway id |
+| `Transactions` | `transactionId` | `ReferenceIndex` (`reference`), `GatewayTxIndex` (`gatewayTransactionId`), `UserIdIndex` (`userId`, additive, unused by any endpoint in this PR) | Idempotency on create; webhook lookup by gateway id |
 | `Deliveries` | `deliveryId` | `TransactionIdIndex` (`transactionId`) | Embed a delivery on `GET /transactions/:id` |
+| `Users` | `userId` | `EmailIndex` (`email`) | Accounts: email-uniqueness lookup on register, credential lookup on login |
 
 ## API endpoints
 
@@ -212,6 +222,8 @@ Full interactive documentation (with request/response schemas and examples) is a
 | `POST` | `/transactions/webhook` | Gateway webhook — checksum-verified, never rate-limited |
 | `GET` | `/customers/:id` | Customer detail (partially masked — no auth layer) |
 | `GET` | `/deliveries/:id` | Delivery detail (partially masked — no auth layer) |
+| `POST` | `/auth/register` | Create an account (bcryptjs-hashed password, unique email). Throttled to 5 req/60s per client |
+| `POST` | `/auth/login` | Exchange email/password for a JWT access token (~1h expiry, no refresh). Throttled to 5 req/60s per client |
 
 ## Key decisions
 
@@ -238,6 +250,13 @@ Full interactive documentation (with request/response schemas and examples) is a
   `deliveryId` is effectively guessable. `GET /customers/:id` partially masks email (`ja***@x.com`)
   and phone (`********4567`); `GET /deliveries/:id` partially masks the address and never returns
   `customerId`. Neither endpoint exists to let a third party harvest full PII from a guessed id.
+- **Accounts module is optional and additive**: `POST /auth/register`/`POST /auth/login` add a
+  bcryptjs (cost 10) + JWT (HS256, ~1h, no refresh) account layer, structured 1:1 with `customers`
+  (hexagonal + neverthrow, same `TransactWriteItems` email-uniqueness guard-item pattern). Unlike
+  the anonymous `customers` upsert-by-email flow, a registration race on the same email returns a
+  `409 Conflict` instead of silently handing back a different account. Guest checkout itself
+  (`POST /transactions` and everything below) remains fully unauthenticated and byte-identical —
+  the accounts module does not gate or modify any existing endpoint.
 - **Guest checkout, no auth layer** — protections in place instead:
   - Rate limiting (`@nestjs/throttler`, global guard) on every route except `/health` and the
     gateway webhook (legitimate gateway retries must never be throttled away — the checksum is the

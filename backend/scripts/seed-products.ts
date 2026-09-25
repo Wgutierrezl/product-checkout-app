@@ -3,11 +3,19 @@
  * real AWS.
  *
  * Local (DYNAMO_ENDPOINT set, e.g. `docker-compose`'s DynamoDB Local):
- * creates the `Products`, `Customers`, and `Deliveries` tables (with their
- * GSIs) if they don't already exist, then seeds products.
+ * creates the `Products`, `Customers`, `Deliveries`, `Transactions` (with the
+ * additive `UserIdIndex` GSI), and `Users` tables (with their GSIs) if they
+ * don't already exist, then seeds products.
+ *
+ * NOTE: table creation here is create-if-missing only, never a migration —
+ * if a `Transactions` table already exists locally from before this GSI was
+ * added, re-running this script will NOT add `UserIdIndex` to it (DynamoDB
+ * Local's `CreateTableCommand` just no-ops on an existing table name). Wipe
+ * DynamoDB Local (`docker compose down -v && docker compose up -d`) to pick
+ * up the new schema on an existing local environment.
  *
  * Real AWS (DYNAMO_ENDPOINT unset, e.g. deploy.yml's post-`cdk deploy`
- * step): table creation is skipped — `DataStack` already created all 4
+ * step): table creation is skipped — `DataStack` already created all 5
  * tables — and the script only PutItems into them. Attempting
  * CreateTableCommand against real tables would be redundant at best and
  * risk an unrelated permissions error at worst (the Lambda role deploy.yml
@@ -19,8 +27,9 @@
  * UUIDs, so re-running the script overwrites the same items instead of
  * duplicating them.
  *
- * Customers, Deliveries, and Transactions are only table-created here (local
- * only), never seeded — they're populated by the checkout flow itself.
+ * Customers, Deliveries, Transactions, and Users are only table-created here
+ * (local only), never seeded — they're populated by the checkout/accounts
+ * flows themselves.
  *
  * Usage: npm run seed
  */
@@ -45,6 +54,10 @@ import {
   TRANSACTIONS_REFERENCE_INDEX_NAME,
   TRANSACTIONS_TABLE_NAME,
 } from '../src/transactions/infrastructure/dynamo-transaction.repository';
+import {
+  USERS_EMAIL_INDEX_NAME,
+  USERS_TABLE_NAME,
+} from '../src/accounts/infrastructure/dynamo-user.repository';
 
 const REGION = process.env.AWS_REGION ?? 'us-east-1';
 // Unset by default — the AWS SDK then targets real regional DynamoDB
@@ -235,6 +248,13 @@ async function ensureDeliveriesTable(client: DynamoDBClient): Promise<void> {
   );
 }
 
+// Mirrors infra/lib/data-stack.ts's TRANSACTIONS_USER_ID_INDEX_NAME. Not
+// exported from dynamo-transaction.repository.ts because no backend code
+// queries it yet (that lands with the write-through/history use cases,
+// out of scope for this change) — it exists locally purely so a developer
+// can exercise the same additive GSI shape DataStack provisions in AWS.
+const TRANSACTIONS_USER_ID_INDEX_NAME = 'UserIdIndex';
+
 async function ensureTransactionsTable(client: DynamoDBClient): Promise<void> {
   await createTableIfMissing(
     client,
@@ -244,6 +264,7 @@ async function ensureTransactionsTable(client: DynamoDBClient): Promise<void> {
         { AttributeName: 'transactionId', AttributeType: 'S' },
         { AttributeName: 'reference', AttributeType: 'S' },
         { AttributeName: 'gatewayTransactionId', AttributeType: 'S' },
+        { AttributeName: 'userId', AttributeType: 'S' },
       ],
       KeySchema: [{ AttributeName: 'transactionId', KeyType: 'HASH' }],
       GlobalSecondaryIndexes: [
@@ -255,6 +276,33 @@ async function ensureTransactionsTable(client: DynamoDBClient): Promise<void> {
         {
           IndexName: TRANSACTIONS_GATEWAY_TX_INDEX_NAME,
           KeySchema: [{ AttributeName: 'gatewayTransactionId', KeyType: 'HASH' }],
+          Projection: { ProjectionType: 'ALL' },
+        },
+        {
+          IndexName: TRANSACTIONS_USER_ID_INDEX_NAME,
+          KeySchema: [{ AttributeName: 'userId', KeyType: 'HASH' }],
+          Projection: { ProjectionType: 'ALL' },
+        },
+      ],
+      BillingMode: 'PAY_PER_REQUEST',
+    }),
+  );
+}
+
+async function ensureUsersTable(client: DynamoDBClient): Promise<void> {
+  await createTableIfMissing(
+    client,
+    new CreateTableCommand({
+      TableName: USERS_TABLE_NAME,
+      AttributeDefinitions: [
+        { AttributeName: 'userId', AttributeType: 'S' },
+        { AttributeName: 'email', AttributeType: 'S' },
+      ],
+      KeySchema: [{ AttributeName: 'userId', KeyType: 'HASH' }],
+      GlobalSecondaryIndexes: [
+        {
+          IndexName: USERS_EMAIL_INDEX_NAME,
+          KeySchema: [{ AttributeName: 'email', KeyType: 'HASH' }],
           Projection: { ProjectionType: 'ALL' },
         },
       ],
@@ -278,6 +326,7 @@ export async function seedProducts(
     await ensureCustomersTable(client);
     await ensureDeliveriesTable(client);
     await ensureTransactionsTable(client);
+    await ensureUsersTable(client);
   }
 
   for (const product of SEED_PRODUCTS) {
@@ -288,9 +337,9 @@ export async function seedProducts(
   console.log(
     `Seeded ${SEED_PRODUCTS.length} products into "${PRODUCTS_TABLE_NAME}". ` +
       (options.manageLocalTables
-        ? `Ensured "${CUSTOMERS_TABLE_NAME}", "${DELIVERIES_TABLE_NAME}", and "${TRANSACTIONS_TABLE_NAME}" tables exist (no seed data).`
+        ? `Ensured "${CUSTOMERS_TABLE_NAME}", "${DELIVERIES_TABLE_NAME}", "${TRANSACTIONS_TABLE_NAME}", and "${USERS_TABLE_NAME}" tables exist (no seed data).`
         : `Skipped table creation (real AWS — DataStack already owns "${CUSTOMERS_TABLE_NAME}", ` +
-          `"${DELIVERIES_TABLE_NAME}", and "${TRANSACTIONS_TABLE_NAME}").`),
+          `"${DELIVERIES_TABLE_NAME}", "${TRANSACTIONS_TABLE_NAME}", and "${USERS_TABLE_NAME}").`),
   );
 }
 

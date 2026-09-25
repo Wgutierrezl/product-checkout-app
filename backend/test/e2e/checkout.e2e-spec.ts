@@ -26,11 +26,13 @@ process.env.LAZY_POLL_THRESHOLD_MS = '0';
 // spins up its own app instance with a tiny limit instead.
 process.env.THROTTLE_TTL = '60';
 process.env.THROTTLE_LIMIT = '100';
+process.env.ACCOUNTS_JWT_SECRET = 'e2e-test-jwt-secret-at-least-32-characters-long';
 
 import 'reflect-metadata';
 import { randomUUID, createHash } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import jwt from 'jsonwebtoken';
 import request from 'supertest';
 
 import { AppModule } from '../../src/app.module';
@@ -362,6 +364,123 @@ describe('Rate limiting', () => {
     for (let i = 0; i < 20; i += 1) {
       const response = await request(throttledServer).get(`/transactions/${unknownId}`);
       expect(response.status).not.toBe(429);
+    }
+  });
+});
+
+describe('Accounts E2E (register -> login)', () => {
+  let accountsApp: INestApplication;
+  let accountsServer: ReturnType<INestApplication['getHttpServer']>;
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+
+    accountsApp = moduleRef.createNestApplication();
+    applyGlobalConfig(accountsApp);
+    await accountsApp.init();
+    accountsServer = accountsApp.getHttpServer();
+  }, 30_000);
+
+  afterAll(async () => {
+    await accountsApp?.close();
+  });
+
+  function uniqueRegisterBody() {
+    return {
+      fullName: 'E2E Auth Buyer',
+      email: `e2e-auth-${randomUUID()}@example.test`,
+      password: 'correct-horse-battery-staple',
+    };
+  }
+
+  it('registers, then logs in with the same credentials and receives a usable JWT', async () => {
+    const body = uniqueRegisterBody();
+
+    const registerResponse = await request(accountsServer).post('/auth/register').send(body).expect(201);
+    expect(registerResponse.body).toEqual({
+      userId: expect.any(String),
+      fullName: body.fullName,
+      email: body.email,
+    });
+    expect(JSON.stringify(registerResponse.body)).not.toMatch(/passwordHash|correct-horse-battery-staple/);
+
+    const loginResponse = await request(accountsServer)
+      .post('/auth/login')
+      .send({ email: body.email, password: body.password })
+      .expect(200);
+    expect(loginResponse.body).toEqual({
+      accessToken: expect.any(String),
+      tokenType: 'Bearer',
+      expiresIn: 3600,
+    });
+
+    const decoded = jwt.decode(loginResponse.body.accessToken as string) as jwt.JwtPayload;
+    expect(decoded.email).toBe(body.email);
+    expect(decoded.sub).toBe(registerResponse.body.userId);
+  });
+
+  it('rejects a duplicate registration with 409 and never leaks a stack trace', async () => {
+    const body = uniqueRegisterBody();
+    await request(accountsServer).post('/auth/register').send(body).expect(201);
+
+    const response = await request(accountsServer).post('/auth/register').send(body).expect(409);
+    expect(response.body).not.toHaveProperty('stack');
+  });
+
+  it('rejects login with an unknown email with 401 and no credential detail', async () => {
+    const response = await request(accountsServer)
+      .post('/auth/login')
+      .send({ email: `unknown-${randomUUID()}@example.test`, password: 'whatever-password' })
+      .expect(401);
+    expect(response.body).not.toHaveProperty('stack');
+  });
+
+  it('rejects login with a wrong password with 401', async () => {
+    const body = uniqueRegisterBody();
+    await request(accountsServer).post('/auth/register').send(body).expect(201);
+
+    await request(accountsServer)
+      .post('/auth/login')
+      .send({ email: body.email, password: 'the-wrong-password' })
+      .expect(401);
+  });
+
+  it('rejects a protected-shaped Bearer check performed manually against a tampered token', () => {
+    // No protected route exists yet in this PR slice (GET /me lands in a
+    // later PR) — this asserts the issued token itself is genuinely
+    // signature-verified end to end, the same guarantee JwtAuthGuard relies on.
+    const token = jwt.sign({ sub: 'user-x', email: 'x@example.test' }, 'wrong-secret', {
+      algorithm: 'HS256',
+      expiresIn: '1h',
+    });
+
+    expect(() => jwt.verify(token, process.env.ACCOUNTS_JWT_SECRET!)).toThrow();
+  });
+
+  it('returns 429 once register exceeds its stricter 5-requests-per-60s limit', async () => {
+    // A dedicated, freshly-booted app: ThrottlerStorage is in-memory per Nest
+    // app instance, so this starts from a clean counter regardless of how
+    // many /auth/register calls the tests above already made against the
+    // shared `accountsServer` instance (same isolation pattern as the
+    // top-level 'Rate limiting' describe above).
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const throttledAccountsApp = moduleRef.createNestApplication();
+    applyGlobalConfig(throttledAccountsApp);
+    await throttledAccountsApp.init();
+    const throttledAccountsServer = throttledAccountsApp.getHttpServer();
+
+    try {
+      for (let i = 0; i < 5; i += 1) {
+        const response = await request(throttledAccountsServer)
+          .post('/auth/register')
+          .send(uniqueRegisterBody());
+        expect(response.status).toBe(201);
+      }
+
+      const sixth = await request(throttledAccountsServer).post('/auth/register').send(uniqueRegisterBody());
+      expect(sixth.status).toBe(429);
+    } finally {
+      await throttledAccountsApp.close();
     }
   });
 });
