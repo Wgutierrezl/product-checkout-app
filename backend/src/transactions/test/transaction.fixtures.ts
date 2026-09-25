@@ -64,6 +64,7 @@ export class FakeTransactionRepository implements TransactionRepositoryPort {
       delivery: input.delivery,
       createdAt: input.createdAt,
       updatedAt: input.createdAt,
+      userId: input.userId,
     };
     this.transactions.push(transaction);
     return okAsync({ transaction, wasCreated: true });

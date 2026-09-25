@@ -3,7 +3,11 @@ import { createHash } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
+import jwt from 'jsonwebtoken';
 
+import { OptionalJwtAuthGuard } from '../../accounts/infrastructure/guards/optional-jwt-auth.guard';
+import { TOKEN_PORT } from '../../accounts/domain/ports/token.port';
+import { JwtTokenAdapter } from '../../accounts/infrastructure/jwt-token.adapter';
 import { buildDelivery } from '../../deliveries/test/delivery.fixtures';
 import { NotFoundError, ValidationError } from '../../shared/errors/domain-error';
 import { errAsync, okAsync } from '../../shared/result/result.types';
@@ -12,6 +16,8 @@ import { GetTransactionUseCase } from '../application/get-transaction.use-case';
 import { HandleWebhookUseCase } from '../application/handle-webhook.use-case';
 import { buildTransaction } from '../test/transaction.fixtures';
 import { TransactionsController } from './transactions.controller';
+
+const JWT_SECRET = 'test-jwt-secret-at-least-32-characters-long';
 
 const EVENTS_SECRET = 'test_events_secret';
 
@@ -55,6 +61,11 @@ function buildController(overrides: {
   );
 }
 
+/** A request shape as left by `OptionalJwtAuthGuard` — `userId` set only for an authenticated caller. */
+function buildRequest(userId?: string) {
+  return { userId } as never;
+}
+
 // @nestjs/throttler's internal metadata keys for the unnamed ('default')
 // throttler; not publicly exported as named constants, so we assert against
 // their known literal values (same pattern as health.controller.spec.ts).
@@ -86,7 +97,7 @@ describe('TransactionsController', () => {
       } as unknown as CreateTransactionUseCase;
       const controller = buildController({ createTransaction });
 
-      const result = await controller.create(validCreateBody());
+      const result = await controller.create(validCreateBody(), buildRequest());
 
       expect(result).toEqual({
         id: 'tx-1',
@@ -108,7 +119,7 @@ describe('TransactionsController', () => {
       } as unknown as CreateTransactionUseCase;
       const controller = buildController({ createTransaction });
 
-      const result = await controller.create(validCreateBody());
+      const result = await controller.create(validCreateBody(), buildRequest());
 
       expect(result.delivery).toBeDefined();
       expect(result.delivery?.id).toBe(delivery.id);
@@ -119,7 +130,37 @@ describe('TransactionsController', () => {
       const createTransaction = { execute: () => errAsync(notFound) } as unknown as CreateTransactionUseCase;
       const controller = buildController({ createTransaction });
 
-      await expect(controller.create(validCreateBody())).rejects.toBe(notFound);
+      await expect(controller.create(validCreateBody(), buildRequest())).rejects.toBe(notFound);
+    });
+
+    it('passes no userId to the use case for a guest request (OptionalJwtAuthGuard left it unset)', async () => {
+      let received: unknown;
+      const createTransaction = {
+        execute: (command: unknown) => {
+          received = command;
+          return okAsync({ transaction: buildTransaction(), delivery: null });
+        },
+      } as unknown as CreateTransactionUseCase;
+      const controller = buildController({ createTransaction });
+
+      await controller.create(validCreateBody(), buildRequest());
+
+      expect((received as { userId?: string }).userId).toBeUndefined();
+    });
+
+    it('passes the authenticated userId to the use case when OptionalJwtAuthGuard resolved one', async () => {
+      let received: unknown;
+      const createTransaction = {
+        execute: (command: unknown) => {
+          received = command;
+          return okAsync({ transaction: buildTransaction(), delivery: null });
+        },
+      } as unknown as CreateTransactionUseCase;
+      const controller = buildController({ createTransaction });
+
+      await controller.create(validCreateBody(), buildRequest('user-1'));
+
+      expect((received as { userId?: string }).userId).toBe('user-1');
     });
   });
 
@@ -204,6 +245,8 @@ describe('TransactionsController', () => {
             useValue: { execute: () => okAsync({ transaction: buildTransaction(), delivery: null }) },
           },
           { provide: HandleWebhookUseCase, useValue: { execute: () => okAsync(null) } },
+          OptionalJwtAuthGuard,
+          { provide: TOKEN_PORT, useValue: new JwtTokenAdapter(JWT_SECRET) },
         ],
       }).compile();
 
@@ -259,6 +302,38 @@ describe('TransactionsController', () => {
 
     it('accepts a well-formed create body', async () => {
       await request(app.getHttpServer()).post('/transactions').send(validCreateBody()).expect(201);
+    });
+
+    it('accepts a well-formed create body with an INVALID Bearer token — proceeds as guest, never 401 (PR6 design amendment hard rule #2)', async () => {
+      await request(app.getHttpServer())
+        .post('/transactions')
+        .set('Authorization', 'Bearer not-a-real-token')
+        .send(validCreateBody())
+        .expect(201);
+    });
+
+    it('accepts a well-formed create body with an EXPIRED Bearer token — proceeds as guest, never 401', async () => {
+      const expired = jwt.sign({ sub: 'user-1', email: 'jane.doe@example.com' }, JWT_SECRET, {
+        algorithm: 'HS256',
+        expiresIn: -1,
+      });
+      await request(app.getHttpServer())
+        .post('/transactions')
+        .set('Authorization', `Bearer ${expired}`)
+        .send(validCreateBody())
+        .expect(201);
+    });
+
+    it('accepts a well-formed create body with a VALID Bearer token (201, authenticated write-through)', async () => {
+      const valid = jwt.sign({ sub: 'user-1', email: 'jane.doe@example.com' }, JWT_SECRET, {
+        algorithm: 'HS256',
+        expiresIn: '1h',
+      });
+      await request(app.getHttpServer())
+        .post('/transactions')
+        .set('Authorization', `Bearer ${valid}`)
+        .send(validCreateBody())
+        .expect(201);
     });
 
     it('rejects a malformed (non-UUID) transaction id with 400', async () => {

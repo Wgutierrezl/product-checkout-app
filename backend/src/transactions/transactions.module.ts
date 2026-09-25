@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+import { AccountsModule } from '../accounts/accounts.module';
 import { CustomersModule } from '../customers/customers.module';
 import { DeliveriesModule } from '../deliveries/deliveries.module';
 import { ProductsModule } from '../products/products.module';
@@ -19,10 +20,12 @@ import { TransactionsController } from './infrastructure/transactions.controller
  * three export their port token). `DYNAMO_DOCUMENT_CLIENT`/
  * `PAYMENT_GATEWAY_PORT`/`CLOCK_PORT`/`ID_GENERATOR_PORT` are all global
  * (DynamoModule/PaymentGatewayModule/SharedKernelModule on AppModule), so
- * they don't need to be imported here.
+ * they don't need to be imported here. `AccountsModule` (PR6) is imported
+ * for `OptionalJwtAuthGuard`/`TOKEN_PORT`, applied on `POST /transactions`
+ * only — guest checkout is completely unaffected.
  */
 @Module({
-  imports: [ProductsModule, CustomersModule, DeliveriesModule],
+  imports: [ProductsModule, CustomersModule, DeliveriesModule, AccountsModule],
   controllers: [TransactionsController],
   providers: [
     CreateTransactionUseCase,

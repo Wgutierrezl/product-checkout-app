@@ -505,4 +505,44 @@ describe('CreateTransactionUseCase', () => {
       expect(logged).toContain('after a definite gateway rejection');
     });
   });
+
+  describe('optional userId write-through (PR6 design amendment)', () => {
+    /**
+     * APPROVAL BASELINE: a guest command (no `userId`, the default shape
+     * `buildCommand()` already builds) must persist a transaction with NO
+     * `userId` — confirmed passing BEFORE this describe's own new-behavior
+     * test below was implemented, and must keep passing unchanged.
+     */
+    it('never sets userId on the persisted transaction when the command omits it (guest checkout)', async () => {
+      const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } });
+      const useCase = buildUseCase({ gateway });
+
+      const result = await useCase.execute(buildCommand());
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap().transaction.userId).toBeUndefined();
+    });
+
+    it('sets userId on the persisted transaction when the command carries an authenticated userId', async () => {
+      const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } });
+      const useCase = buildUseCase({ gateway });
+
+      const result = await useCase.execute(buildCommand({ userId: 'user-1' }));
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap().transaction.userId).toBe('user-1');
+    });
+
+    it('never overwrites userId on an idempotent replay (second request omits it, first already stored it)', async () => {
+      const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } });
+      const transactions = new FakeTransactionRepository();
+      const useCase = buildUseCase({ transactions, gateway });
+
+      await useCase.execute(buildCommand({ userId: 'user-1' }));
+      const replay = await useCase.execute(buildCommand());
+
+      expect(replay.isOk()).toBe(true);
+      expect(replay._unsafeUnwrap().transaction.userId).toBe('user-1');
+    });
+  });
 });

@@ -49,6 +49,14 @@ export interface CreateTransactionCommand {
   installments: number;
   acceptanceToken: string;
   acceptPersonalAuth: string;
+  /**
+   * Set only when `POST /transactions` carried a valid Bearer token
+   * (`OptionalJwtAuthGuard`) — `undefined` for a guest checkout, in which
+   * case the persisted transaction has NO `userId` attribute at all (PR6
+   * design amendment hard rule #1; see `DynamoTransactionRepository`'s own
+   * guest-checkout regression test).
+   */
+  userId?: string;
 }
 
 interface AmountBreakdown {
@@ -188,6 +196,7 @@ export class CreateTransactionUseCase {
       totalAmount: state.amount.totalAmount,
       delivery: state.command.delivery,
       createdAt: this.clock.now().toISOString(),
+      userId: state.command.userId,
     });
   }
 

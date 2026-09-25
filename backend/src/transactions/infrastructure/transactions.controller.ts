@@ -1,7 +1,9 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
-import { ApiBadGatewayResponse, ApiBadRequestResponse, ApiConflictResponse, ApiCreatedResponse, ApiNotFoundResponse, ApiOkResponse, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Req, UseGuards } from '@nestjs/common';
+import { ApiBadGatewayResponse, ApiBadRequestResponse, ApiBearerAuth, ApiConflictResponse, ApiCreatedResponse, ApiNotFoundResponse, ApiOkResponse, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import { SkipThrottle, Throttle } from '@nestjs/throttler';
 
+import { OptionalJwtAuthGuard } from '../../accounts/infrastructure/guards/optional-jwt-auth.guard';
+import { RequestWithUserId } from '../../accounts/infrastructure/guards/jwt-auth.guard';
 import { CreateTransactionUseCase } from '../application/create-transaction.use-case';
 import { GetTransactionUseCase } from '../application/get-transaction.use-case';
 import { HandleWebhookUseCase } from '../application/handle-webhook.use-case';
@@ -19,10 +21,15 @@ export class TransactionsController {
   ) {}
 
   @Post()
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({
     summary:
       'Create a checkout transaction. Price is always computed server-side; the gateway is called ' +
-      'synchronously with the server-computed amount.',
+      'synchronously with the server-computed amount. An OPTIONAL Bearer token links the purchase to ' +
+      'the authenticated account (GET /me/transactions) — guest checkout (no header) is completely ' +
+      'unaffected, and a missing/expired/tampered token is never a 401 here: it silently falls back ' +
+      'to guest instead (see OptionalJwtAuthGuard).',
   })
   @ApiCreatedResponse({
     type: TransactionResponseDto,
@@ -35,7 +42,10 @@ export class TransactionsController {
   @ApiNotFoundResponse({ description: 'Product not found' })
   @ApiConflictResponse({ description: 'Insufficient stock' })
   @ApiBadGatewayResponse({ description: 'Payment gateway unreachable or timed out' })
-  async create(@Body() dto: CreateTransactionDto): Promise<TransactionResponseDto> {
+  async create(
+    @Body() dto: CreateTransactionDto,
+    @Req() request: RequestWithUserId,
+  ): Promise<TransactionResponseDto> {
     const result = await this.createTransactionUseCase.execute({
       idempotencyKey: dto.idempotencyKey,
       productId: dto.productId,
@@ -46,6 +56,7 @@ export class TransactionsController {
       installments: dto.installments,
       acceptanceToken: dto.acceptanceToken,
       acceptPersonalAuth: dto.acceptPersonalAuth,
+      userId: request.userId,
     });
 
     return result.match(

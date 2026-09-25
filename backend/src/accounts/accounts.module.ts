@@ -13,6 +13,7 @@ import { AuthController } from './infrastructure/auth.controller';
 import { BcryptPasswordHasherAdapter } from './infrastructure/bcrypt-password-hasher.adapter';
 import { DynamoUserRepository } from './infrastructure/dynamo-user.repository';
 import { JwtAuthGuard } from './infrastructure/guards/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from './infrastructure/guards/optional-jwt-auth.guard';
 import { ACCOUNTS_JWT_SECRET, JwtTokenAdapter } from './infrastructure/jwt-token.adapter';
 import { MeController } from './infrastructure/me.controller';
 
@@ -29,6 +30,7 @@ import { MeController } from './infrastructure/me.controller';
     GetMeUseCase,
     UpdatePreferencesUseCase,
     JwtAuthGuard,
+    OptionalJwtAuthGuard,
     { provide: USER_REPOSITORY_PORT, useClass: DynamoUserRepository },
     { provide: PASSWORD_HASHER_PORT, useClass: BcryptPasswordHasherAdapter },
     { provide: TOKEN_PORT, useClass: JwtTokenAdapter },
@@ -39,9 +41,9 @@ import { MeController } from './infrastructure/me.controller';
         configService.getOrThrow<AppConfig['accounts']>('accounts').jwtSecret,
     },
   ],
-  // Exported so PR6's TransactionsModule can reuse TOKEN_PORT for its
-  // OptionalJwtAuthGuard without re-declaring it (JwtAuthGuard itself is
-  // only ever used inside this module's own controllers).
-  exports: [JwtAuthGuard, TOKEN_PORT, USER_REPOSITORY_PORT],
+  // Exported so TransactionsModule can apply OptionalJwtAuthGuard on
+  // POST /transactions (JwtAuthGuard itself is only ever used inside this
+  // module's own controllers — MeController).
+  exports: [OptionalJwtAuthGuard, TOKEN_PORT, USER_REPOSITORY_PORT],
 })
 export class AccountsModule {}
