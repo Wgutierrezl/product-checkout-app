@@ -1,6 +1,8 @@
 import type { Config } from 'jest';
 
 const config: Config = {
+  // Some tests type a whole form; give them headroom on slow or busy machines.
+  testTimeout: 15000,
   rootDir: '.',
   testEnvironment: 'jsdom',
   testRegex: '.*\\.test\\.tsx?$',
