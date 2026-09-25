@@ -40,14 +40,25 @@ describe('ProductGrid', () => {
     expect(screen.getAllByRole('listitem')).toHaveLength(2);
   });
 
-  it('marks only the first product image as the priority (LCP) image', () => {
-    render(<ProductGrid products={PRODUCTS} onBuy={jest.fn()} />);
+  it('loads the first row (4 cards on wide desktop) eagerly, with high fetch priority on the first only', () => {
+    const products = Array.from({ length: 6 }, (_, index) => ({
+      ...PRODUCTS[0],
+      id: `p${index + 1}`,
+      name: `Product ${index + 1}`,
+    }));
+    render(<ProductGrid products={products} onBuy={jest.fn()} />);
 
     const images = screen.getAllByRole('img');
-    expect(images[0]).toHaveAttribute('loading', 'eager');
+    expect(images.map((image) => image.getAttribute('loading'))).toEqual([
+      'eager',
+      'eager',
+      'eager',
+      'eager',
+      'lazy',
+      'lazy',
+    ]);
     expect(images[0]).toHaveAttribute('fetchpriority', 'high');
-    expect(images[1]).toHaveAttribute('loading', 'lazy');
-    expect(images[1]).not.toHaveAttribute('fetchpriority');
+    images.slice(1).forEach((image) => expect(image).not.toHaveAttribute('fetchpriority'));
   });
 
   it('forwards onBuy from the specific card that was interacted with', async () => {

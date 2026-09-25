@@ -109,6 +109,14 @@ describe('ProductCard', () => {
     expect(image).toHaveAttribute('fetchpriority', 'high');
   });
 
+  it('uses eager loading without high fetch priority when marked eager but not the priority image', () => {
+    render(<ProductCard product={PRODUCT} onBuy={jest.fn()} eager />);
+
+    const image = screen.getByRole('img', { name: PRODUCT.name });
+    expect(image).toHaveAttribute('loading', 'eager');
+    expect(image).not.toHaveAttribute('fetchpriority');
+  });
+
   it('defaults to lazy loading with no fetch priority when not the priority image', () => {
     render(<ProductCard product={PRODUCT} onBuy={jest.fn()} />);
 
