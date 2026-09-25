@@ -65,8 +65,18 @@ function reachSummary(store: ReturnType<typeof buildStore>) {
   store.dispatch(stepChangeRequested('SUMMARY'));
 }
 
+const FALLBACK_SESSION_KEY = 'd4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f70';
+
+/** A valid card session bound to whatever idempotency key is persisted right now. */
 function validCardSession() {
-  return { version: PERSISTED_VERSION, cardToken: 'tok_test_card', cardSummary: CARD_SUMMARY };
+  const raw = localStorage.getItem(STORAGE_KEY);
+  const persistedKey: string | null = raw ? JSON.parse(raw).checkout.idempotencyKey : null;
+  return {
+    version: PERSISTED_VERSION,
+    cardToken: 'tok_test_card',
+    cardSummary: CARD_SUMMARY,
+    idempotencyKey: persistedKey ?? FALLBACK_SESSION_KEY,
+  };
 }
 
 describe('persistMiddleware', () => {
@@ -147,7 +157,18 @@ describe('persistMiddleware', () => {
         version: PERSISTED_VERSION,
         cardToken: 'tok_test_card',
         cardSummary: CARD_SUMMARY,
+        idempotencyKey: (readPersisted().checkout as { idempotencyKey: string }).idempotencyKey,
       });
+    });
+
+    it('binds the card session to the idempotency key the checkout will pay with', () => {
+      const store = buildStore();
+
+      reachSummary(store);
+
+      const persistedKey = (readPersisted().checkout as { idempotencyKey: string }).idempotencyKey;
+      expect(persistedKey).toMatch(/^[0-9a-f-]{36}$/);
+      expect(readCardSession()?.idempotencyKey).toBe(persistedKey);
     });
 
     it('does not store the card session while still on DETAILS (the token is only kept for SUMMARY)', () => {
@@ -244,10 +265,26 @@ describe('persistMiddleware', () => {
       const store = buildStore();
       reachSummary(store);
 
+      const before = readCardSession();
+
       loadPersistedState();
 
-      expect(readCardSession()).toEqual(validCardSession());
+      expect(readCardSession()).toEqual(before);
       expect(loadPersistedState()?.checkout.step).toBe('SUMMARY');
+    });
+
+    it('downgrades SUMMARY and wipes a card session that belongs to a different idempotency key', () => {
+      const store = buildStore();
+      reachSummary(store);
+      sessionStorage.setItem(
+        CARD_SESSION_KEY,
+        JSON.stringify({ ...validCardSession(), idempotencyKey: FALLBACK_SESSION_KEY }),
+      );
+
+      const rehydrated = loadPersistedState();
+
+      expect(rehydrated?.checkout).toMatchObject({ step: 'DETAILS', cardToken: null, cardSummary: null });
+      expect(sessionStorage.getItem(CARD_SESSION_KEY)).toBeNull();
     });
 
     it('downgrades a persisted SUMMARY step to DETAILS when there is no card session (e.g. a new tab)', () => {
@@ -380,41 +417,49 @@ describe('persistMiddleware', () => {
         reachSummary(store);
       }
 
-      it.each<[string, string]>([
-        ['it is malformed JSON', '{not json'],
-        ['it is not an object', JSON.stringify(42)],
-        ['its version does not match', JSON.stringify({ ...validCardSession(), version: 999 })],
-        ['the token is missing', JSON.stringify({ ...validCardSession(), cardToken: undefined })],
-        ['the token is not a string', JSON.stringify({ ...validCardSession(), cardToken: 42 })],
-        ['the token is empty', JSON.stringify({ ...validCardSession(), cardToken: '' })],
-        ['the token is all digits (PAN-shaped)', JSON.stringify({ ...validCardSession(), cardToken: '4242424242424242' })],
-        ['the token has unexpected characters', JSON.stringify({ ...validCardSession(), cardToken: 'tok test<script>' })],
-        ['the token is absurdly long', JSON.stringify({ ...validCardSession(), cardToken: `tok_${'a'.repeat(300)}` })],
-        ['the summary is missing', JSON.stringify({ ...validCardSession(), cardSummary: null })],
+      it.each<[string, () => string]>([
+        ['it is malformed JSON', () => '{not json'],
+        ['it is not an object', () => JSON.stringify(42)],
+        ['its version does not match', () => JSON.stringify({ ...validCardSession(), version: 999 })],
+        ['the token is missing', () => JSON.stringify({ ...validCardSession(), cardToken: undefined })],
+        ['the token is not a string', () => JSON.stringify({ ...validCardSession(), cardToken: 42 })],
+        ['the token is empty', () => JSON.stringify({ ...validCardSession(), cardToken: '' })],
+        ['the token is all digits (PAN-shaped)', () => JSON.stringify({ ...validCardSession(), cardToken: '4242424242424242' })],
+        ['the token has unexpected characters', () => JSON.stringify({ ...validCardSession(), cardToken: 'tok test<script>' })],
+        ['the token is absurdly long', () => JSON.stringify({ ...validCardSession(), cardToken: `tok_${'a'.repeat(300)}` })],
+        ['the summary is missing', () => JSON.stringify({ ...validCardSession(), cardSummary: null })],
         [
           'the summary brand is unknown',
-          JSON.stringify({ ...validCardSession(), cardSummary: { ...CARD_SUMMARY, brand: 'amex' } }),
+          () => JSON.stringify({ ...validCardSession(), cardSummary: { ...CARD_SUMMARY, brand: 'amex' } }),
         ],
         [
           'the summary last4 is not exactly 4 digits',
-          JSON.stringify({ ...validCardSession(), cardSummary: { ...CARD_SUMMARY, last4: '4242424242424242' } }),
+          () => JSON.stringify({ ...validCardSession(), cardSummary: { ...CARD_SUMMARY, last4: '4242424242424242' } }),
         ],
         [
           'the token is a dashed PAN (no gateway token prefix)',
-          JSON.stringify({ ...validCardSession(), cardToken: '4242-4242-4242-4242' }),
+          () => JSON.stringify({ ...validCardSession(), cardToken: '4242-4242-4242-4242' }),
         ],
-        ['the token lacks the gateway token prefix', JSON.stringify({ ...validCardSession(), cardToken: 'abc_def' })],
+        ['the token lacks the gateway token prefix', () => JSON.stringify({ ...validCardSession(), cardToken: 'abc_def' })],
         [
           'the summary holder is absurdly long',
-          JSON.stringify({ ...validCardSession(), cardSummary: { ...CARD_SUMMARY, holder: 'a'.repeat(501) } }),
+          () => JSON.stringify({ ...validCardSession(), cardSummary: { ...CARD_SUMMARY, holder: 'a'.repeat(501) } }),
+        ],
+        [
+          'the idempotency key is missing (a session from before keys were bound)',
+          () => JSON.stringify({ ...validCardSession(), idempotencyKey: undefined }),
+        ],
+        [
+          'the idempotency key is not uuid-ish',
+          () => JSON.stringify({ ...validCardSession(), idempotencyKey: 'not-a-uuid' }),
         ],
         [
           'the summary holder is not a string',
-          JSON.stringify({ ...validCardSession(), cardSummary: { ...CARD_SUMMARY, holder: 7 } }),
+          () => JSON.stringify({ ...validCardSession(), cardSummary: { ...CARD_SUMMARY, holder: 7 } }),
         ],
       ])('when %s', (_name, raw) => {
         persistSummaryStep();
-        sessionStorage.setItem(CARD_SESSION_KEY, raw);
+        sessionStorage.setItem(CARD_SESSION_KEY, raw());
 
         const rehydrated = loadPersistedState();
 
@@ -473,6 +518,22 @@ describe('persistMiddleware', () => {
         cardSummary: null,
       });
       expect(rehydrated?.transaction).toEqual({ id: IN_FLIGHT_KEY, status: 'PENDING', pollStartedAt: 123 });
+    });
+
+    it('keeps a v4 payment that was in flight, so it can still be resumed', () => {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ ...v3Payload(), version: 4, checkout: { ...v3Payload().checkout, formDraft: DRAFT } }),
+      );
+
+      const rehydrated = loadPersistedState();
+
+      expect(rehydrated?.checkout).toMatchObject({
+        idempotencyKey: IN_FLIGHT_KEY,
+        submitAttempted: true,
+        formDraft: DRAFT,
+      });
+      expect(rehydrated?.transaction.id).toBe(IN_FLIGHT_KEY);
     });
 
     it('never carries the v2 cardSummary over from localStorage', () => {

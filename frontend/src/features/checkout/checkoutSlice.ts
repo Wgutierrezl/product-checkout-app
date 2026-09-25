@@ -165,6 +165,13 @@ const checkoutSlice = createSlice({
       state.cardToken = action.payload.cardToken;
       state.cardSummary = action.payload.cardSummary;
       state.draftRestored = false;
+      // The token is bound to ONE idempotency key from the moment it exists,
+      // and that key is persisted with it. A duplicated tab therefore pays
+      // under the same key, which the backend replays instead of charging
+      // twice (the sandbox gateway does not reject a reused token itself).
+      if (!state.idempotencyKey) {
+        state.idempotencyKey = generateIdempotencyKey();
+      }
       state.submitStatus = 'idle';
       state.submitError = null;
     },

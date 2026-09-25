@@ -6,7 +6,7 @@ import type { CheckoutStep } from '../../domain/checkout/stepMachine';
 import { findCountryByIso2 } from '../../domain/phone/countries';
 
 /** Bumped whenever the persisted shape changes; a mismatch discards it. */
-export const PERSISTED_VERSION = 4;
+export const PERSISTED_VERSION = 5;
 export const STORAGE_KEY = 'checkout-spa:v1';
 /**
  * sessionStorage key for the single-use card token + its display summary.
@@ -57,6 +57,8 @@ interface PersistedCardSession {
   version: number;
   cardToken: string;
   cardSummary: CardSummary;
+  /** The checkout's idempotency key when the card was tokenized; must match the persisted one. */
+  idempotencyKey: string;
 }
 
 interface PersistedState {
@@ -243,7 +245,9 @@ function isValidCardSession(value: unknown): value is PersistedCardSession {
   return (
     candidate.version === PERSISTED_VERSION &&
     isValidCardToken(candidate.cardToken) &&
-    isValidCardSummary(candidate.cardSummary)
+    isValidCardSummary(candidate.cardSummary) &&
+    typeof candidate.idempotencyKey === 'string' &&
+    UUID_LIKE.test(candidate.idempotencyKey)
   );
 }
 
@@ -299,9 +303,12 @@ function isPersistedState(value: unknown): value is PersistedState {
  * upgraded instead of discarded, so a refresh right after a deploy never
  * loses a payment left in flight. v2 and v3 simply predate `formDraft`
  * (v2's extra `cardSummary` is ignored, since only whitelisted fields are
- * ever rebuilt). The result still goes through full validation.
+ * ever rebuilt); v4's localStorage shape is identical to v5's (only the
+ * card session changed, and an old session is simply not resumed). The
+ * result still goes through full validation.
  */
-const MIGRATABLE_VERSIONS: readonly number[] = [2, 3];
+const VERSIONS_WITHOUT_FORM_DRAFT: readonly number[] = [2, 3];
+const MIGRATABLE_VERSIONS: readonly number[] = [...VERSIONS_WITHOUT_FORM_DRAFT, 4];
 
 function migrate(value: unknown): unknown {
   if (typeof value !== 'object' || value === null) {
@@ -314,10 +321,11 @@ function migrate(value: unknown): unknown {
   if (typeof candidate.checkout !== 'object' || candidate.checkout === null) {
     return value;
   }
+  const needsFormDraft = VERSIONS_WITHOUT_FORM_DRAFT.includes(candidate.version as number);
   return {
     ...candidate,
     version: PERSISTED_VERSION,
-    checkout: { ...candidate.checkout, formDraft: null },
+    checkout: needsFormDraft ? { ...candidate.checkout, formDraft: null } : candidate.checkout,
   };
 }
 
@@ -338,8 +346,8 @@ function readCardSession(): PersistedCardSession | null {
  * planted in storage never reaches Redux.
  *
  * A persisted `SUMMARY` step stays on `SUMMARY` only when this tab still
- * holds a valid card session (sessionStorage) and no payment attempt was in
- * flight. Otherwise (new tab, closed tab, corrupted session, or a token that
+ * holds a valid card session (sessionStorage) bound to the persisted
+ * idempotency key, and no payment attempt was in flight. Otherwise (new tab, closed tab, corrupted session, or a token that
  * may already have been sent) it is downgraded to `DETAILS` with no card
  * data, and the buyer re-enters the card (see design Amendment: tokenize at
  * Continue). A card session is never kept for any other step.
@@ -358,7 +366,11 @@ export function loadPersistedState():
   }
 
   const persisted = parsed.checkout;
-  const cardSession = persisted.step === 'SUMMARY' && !persisted.submitAttempted ? readCardSession() : null;
+  const candidateSession = persisted.step === 'SUMMARY' && !persisted.submitAttempted ? readCardSession() : null;
+  // Only a session bound to the SAME idempotency key may resume: whatever
+  // tab pays with this token then pays under that key (a backend replay).
+  const cardSession =
+    candidateSession !== null && candidateSession.idempotencyKey === persisted.idempotencyKey ? candidateSession : null;
   const canResumeSummary = cardSession !== null;
   if (!canResumeSummary) {
     // Unused, invalid, or possibly already sent: never keep it around.
@@ -400,12 +412,13 @@ export function clearPersistedState(): void {
  * (single-use), the buyer went back to edit details, or the checkout reset.
  */
 function syncCardSession(checkout: CheckoutState): void {
-  const { step, cardToken, cardSummary, submitAttempted } = checkout;
-  if (step === 'SUMMARY' && cardToken && cardSummary && !submitAttempted) {
+  const { step, cardToken, cardSummary, submitAttempted, idempotencyKey } = checkout;
+  if (step === 'SUMMARY' && cardToken && cardSummary && idempotencyKey && !submitAttempted) {
     const session: PersistedCardSession = {
       version: PERSISTED_VERSION,
       cardToken,
       cardSummary: pickCardSummary(cardSummary),
+      idempotencyKey,
     };
     safeSetItem(CARD_SESSION_KEY, JSON.stringify(session), 'session');
     return;

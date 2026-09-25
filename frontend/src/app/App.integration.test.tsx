@@ -131,6 +131,7 @@ function persistSummaryInThisTab() {
       version: PERSISTED_VERSION,
       cardToken: 'tok_restored_card',
       cardSummary: { brand: 'visa', last4: '4242', holder: 'Jane Doe' },
+      idempotencyKey: 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f',
     }),
   );
 }
@@ -287,6 +288,67 @@ describe('App refresh resilience (integration)', () => {
       expect(
         screen.getByText('For your security, card details are never stored on this device. Please re-enter them.'),
       ).toBeInTheDocument();
+    });
+  });
+
+  describe('a duplicated tab on SUMMARY (the browser copies sessionStorage)', () => {
+    it('pays under the SAME idempotency key in both tabs, so the second payment is a backend replay, never a new charge', async () => {
+      persistDetailsStep();
+      mockedTokenizeCard.mockResolvedValue({ cardToken: 'tok_shared_card' });
+      mockedFetchProducts.mockResolvedValue([PRODUCT]);
+      mockedFetchPaymentAcceptance.mockResolvedValue(ACCEPTANCE);
+      mockedFetchTransaction.mockReturnValue(new Promise(() => {}));
+      mockedCreateTransaction.mockImplementation(async (input) => ({
+        id: input.idempotencyKey,
+        reference: 'REF-1',
+        status: 'PENDING',
+        productAmount: 150_000,
+        baseFee: 250_000,
+        deliveryFee: 800_000,
+        total: 1_200_000,
+        currency: 'COP',
+      }));
+      const user = userEvent.setup({ delay: null });
+
+      // Tab A reaches SUMMARY through the real Continue flow.
+      const tabA = createAppStore();
+      const renderedA = render(
+        <Provider store={tabA}>
+          <App />
+        </Provider>,
+      );
+      await typeFullForm(user);
+      await user.click(screen.getByRole('button', { name: /continue/i }));
+      await waitFor(() => expect(tabA.getState().checkout.step).toBe('SUMMARY'));
+
+      // Tab B: the duplicate boots from the same localStorage and its own copy of sessionStorage.
+      const tabB = createAppStore();
+      expect(tabB.getState().checkout.step).toBe('SUMMARY');
+
+      async function payIn() {
+        const [terms, personalData] = await screen.findAllByRole('checkbox');
+        await waitFor(() => expect(terms).toBeEnabled());
+        await user.click(terms);
+        await user.click(personalData);
+        await user.click(screen.getByRole('button', { name: /^pay/i }));
+      }
+
+      await payIn();
+      await waitFor(() => expect(tabA.getState().checkout.step).toBe('RESULT'));
+      renderedA.unmount();
+
+      render(
+        <Provider store={tabB}>
+          <App />
+        </Provider>,
+      );
+      await payIn();
+      await waitFor(() => expect(mockedCreateTransaction).toHaveBeenCalledTimes(2));
+
+      const [first, second] = mockedCreateTransaction.mock.calls.map(([input]) => input);
+      expect(first.cardToken).toBe('tok_shared_card');
+      expect(second.cardToken).toBe('tok_shared_card');
+      expect(second.idempotencyKey).toBe(first.idempotencyKey);
     });
   });
 

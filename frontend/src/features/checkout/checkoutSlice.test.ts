@@ -159,6 +159,24 @@ describe('checkoutSlice', () => {
       expect(state.submitError).toBeNull();
     });
 
+    it('ensures an idempotency key the moment a card is tokenized, so every tab holding this token pays under it', () => {
+      const store = buildStore();
+
+      store.dispatch(cardTokenized({ cardToken: 'tok_test_card', cardSummary: CARD_SUMMARY }));
+
+      expect(store.getState().checkout.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
+    });
+
+    it('keeps an existing idempotency key when a card is tokenized again (same checkout attempt)', () => {
+      const store = buildStore();
+      store.dispatch(idempotencyKeyEnsured());
+      const existingKey = store.getState().checkout.idempotencyKey;
+
+      store.dispatch(cardTokenized({ cardToken: 'tok_test_card', cardSummary: CARD_SUMMARY }));
+
+      expect(store.getState().checkout.idempotencyKey).toBe(existingKey);
+    });
+
     it('sets submitStatus to failed and records the error on tokenizeFailed, without setting a token', () => {
       const store = buildStore();
 
