@@ -11,6 +11,7 @@ import {
   TRANSACTIONS_GATEWAY_TX_INDEX_NAME,
   TRANSACTIONS_REFERENCE_INDEX_NAME,
   TRANSACTIONS_TABLE_NAME,
+  TRANSACTIONS_USER_ID_INDEX_NAME,
 } from './dynamo-transaction.repository';
 
 function buildCancellationError(reasons: Array<{ Code?: string }>): TransactionCanceledException {
@@ -653,6 +654,96 @@ describe('DynamoTransactionRepository', () => {
 
       expect(result.isOk()).toBe(true);
       expect(result._unsafeUnwrap()).toBeNull();
+    });
+  });
+
+  describe('findByUserId', () => {
+    function itemWithUser(id: string, createdAt: string) {
+      return { ...storedItem, transactionId: id, userId: 'user-1', createdAt };
+    }
+
+    it('queries the UserIdIndex GSI scoped to the given userId', async () => {
+      ddbMock.on(QueryCommand).resolves({ Items: [] });
+      const repository = new DynamoTransactionRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      await repository.findByUserId('user-1');
+
+      const call = ddbMock.commandCalls(QueryCommand)[0].args[0].input;
+      expect(call.TableName).toBe(TRANSACTIONS_TABLE_NAME);
+      expect(call.IndexName).toBe(TRANSACTIONS_USER_ID_INDEX_NAME);
+      expect(call.KeyConditionExpression).toBe('userId = :userId');
+      expect(call.ExpressionAttributeValues).toEqual({ ':userId': 'user-1' });
+    });
+
+    it('returns the transactions newest-first (the GSI has no sort key, so ordering happens here)', async () => {
+      ddbMock.on(QueryCommand).resolves({
+        Items: [
+          itemWithUser('tx-old', '2026-01-01T00:00:00.000Z'),
+          itemWithUser('tx-new', '2026-03-01T00:00:00.000Z'),
+          itemWithUser('tx-mid', '2026-02-01T00:00:00.000Z'),
+        ],
+      });
+      const repository = new DynamoTransactionRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.findByUserId('user-1');
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap().map((tx) => tx.id)).toEqual(['tx-new', 'tx-mid', 'tx-old']);
+    });
+
+    it('caps the result at the latest 50 transactions', async () => {
+      const items = Array.from({ length: 60 }, (_, i) =>
+        itemWithUser(`tx-${i}`, new Date(2026, 0, i + 1).toISOString()),
+      );
+      ddbMock.on(QueryCommand).resolves({ Items: items });
+      const repository = new DynamoTransactionRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.findByUserId('user-1');
+
+      expect(result.isOk()).toBe(true);
+      const list = result._unsafeUnwrap();
+      expect(list).toHaveLength(50);
+      expect(list[0].id).toBe('tx-59');
+    });
+
+    it('returns an empty array (not an error) when the user has no transactions', async () => {
+      ddbMock.on(QueryCommand).resolves({ Items: [] });
+      const repository = new DynamoTransactionRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.findByUserId('user-with-no-purchases');
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toEqual([]);
+    });
+
+    it('treats a response with no Items field at all as empty (defensive fallback)', async () => {
+      ddbMock.on(QueryCommand).resolves({});
+      const repository = new DynamoTransactionRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.findByUserId('user-1');
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toEqual([]);
+    });
+
+    it('returns UnexpectedError when the underlying client call fails', async () => {
+      ddbMock.on(QueryCommand).rejects(new Error('network error'));
+      const repository = new DynamoTransactionRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.findByUserId('user-1');
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('Unexpected');
+    });
+
+    it('returns ValidationError when a matched item has corrupt data', async () => {
+      ddbMock.on(QueryCommand).resolves({ Items: [{ ...itemWithUser('tx-1', '2026-01-01T00:00:00.000Z'), unitPriceCents: -1 }] });
+      const repository = new DynamoTransactionRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.findByUserId('user-1');
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('Validation');
     });
   });
 });

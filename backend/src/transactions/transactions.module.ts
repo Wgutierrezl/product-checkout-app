@@ -61,5 +61,8 @@ import { TransactionsController } from './infrastructure/transactions.controller
       useFactory: (configService: ConfigService) => configService.getOrThrow<number>('reconciliationWindowMs'),
     },
   ],
+  // Exported so AccountsModule can inject TRANSACTION_REPOSITORY_PORT for
+  // ListMyTransactionsUseCase's GET /me/transactions join (PR6).
+  exports: [TRANSACTION_REPOSITORY_PORT],
 })
 export class TransactionsModule {}

@@ -168,4 +168,11 @@ export class FakeTransactionRepository implements TransactionRepositoryPort {
     const found = this.transactions.find((transaction) => transaction.reference === reference);
     return okAsync(found ?? null);
   }
+
+  findByUserId(userId: string): AppResultAsync<Transaction[]> {
+    const found = this.transactions
+      .filter((transaction) => transaction.userId === userId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return okAsync(found);
+  }
 }

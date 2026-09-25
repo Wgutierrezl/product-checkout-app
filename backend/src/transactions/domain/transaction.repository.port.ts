@@ -126,6 +126,15 @@ export interface TransactionRepositoryPort {
   findByGatewayTransactionId(gatewayTransactionId: string): AppResultAsync<Transaction | null>;
   /** Webhook lookup path 2 (fallback, e.g. gatewayTransactionId not yet persisted). */
   findByReference(reference: string): AppResultAsync<Transaction | null>;
+  /**
+   * Queries the additive `UserIdIndex` GSI for every transaction belonging
+   * to `userId` (PR6's `GET /me/transactions`) — never returns another
+   * user's or a guest's transactions. The GSI has no sort key, so ordering
+   * (newest first) and capping happen in the adapter after the query; a
+   * demo-scale workload never approaches needing real pagination — see
+   * `DynamoTransactionRepository.findByUserId`'s own cap constant.
+   */
+  findByUserId(userId: string): AppResultAsync<Transaction[]>;
 }
 
 export const TRANSACTION_REPOSITORY_PORT = Symbol('TRANSACTION_REPOSITORY_PORT');

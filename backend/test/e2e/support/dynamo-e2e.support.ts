@@ -27,16 +27,12 @@ import {
   TRANSACTIONS_GATEWAY_TX_INDEX_NAME,
   TRANSACTIONS_REFERENCE_INDEX_NAME,
   TRANSACTIONS_TABLE_NAME,
+  TRANSACTIONS_USER_ID_INDEX_NAME,
 } from '../../../src/transactions/infrastructure/dynamo-transaction.repository';
 import {
   USERS_EMAIL_INDEX_NAME,
   USERS_TABLE_NAME,
 } from '../../../src/accounts/infrastructure/dynamo-user.repository';
-
-// Mirrors infra/lib/data-stack.ts's TRANSACTIONS_USER_ID_INDEX_NAME and
-// scripts/seed-products.ts's local equivalent. Not exported from
-// dynamo-transaction.repository.ts because no backend code queries it yet.
-const TRANSACTIONS_USER_ID_INDEX_NAME = 'UserIdIndex';
 
 export const E2E_AWS_REGION = process.env.AWS_REGION ?? 'us-east-1';
 export const E2E_DYNAMO_ENDPOINT = process.env.DYNAMO_ENDPOINT ?? 'http://localhost:8000';
@@ -280,11 +276,11 @@ export async function findCustomerIdByEmail(email: string): Promise<string> {
 }
 
 /**
- * Test-only: queries the Transactions table's `UserIdIndex` GSI (additive,
- * not yet queried by any production code path — see design's PR6). Exists
- * so the e2e suite can assert this GSI is actually provisioned and
- * queryable on the locally-recreated table, kept in sync with
- * `seed-products.ts`'s own `ensureTransactionsTable`.
+ * Test-only: queries the Transactions table's `UserIdIndex` GSI directly
+ * (bypassing `DynamoTransactionRepository.findByUserId`'s own sort/cap, and
+ * `GET /me/transactions`'s product/delivery join) — used to assert raw
+ * write-through facts (e.g. "exactly one item with this userId") without
+ * going through the full HTTP response shape.
  */
 /**
  * Test-only: reads a Transaction item's raw DynamoDB attributes (bypassing

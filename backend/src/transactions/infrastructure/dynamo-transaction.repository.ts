@@ -34,6 +34,16 @@ export const TRANSACTIONS_TABLE_NAME = resolveTableName(
 );
 export const TRANSACTIONS_REFERENCE_INDEX_NAME = 'ReferenceIndex';
 export const TRANSACTIONS_GATEWAY_TX_INDEX_NAME = 'GatewayTxIndex';
+export const TRANSACTIONS_USER_ID_INDEX_NAME = 'UserIdIndex';
+
+/**
+ * `findByUserId` has no server-side pagination (the GSI has no sort key, so
+ * newest-first ordering happens in this adapter after a full query) — a
+ * flat cap at the latest 50 purchases is a deliberate, stated simplification
+ * for a demo-scale workload, not real cursor-based pagination. Revisit if
+ * a single account's purchase history could plausibly exceed this.
+ */
+export const TRANSACTIONS_USER_ID_HISTORY_LIMIT = 50;
 
 /** Outcome of attempting the 3-item settlement `TransactWriteItems`. */
 type SettleAttemptOutcome = 'settled' | 'racedByTransactionCondition' | 'oversold';
@@ -513,6 +523,39 @@ export class DynamoTransactionRepository implements TransactionRepositoryPort {
 
   findByReference(reference: string): AppResultAsync<Transaction | null> {
     return this.findOneByIndex(TRANSACTIONS_REFERENCE_INDEX_NAME, 'reference', reference);
+  }
+
+  /**
+   * PR6's `GET /me/transactions`: every transaction for `userId` via the
+   * additive `UserIdIndex` GSI. The GSI has no sort key, so this queries
+   * without a `Limit` (a demo-scale per-user purchase count), then sorts
+   * newest-first and caps at `TRANSACTIONS_USER_ID_HISTORY_LIMIT` in
+   * application code — a stated simplification, not real pagination.
+   */
+  findByUserId(userId: string): AppResultAsync<Transaction[]> {
+    return ResultAsync.fromPromise(
+      this.client.send(
+        new QueryCommand({
+          TableName: TRANSACTIONS_TABLE_NAME,
+          IndexName: TRANSACTIONS_USER_ID_INDEX_NAME,
+          KeyConditionExpression: 'userId = :userId',
+          ExpressionAttributeValues: { ':userId': userId },
+        }),
+      ),
+      (error) => new UnexpectedError(`Failed to query transactions for user ${userId}: ${(error as Error).message}`),
+    ).andThen((result) => {
+      const items = (result.Items ?? []) as TransactionItem[];
+      const transactions = Result.combine(items.map((item) => toTransaction(item)));
+
+      if (transactions.isErr()) {
+        return errAsync(transactions.error);
+      }
+
+      const sorted = [...transactions.value]
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, TRANSACTIONS_USER_ID_HISTORY_LIMIT);
+      return okAsync(sorted);
+    });
   }
 
   /**
