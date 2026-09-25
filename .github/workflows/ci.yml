@@ -5,9 +5,12 @@ on:
     branches:
       - develop
       - main
+      # Integration branches collect a feature's PRs before it reaches develop.
+      - 'integration/**'
   push:
     branches:
       - develop
+      - 'integration/**'
   workflow_dispatch:
 
 concurrency:
