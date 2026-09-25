@@ -8,6 +8,7 @@ const requiredEnv = {
   PAYMENT_GATEWAY_INTEGRITY_SECRET: 'integrity_123',
   PAYMENT_GATEWAY_EVENTS_SECRET: 'events_123',
   CORS_ALLOWED_ORIGINS: 'http://localhost:5173, http://localhost:3001',
+  ACCOUNTS_JWT_SECRET: 'test-jwt-secret-at-least-32-chars-long',
 };
 
 function buildEnv(overrides: Record<string, unknown> = {}): EnvironmentVariables {
@@ -47,6 +48,9 @@ describe('configuration', () => {
       throttle: {
         ttl: env.THROTTLE_TTL,
         limit: env.THROTTLE_LIMIT,
+      },
+      accounts: {
+        jwtSecret: env.ACCOUNTS_JWT_SECRET,
       },
     });
   });

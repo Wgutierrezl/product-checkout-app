@@ -7,6 +7,7 @@ const requiredEnv = {
   PAYMENT_GATEWAY_INTEGRITY_SECRET: 'integrity_secret_123',
   PAYMENT_GATEWAY_EVENTS_SECRET: 'events_secret_123',
   CORS_ALLOWED_ORIGINS: 'http://localhost:5173',
+  ACCOUNTS_JWT_SECRET: 'test-jwt-secret-at-least-32-chars-long',
 };
 
 describe('validateEnv', () => {
@@ -47,6 +48,7 @@ describe('validateEnv', () => {
     'PAYMENT_GATEWAY_INTEGRITY_SECRET',
     'PAYMENT_GATEWAY_EVENTS_SECRET',
     'CORS_ALLOWED_ORIGINS',
+    'ACCOUNTS_JWT_SECRET',
   ] as const)('rejects an empty string for required var %s', (key) => {
     expect(() => validateEnv({ ...requiredEnv, [key]: '' })).toThrow();
   });

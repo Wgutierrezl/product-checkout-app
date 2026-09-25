@@ -28,6 +28,9 @@ export interface AppConfig {
     ttl: number;
     limit: number;
   };
+  accounts: {
+    jwtSecret: string;
+  };
 }
 
 /**
@@ -68,6 +71,9 @@ export default function configuration(
     throttle: {
       ttl: env.THROTTLE_TTL,
       limit: env.THROTTLE_LIMIT,
+    },
+    accounts: {
+      jwtSecret: env.ACCOUNTS_JWT_SECRET,
     },
   };
 }

@@ -107,6 +107,16 @@ export class EnvironmentVariables {
   @IsInt()
   @Min(1)
   THROTTLE_LIMIT: number = 30;
+
+  /**
+   * HS256 signing secret for the accounts module's JWT access tokens.
+   * Sourced from SSM in production (see `ssm-bootstrap.ts`'s
+   * `jwt-secret` entry) or `.env` locally. Rotation is manual-only for the
+   * MVP — no rotation code path exists (per the signed-off decision).
+   */
+  @IsNotEmpty()
+  @IsString()
+  ACCOUNTS_JWT_SECRET!: string;
 }
 
 export function validateEnv(config: Record<string, unknown>): EnvironmentVariables {
