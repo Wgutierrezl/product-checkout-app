@@ -8,8 +8,9 @@ import { checkoutReducer, initialCheckoutState, type CheckoutState } from './che
 import { catalogReducer, type CatalogState } from '../catalog/catalogSlice';
 import { transactionReducer } from '../transaction/transactionSlice';
 import * as backendClient from '../../api/backendClient';
-import { BackendApiError } from '../../api/types';
+import { BackendApiError, REQUEST_TIMEOUT_STATUS } from '../../api/types';
 import type { Product } from '../../api/types';
+import { buildTransactionFixture } from '../transaction/transactionFixtures';
 
 jest.mock('../../api/backendClient');
 
@@ -20,6 +21,9 @@ const mockedCreateTransaction = backendClient.createTransaction as jest.MockedFu
   typeof backendClient.createTransaction
 >;
 const mockedFetchProducts = backendClient.fetchProducts as jest.MockedFunction<typeof backendClient.fetchProducts>;
+const mockedFetchTransaction = backendClient.fetchTransaction as jest.MockedFunction<
+  typeof backendClient.fetchTransaction
+>;
 
 const PRODUCT: Product = {
   id: 'p1',
@@ -81,6 +85,7 @@ describe('SummaryContainer', () => {
     mockedFetchPaymentAcceptance.mockReset();
     mockedCreateTransaction.mockReset();
     mockedFetchProducts.mockReset();
+    mockedFetchTransaction.mockReset();
     mockedFetchPaymentAcceptance.mockResolvedValue(ACCEPTANCE);
     mockedFetchProducts.mockResolvedValue([PRODUCT]);
   });
@@ -289,6 +294,8 @@ describe('SummaryContainer', () => {
       expect(store.getState().checkout.submitError).toBe('Insufficient stock');
       expect(mockedFetchProducts).toHaveBeenCalledTimes(1);
       expect(store.getState().checkout.submitAttempted).toBe(false);
+      // A genuine first attempt rejected for stock is definite: no lookup.
+      expect(mockedFetchTransaction).not.toHaveBeenCalled();
     });
 
     it('400 validation: shows the message and routes back to DETAILS to re-enter the card, rotating the key', async () => {
@@ -308,8 +315,81 @@ describe('SummaryContainer', () => {
       expect(checkout.submitAttempted).toBe(false);
     });
 
-    it('network (status 0): never reached the backend -- keeps the SAME key and the SAME card token, stays on SUMMARY for a retry', async () => {
-      mockedCreateTransaction.mockRejectedValue(new BackendApiError('Network error: timeout', 0));
+    describe('client timeout (408): the POST may have landed, so look it up under the SAME key instead of asking for the card', () => {
+      const existingKey = 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f';
+
+      it('the lookup finds it: shows the real status (APPROVED), with no second POST and the same key', async () => {
+        mockedCreateTransaction.mockRejectedValue(new BackendApiError('Request timed out', REQUEST_TIMEOUT_STATUS));
+        mockedFetchTransaction.mockResolvedValue(buildTransactionFixture({ id: existingKey, status: 'APPROVED' }));
+        const user = userEvent.setup();
+        const { store } = renderWithStore(buildStore({ idempotencyKey: existingKey }));
+        await acceptBoth(user);
+
+        await user.click(screen.getByRole('button', { name: /^pay$/i }));
+
+        await waitFor(() => expect(store.getState().checkout.step).toBe('RESULT'));
+        const { checkout, transaction } = store.getState();
+        expect(mockedFetchTransaction).toHaveBeenCalledWith(existingKey);
+        expect(mockedCreateTransaction).toHaveBeenCalledTimes(1);
+        expect(transaction).toMatchObject({ id: existingKey, status: 'APPROVED' });
+        expect(checkout.idempotencyKey).toBe(existingKey);
+        expect(checkout.cardToken).toBeNull();
+        expect(checkout.submitAttempted).toBe(false);
+        expect(checkout.submitStatus).toBe('idle');
+        expect(checkout.submitError).toBeNull();
+      });
+
+      it.each<[string, () => void]>([
+        ['404: the POST never landed', () => mockedFetchTransaction.mockRejectedValue(new BackendApiError('Transaction not found', 404))],
+        ['the lookup itself fails', () => mockedFetchTransaction.mockRejectedValue(new BackendApiError('Network error', 0))],
+      ])('%s: falls back to DETAILS to re-enter the card, keeping the key and the in-flight marker', async (_name, arrangeLookup) => {
+        mockedCreateTransaction.mockRejectedValue(new BackendApiError('Request timed out', REQUEST_TIMEOUT_STATUS));
+        arrangeLookup();
+        const user = userEvent.setup();
+        const { store } = renderWithStore(buildStore({ idempotencyKey: existingKey }));
+        await acceptBoth(user);
+
+        await user.click(screen.getByRole('button', { name: /^pay$/i }));
+
+        await waitFor(() => expect(store.getState().checkout.step).toBe('DETAILS'));
+        const { checkout } = store.getState();
+        expect(mockedFetchTransaction).toHaveBeenCalledWith(existingKey);
+        expect(checkout.cardToken).toBeNull();
+        expect(checkout.idempotencyKey).toBe(existingKey);
+        expect(checkout.submitAttempted).toBe(true);
+        expect(checkout.submitStatus).toBe('failed');
+        expect(checkout.submitError).toBe(
+          "We couldn't confirm your payment in time. Re-enter your card to check it again; you won't be charged twice.",
+        );
+      });
+    });
+
+    it('client timeout: dispatches nothing more if the summary unmounts while the lookup is pending', async () => {
+      const existingKey = 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f';
+      mockedCreateTransaction.mockRejectedValue(new BackendApiError('Request timed out', REQUEST_TIMEOUT_STATUS));
+      let rejectLookup: ((error: unknown) => void) | undefined;
+      mockedFetchTransaction.mockReturnValue(
+        new Promise((_resolve, reject) => {
+          rejectLookup = reject;
+        }),
+      );
+      const user = userEvent.setup();
+      const { store, unmount } = renderWithStore(buildStore({ idempotencyKey: existingKey }));
+      await acceptBoth(user);
+      await user.click(screen.getByRole('button', { name: /^pay$/i }));
+      await waitFor(() => expect(mockedFetchTransaction).toHaveBeenCalledWith(existingKey));
+
+      unmount();
+      rejectLookup?.(new BackendApiError('Transaction not found', 404));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(store.getState().checkout.step).toBe('SUMMARY');
+      expect(store.getState().checkout.submitError).toBeNull();
+      expect(store.getState().checkout.submitAttempted).toBe(true);
+    });
+
+    it('network (status 0): most likely never reached the backend -- keeps the SAME key and the SAME card token, stays on SUMMARY for a retry', async () => {
+      mockedCreateTransaction.mockRejectedValue(new BackendApiError('Network error: Failed to fetch', 0));
       const user = userEvent.setup();
       const existingKey = 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f';
       const { store } = renderWithStore(buildStore({ idempotencyKey: existingKey }));
@@ -340,6 +420,43 @@ describe('SummaryContainer', () => {
       expect(checkout.cardToken).toBeNull();
       expect(checkout.idempotencyKey).toBe(existingKey);
       expect(checkout.submitAttempted).toBe(false);
+    });
+
+    it('502 from a gateway rejection (e.g. an expired token, or any other definite rejection): back to DETAILS with a neutral message, with a NEW key', async () => {
+      mockedCreateTransaction.mockRejectedValue(
+        new BackendApiError('Payment provider unavailable', 502, 'PaymentGatewayError'),
+      );
+      const user = userEvent.setup();
+      const existingKey = 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f';
+      const { store } = renderWithStore(buildStore({ idempotencyKey: existingKey }));
+      await acceptBoth(user);
+
+      await user.click(screen.getByRole('button', { name: /^pay$/i }));
+
+      await waitFor(() => expect(store.getState().checkout.step).toBe('DETAILS'));
+      const { checkout } = store.getState();
+      expect(checkout.submitError).toBe('The payment was rejected. Please re-enter your card or try another one.');
+      expect(checkout.cardToken).toBeNull();
+      // The backend already recorded that attempt as ERROR under the old
+      // key; replaying it would only return that ERROR again.
+      expect(checkout.idempotencyKey).not.toBe(existingKey);
+      expect(checkout.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
+      expect(checkout.submitAttempted).toBe(false);
+      expect(checkout.submitStatus).toBe('failed');
+    });
+
+    it('502 without the gateway error type (e.g. from a proxy) keeps the generic 5xx handling and the same key', async () => {
+      mockedCreateTransaction.mockRejectedValue(new BackendApiError('Bad Gateway', 502));
+      const user = userEvent.setup();
+      const existingKey = 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f';
+      const { store } = renderWithStore(buildStore({ idempotencyKey: existingKey }));
+      await acceptBoth(user);
+
+      await user.click(screen.getByRole('button', { name: /^pay$/i }));
+
+      await waitFor(() => expect(store.getState().checkout.step).toBe('DETAILS'));
+      expect(store.getState().checkout.submitError).toBe('Bad Gateway');
+      expect(store.getState().checkout.idempotencyKey).toBe(existingKey);
     });
 
     it('falls back to a generic acceptance-fetch-before-pay error, staying on SUMMARY with the same key', async () => {

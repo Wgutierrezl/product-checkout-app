@@ -84,10 +84,24 @@ export interface PaymentAcceptance {
  * code; `message` is the best-effort human-readable reason extracted from
  * either error shape the backend can return (see `backendClient.ts`).
  */
+/**
+ * Status given to a request this app aborted after its own client-side
+ * timeout (HTTP's 408 Request Timeout, which carries the same meaning).
+ * Unlike a network failure, the request may well have reached the backend,
+ * so callers must treat its outcome as unknown.
+ */
+export const REQUEST_TIMEOUT_STATUS = 408;
+
 export class BackendApiError extends Error {
+  /**
+   * @param errorType the backend's `error` field (e.g. `PaymentGatewayError`)
+   *   when the body carried one; `undefined` for network failures or bodies
+   *   that did not come from the backend's own error filter (e.g. a proxy).
+   */
   constructor(
     message: string,
     readonly status: number,
+    readonly errorType?: string,
   ) {
     super(message);
     this.name = 'BackendApiError';

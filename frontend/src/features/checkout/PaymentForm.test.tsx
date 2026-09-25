@@ -1,6 +1,7 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { PaymentForm } from './PaymentForm';
+import { DRAFT_SAVE_DEBOUNCE_MS, PaymentForm } from './PaymentForm';
+import type { PaymentFormDraft } from './checkoutSlice';
 import type { CustomerInput, DeliveryInput } from '../../api/types';
 
 const CUSTOMER: CustomerInput = { fullName: 'Jane Doe', email: 'jane@example.com', phone: '+573001234567' };
@@ -551,6 +552,183 @@ describe('PaymentForm', () => {
       renderForm({ isSubmitting: false });
 
       expect(screen.getByLabelText(/card number/i)).toBeEnabled();
+    });
+  });
+
+  describe('draft of the non-card fields (refresh resilience)', () => {
+    const DRAFT: PaymentFormDraft = {
+      cardHolder: 'Jane Doe',
+      installments: 6,
+      fullName: 'Jane Doe',
+      email: 'jane@example.com',
+      phoneCountry: 'MX',
+      phoneNational: '5512345678',
+      address: 'Cra 1 # 2-3',
+      city: 'Bogota',
+      region: 'Cundinamarca',
+      postalCode: '110111',
+    };
+    const RESTORED_NOTICE = 'For your security, card details are never stored on this device. Please re-enter them.';
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    function setupWithFakeTimers() {
+      jest.useFakeTimers();
+      return userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    }
+
+    it('restores every non-card field from the draft, leaving the card fields empty', () => {
+      renderForm({ initialDraft: DRAFT, initialCustomer: CUSTOMER, initialDelivery: DELIVERY });
+
+      expect(screen.getByLabelText(/cardholder name/i)).toHaveValue('Jane Doe');
+      expect(screen.getByLabelText(/installments/i)).toHaveValue('6');
+      expect(screen.getByLabelText(/full name/i)).toHaveValue('Jane Doe');
+      expect(screen.getByLabelText(/email/i)).toHaveValue('jane@example.com');
+      expect(screen.getByLabelText(/^phone$/i)).toHaveValue('5512345678');
+      expect(screen.getByRole('combobox', { name: /country/i })).toHaveDisplayValue(/\+52/);
+      expect(screen.getByLabelText(/^address/i)).toHaveValue('Cra 1 # 2-3');
+      expect(screen.getByLabelText(/city/i)).toHaveValue('Bogota');
+      expect(screen.getByLabelText(/region/i)).toHaveValue('Cundinamarca');
+      expect(screen.getByLabelText(/postal code/i)).toHaveValue('110111');
+      expect(screen.getByLabelText(/card number/i)).toHaveValue('');
+      expect(screen.getByLabelText(/expiry/i)).toHaveValue('');
+      expect(screen.getByLabelText(/cvc/i)).toHaveValue('');
+    });
+
+    it('does not report a draft on mount when nothing changed', () => {
+      jest.useFakeTimers();
+      const onDraftChange = jest.fn();
+      renderForm({ initialDraft: DRAFT, onDraftChange });
+
+      act(() => {
+        jest.advanceTimersByTime(DRAFT_SAVE_DEBOUNCE_MS * 2);
+      });
+
+      expect(onDraftChange).not.toHaveBeenCalled();
+    });
+
+    it('reports the draft only after the buyer pauses typing (debounced)', async () => {
+      const user = setupWithFakeTimers();
+      const onDraftChange = jest.fn();
+      renderForm({ onDraftChange });
+
+      await user.type(screen.getByLabelText(/full name/i), 'Jane');
+      expect(onDraftChange).not.toHaveBeenCalled();
+
+      act(() => {
+        jest.advanceTimersByTime(DRAFT_SAVE_DEBOUNCE_MS);
+      });
+
+      expect(onDraftChange).toHaveBeenCalledTimes(1);
+      expect(onDraftChange).toHaveBeenLastCalledWith(expect.objectContaining({ fullName: 'Jane' }));
+    });
+
+    it('never includes the card number, expiry or CVC in the reported draft', async () => {
+      const user = setupWithFakeTimers();
+      const onDraftChange = jest.fn();
+      renderForm({ onDraftChange });
+
+      await fillValidForm(user);
+      act(() => {
+        jest.advanceTimersByTime(DRAFT_SAVE_DEBOUNCE_MS);
+      });
+
+      const draft = onDraftChange.mock.lastCall?.[0] as PaymentFormDraft;
+      expect(Object.keys(draft).sort()).toEqual(
+        [
+          'address',
+          'cardHolder',
+          'city',
+          'email',
+          'fullName',
+          'installments',
+          'phoneCountry',
+          'phoneNational',
+          'postalCode',
+          'region',
+        ].sort(),
+      );
+      const serialized = JSON.stringify(onDraftChange.mock.calls);
+      expect(serialized).not.toContain('4111');
+      expect(serialized).not.toContain('09/30');
+      expect(serialized).not.toContain('0930');
+      expect(serialized).not.toMatch(/"123"/);
+    });
+
+    it('reports the latest draft right away on a valid submit, without waiting for the debounce', async () => {
+      const user = userEvent.setup();
+      const onDraftChange = jest.fn();
+      const { onSubmit } = renderForm({ onDraftChange });
+      await fillValidForm(user);
+      onDraftChange.mockClear();
+
+      await user.click(screen.getByRole('button', { name: /continue/i }));
+
+      expect(onSubmit).toHaveBeenCalled();
+      expect(onDraftChange).toHaveBeenCalledWith(expect.objectContaining({ region: 'Cundinamarca' }));
+    });
+
+    it('shows a status notice near the card fields when data was restored and the card is empty', () => {
+      renderForm({ initialDraft: DRAFT, showRestoredNotice: true });
+
+      const notice = screen.getByRole('status');
+      expect(notice).toHaveTextContent(RESTORED_NOTICE);
+      // role="status" already implies a polite live region.
+      expect(notice).not.toHaveAttribute('aria-live');
+    });
+
+    it('describes the card number field with the notice, so it is read when the buyer reaches the card', () => {
+      renderForm({ initialDraft: DRAFT, showRestoredNotice: true });
+
+      expect(screen.getByLabelText(/card number/i)).toHaveAccessibleDescription(RESTORED_NOTICE);
+    });
+
+    it('keeps a card number error in the description alongside the notice', async () => {
+      const user = userEvent.setup();
+      renderForm({ initialDraft: DRAFT, showRestoredNotice: true });
+      const cardNumber = screen.getByLabelText(/card number/i);
+
+      await user.click(cardNumber);
+      await user.tab();
+
+      expect(cardNumber).toHaveAccessibleDescription(`Card number is required ${RESTORED_NOTICE}`);
+    });
+
+    it('drops the notice from the card number description once it is dismissed', async () => {
+      const user = userEvent.setup();
+      renderForm({ initialDraft: DRAFT, showRestoredNotice: true });
+      const cardNumber = screen.getByLabelText(/card number/i);
+
+      await user.type(cardNumber, '4');
+
+      expect(cardNumber).not.toHaveAccessibleDescription(expect.stringContaining('never stored'));
+    });
+
+    it('does not show the notice when nothing was restored', () => {
+      renderForm({ initialDraft: DRAFT });
+
+      expect(screen.queryByText(RESTORED_NOTICE)).not.toBeInTheDocument();
+    });
+
+    it('does not show the notice next to a submit error (the error already asks for the card again)', () => {
+      renderForm({ initialDraft: DRAFT, showRestoredNotice: true, submitError: 'Card declined' });
+
+      expect(screen.queryByText(RESTORED_NOTICE)).not.toBeInTheDocument();
+    });
+
+    it('dismisses the notice for good once the buyer types a card number', async () => {
+      const user = userEvent.setup();
+      renderForm({ initialDraft: DRAFT, showRestoredNotice: true });
+      const cardNumber = screen.getByLabelText(/card number/i);
+      expect(screen.getByText(RESTORED_NOTICE)).toBeInTheDocument();
+
+      await user.type(cardNumber, '4');
+      expect(screen.queryByText(RESTORED_NOTICE)).not.toBeInTheDocument();
+
+      await user.clear(cardNumber);
+      expect(screen.queryByText(RESTORED_NOTICE)).not.toBeInTheDocument();
     });
   });
 });

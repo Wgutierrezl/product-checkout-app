@@ -25,7 +25,11 @@ function buildPreloadedState() {
   }
 
   return {
-    checkout: { ...initialCheckoutState, ...persisted.checkout },
+    checkout: {
+      ...initialCheckoutState,
+      ...persisted.checkout,
+      draftRestored: persisted.checkout.formDraft !== null,
+    },
     transaction: { ...initialTransactionState, ...persisted.transaction },
   };
 }

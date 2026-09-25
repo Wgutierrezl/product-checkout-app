@@ -20,7 +20,18 @@ type ResumeDispatch = (
 export interface ResumeInFlightPaymentOptions {
   idempotencyKey: string;
   dispatch: ResumeDispatch;
+  /**
+   * Whether a 404 clears `submitAttempted` (default `true`: on boot, a 404
+   * means the attempt never landed). Pass `false` right after a client
+   * timeout or when following another tab's attempt: the POST may still be
+   * in flight on the backend, so the in-flight marker must survive for a
+   * later check.
+   */
+  resolveOnNotFound?: boolean;
 }
+
+/** `found`: resumed to RESULT. `notFound`: 404. `unknown`: any other failure. */
+export type ResumeOutcome = 'found' | 'notFound' | 'unknown';
 
 /**
  * Resolves a payment attempt that was still in flight when the page was
@@ -48,7 +59,11 @@ export interface ResumeInFlightPaymentOptions {
  * - Anything else (network error, 5xx): genuinely unknown -- `submitAttempted`
  *   is deliberately left as-is so a later reload/retry re-checks.
  */
-export async function resumeInFlightPayment({ idempotencyKey, dispatch }: ResumeInFlightPaymentOptions): Promise<void> {
+export async function resumeInFlightPayment({
+  idempotencyKey,
+  dispatch,
+  resolveOnNotFound = true,
+}: ResumeInFlightPaymentOptions): Promise<ResumeOutcome> {
   try {
     const transaction = await fetchTransaction(idempotencyKey);
 
@@ -70,10 +85,15 @@ export async function resumeInFlightPayment({ idempotencyKey, dispatch }: Resume
     dispatch(cardTokenConsumed());
     dispatch(paymentAttemptResolved());
     dispatch(stepForced('RESULT'));
+    return 'found';
   } catch (error) {
     if (error instanceof BackendApiError && error.status === 404) {
-      dispatch(paymentAttemptResolved());
+      if (resolveOnNotFound) {
+        dispatch(paymentAttemptResolved());
+      }
+      return 'notFound';
     }
     // Any other error: leave submitAttempted untouched, retry later.
+    return 'unknown';
   }
 }
