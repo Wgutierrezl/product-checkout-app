@@ -87,7 +87,16 @@ describe('AuthController', () => {
 
       const result = await controller.login(validLoginBody());
 
-      expect(result).toEqual({ accessToken: 'signed.jwt.token', tokenType: 'Bearer', expiresIn: 3600 });
+      expect(result).toEqual({
+        accessToken: 'signed.jwt.token',
+        tokenType: 'Bearer',
+        expiresIn: 3600,
+        userId: 'user-1',
+        email: 'jane.doe@example.com',
+        fullName: 'Jane Doe',
+      });
+      expect(Object.keys(result)).not.toContain('passwordHash');
+      expect(JSON.stringify(result)).not.toMatch(/passwordHash|\$2a\$10\$/);
     });
 
     it('throws the DomainError (401) on bad credentials', async () => {

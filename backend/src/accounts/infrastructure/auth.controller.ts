@@ -64,7 +64,7 @@ export class AuthController {
     const result = await this.loginUseCase.execute({ email: dto.email, password: dto.password });
 
     return result.match(
-      ({ accessToken }) => LoginResponseDto.fromToken(accessToken),
+      ({ accessToken, user }) => LoginResponseDto.from(accessToken, user),
       (error) => {
         throw error;
       },

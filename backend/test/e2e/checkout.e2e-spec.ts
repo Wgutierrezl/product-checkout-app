@@ -412,7 +412,11 @@ describe('Accounts E2E (register -> login)', () => {
       accessToken: expect.any(String),
       tokenType: 'Bearer',
       expiresIn: 3600,
+      userId: registerResponse.body.userId,
+      email: body.email,
+      fullName: body.fullName,
     });
+    expect(JSON.stringify(loginResponse.body)).not.toMatch(/passwordHash|\$2[aby]\$/);
 
     const decoded = jwt.decode(loginResponse.body.accessToken as string) as jwt.JwtPayload;
     expect(decoded.email).toBe(body.email);
