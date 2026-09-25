@@ -117,7 +117,7 @@ the gaps are listed in [Known limitations and next steps](#known-limitations-and
 | GitHub link with an updated README | This README plus one per package | — |
 | Deployed app connected to the backend | CloudFront SPA calling the HTTP API | [Live links](#live-links) |
 | [5] README completed | Setup, architecture, data model, API, coverage, this map | This document |
-| [5] Images render fast, nothing out of bounds | **Partial.** Explicit `width`/`height` and a 1:1 `aspect-ratio` (no layout shift), WebP, lazy loading below the fold, the first desktop row eager with `fetchpriority="high"` on the first image, clamped text. Images are hotlinked at one size with no `srcset` | [`ProductCard.tsx`](./frontend/src/features/catalog/ProductCard.tsx) |
+| [5] Images render fast, nothing out of bounds | Responsive `srcset` (320/480/640/960 px WebP) with `sizes` matched to the grid columns, explicit `width`/`height` and a 1:1 `aspect-ratio` (no layout shift), lazy loading below the fold, the first desktop row eager with `fetchpriority="high"` on the first image, clamped text. Images are still hotlinked from Unsplash, not served from our CDN | [`ProductCard.tsx`](./frontend/src/features/catalog/ProductCard.tsx) |
 | [20] Full credit-card checkout onboarding | The five steps work end to end on the live app with the sandbox test cards | [Checkout flow](#checkout-flow) |
 | [20] API working correctly | 25 e2e tests against the real `AppModule` and DynamoDB Local, plus the unit suite | [backend § End-to-end tests](./backend/README.md#end-to-end-tests) |
 | [30] >80% unit coverage, backend and frontend | Backend 100%, frontend >98% on every metric | [Testing & coverage](#testing--coverage) |
@@ -354,7 +354,7 @@ on `develop` (`npm test -- --coverage` in each package; `npm run test:e2e` for t
 |---|---|---|---|---|---|
 | `backend` (unit) | 100% | 100% | 100% | 100% | 49 suites / 412 tests |
 | `backend` (e2e) | — | — | — | — | 1 suite / 25 tests (DynamoDB Local) |
-| `frontend` | 99.57% | 98.43% | 100% | 99.54% | 54 suites / 704 tests |
+| `frontend` | 99.58% | 98.44% | 100% | 99.55% | 55 suites / 713 tests |
 | `infra` | 100% | 100% | 100% | 100% | 6 suites / 40 tests |
 
 - **Backend e2e** runs against a real `AppModule` and DynamoDB Local, with a deterministic
@@ -458,8 +458,8 @@ Consciously left out of this scope, each with the reason or the next step:
   Next: align both on the same status code.
 - **A replay with a different body under the same key returns the original silently.** Safe (no
   second charge), but a mismatched body could get a 409/422 instead.
-- **Product images are hotlinked from Unsplash at a single size (600px WebP).** Next: `srcset` /
-  `sizes` and serve them from our own CloudFront distribution.
+- **Product images are hotlinked from Unsplash**, not served from our CDN. Next: copy them to
+  our own CloudFront distribution.
 - **Google Fonts is render-blocking.** Next: self-host the two font families.
 - **The CSP `connect-src` allows any `execute-api` host in the region** (to avoid a circular
   stack dependency, see [infra § Stacks](./infra/README.md#stacks)). Next: pin it to the API id.

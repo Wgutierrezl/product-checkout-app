@@ -3,6 +3,7 @@ import { Button } from '../../shared/ui/Button';
 import { formatCOP } from '../../domain/money/formatCOP';
 import { clampQuantity, maxSelectableQuantity } from '../../domain/catalog/quantityBounds';
 import type { Product } from '../../api/types';
+import { buildProductImageSrcSet, PRODUCT_IMAGE_SIZES } from './productImageSrcSet';
 import styles from './ProductCard.module.css';
 
 export interface ProductCardProps {
@@ -27,6 +28,8 @@ export function ProductCard({ product, onBuy, priority = false, eager = false }:
     setQuantity((current) => clampQuantity(current, product.stock));
   }, [product.stock]);
 
+  const imageSrcSet = buildProductImageSrcSet(product.imageUrl);
+
   const decrease = () => setQuantity((current) => clampQuantity(current - 1, product.stock));
   const increase = () => setQuantity((current) => clampQuantity(current + 1, product.stock));
 
@@ -35,6 +38,9 @@ export function ProductCard({ product, onBuy, priority = false, eager = false }:
       <div className={styles.imageWrap}>
         <img
           className={styles.image}
+          // sizes/srcSet before src: a detached <img> can start fetching as
+          // soon as src is set, so the candidates must already be in place.
+          {...(imageSrcSet ? { sizes: PRODUCT_IMAGE_SIZES, srcSet: imageSrcSet } : {})}
           src={product.imageUrl}
           alt={product.name}
           width={320}
