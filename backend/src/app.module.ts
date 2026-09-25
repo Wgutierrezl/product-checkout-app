@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 
+import { AccountsModule } from './accounts/accounts.module';
 import { CustomersModule } from './customers/customers.module';
 import { DeliveriesModule } from './deliveries/deliveries.module';
 import { HealthController } from './health/health.controller';
@@ -33,6 +34,7 @@ import { PaymentGatewayModule } from './shared/payment-gateway/payment-gateway.m
     DeliveriesModule,
     PaymentAcceptanceModule,
     TransactionsModule,
+    AccountsModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

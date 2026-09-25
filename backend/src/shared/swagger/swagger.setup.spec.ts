@@ -26,6 +26,23 @@ describe('setupSwagger', () => {
     );
     expect(SwaggerModule.setup).toHaveBeenCalledWith('docs', app, { paths: {} });
   });
+
+  it('registers a Bearer auth security scheme for the accounts module', () => {
+    const app = {} as INestApplication;
+
+    setupSwagger(app);
+
+    expect(SwaggerModule.createDocument).toHaveBeenCalledWith(
+      app,
+      expect.objectContaining({
+        components: expect.objectContaining({
+          securitySchemes: expect.objectContaining({
+            bearer: expect.objectContaining({ type: 'http', scheme: 'bearer' }),
+          }),
+        }),
+      }),
+    );
+  });
 });
 
 describe('buildSwaggerDocument', () => {

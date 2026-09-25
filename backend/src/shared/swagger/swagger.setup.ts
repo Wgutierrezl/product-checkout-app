@@ -4,9 +4,14 @@ import { DocumentBuilder, OpenAPIObject, SwaggerModule } from '@nestjs/swagger';
 const SWAGGER_CONFIG = new DocumentBuilder()
   .setTitle('Product Checkout API')
   .setDescription(
-    'Backend API for product checkout: catalog, payment acceptance, transactions, customers, deliveries.',
+    'Backend API for product checkout: catalog, payment acceptance, transactions, customers, ' +
+      'deliveries, and accounts (register/login). Protected accounts routes use a Bearer JWT ' +
+      'issued by POST /auth/login.',
   )
   .setVersion('0.1.0')
+  // Default scheme name 'bearer' — referenced by `@ApiBearerAuth()` on any
+  // controller/route guarded by `JwtAuthGuard`.
+  .addBearerAuth()
   .build();
 
 /**
