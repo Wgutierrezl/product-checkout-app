@@ -8,6 +8,7 @@ const STATUS_BY_ERROR_TYPE: Record<DomainErrorType, number> = {
   InsufficientStock: HttpStatus.CONFLICT,
   PaymentGatewayError: HttpStatus.BAD_GATEWAY,
   Conflict: HttpStatus.CONFLICT,
+  Unauthorized: HttpStatus.UNAUTHORIZED,
   Unexpected: HttpStatus.INTERNAL_SERVER_ERROR,
 };
 

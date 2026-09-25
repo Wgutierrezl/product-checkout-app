@@ -5,6 +5,7 @@ import {
   InsufficientStockError,
   NotFoundError,
   PaymentGatewayError,
+  UnauthorizedError,
   UnexpectedError,
   ValidationError,
 } from './domain-error';
@@ -17,6 +18,7 @@ describe('mapDomainErrorToHttpStatus', () => {
     [new InsufficientStockError('no stock'), HttpStatus.CONFLICT],
     [new PaymentGatewayError('gateway down'), HttpStatus.BAD_GATEWAY],
     [new ConflictError('already settled'), HttpStatus.CONFLICT],
+    [new UnauthorizedError('bad credentials'), HttpStatus.UNAUTHORIZED],
     [new UnexpectedError('boom'), HttpStatus.INTERNAL_SERVER_ERROR],
   ])('maps %p to HTTP status %i', (error, expectedStatus) => {
     expect(mapDomainErrorToHttpStatus(error)).toBe(expectedStatus);

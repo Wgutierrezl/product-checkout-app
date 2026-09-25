@@ -4,6 +4,7 @@ export type DomainErrorType =
   | 'InsufficientStock'
   | 'PaymentGatewayError'
   | 'Conflict'
+  | 'Unauthorized'
   | 'Unexpected';
 
 export abstract class DomainError extends Error {
@@ -45,6 +46,11 @@ export class PaymentGatewayError extends DomainError {
 
 export class ConflictError extends DomainError {
   readonly type: DomainErrorType = 'Conflict';
+}
+
+/** Missing/invalid/expired credentials or token — maps to HTTP 401. */
+export class UnauthorizedError extends DomainError {
+  readonly type: DomainErrorType = 'Unauthorized';
 }
 
 export class UnexpectedError extends DomainError {
