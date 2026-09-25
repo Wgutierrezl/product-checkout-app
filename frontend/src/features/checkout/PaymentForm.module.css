@@ -64,6 +64,21 @@
   flex: 1;
 }
 
+.phoneRow {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.phoneCountry {
+  flex: 0 0 auto;
+  width: 7.5rem;
+}
+
+.phoneRow .input {
+  flex: 1;
+  min-width: 0;
+}
+
 .brandMessage {
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);

@@ -32,7 +32,9 @@ async function fillValidForm(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText(/cvc/i), '123');
   await user.type(screen.getByLabelText(/full name/i), 'Jane Doe');
   await user.type(screen.getByLabelText(/email/i), 'jane@example.com');
-  await user.type(screen.getByLabelText(/phone/i), '+573001234567');
+  // Default country is Colombia (+57), so typing only the national number
+  // reconstructs the same '+573001234567' E.164 value used elsewhere.
+  await user.type(screen.getByLabelText(/phone/i), '3001234567');
   await user.type(screen.getByLabelText(/^address/i), 'Cra 1 # 2-3');
   await user.type(screen.getByLabelText(/city/i), 'Bogota');
   await user.type(screen.getByLabelText(/region/i), 'Cundinamarca');
@@ -230,6 +232,60 @@ describe('PaymentForm', () => {
 
       expect(screen.getByText(/enter a valid email address/i)).toBeInTheDocument();
     });
+
+    it('shows an error when the national phone number is too short', async () => {
+      const user = userEvent.setup();
+      renderForm();
+
+      await user.type(screen.getByLabelText(/phone/i), '123');
+      await user.tab();
+
+      expect(screen.getByText(/enter a valid phone number/i)).toBeInTheDocument();
+    });
+  });
+
+  describe('phone with country code', () => {
+    it('defaults the country to Colombia (+57)', () => {
+      renderForm();
+
+      expect(screen.getByRole('combobox', { name: /country code/i })).toHaveValue('🇨🇴 +57');
+    });
+
+    it('restricts the national number field to digits only', async () => {
+      const user = userEvent.setup();
+      renderForm();
+
+      await user.type(screen.getByLabelText(/phone/i), 'abc300-123-4567');
+
+      expect(screen.getByLabelText(/phone/i)).toHaveValue('3001234567');
+    });
+
+    it('submits the phone as E.164 using the selected country dial code', async () => {
+      const user = userEvent.setup();
+      const { onSubmit } = renderForm();
+
+      await fillValidForm(user);
+      const combobox = screen.getByRole('combobox', { name: /country code/i });
+      await user.click(combobox);
+      await user.type(combobox, 'Spain');
+      await user.keyboard('{ArrowDown}{Enter}');
+
+      await user.click(screen.getByRole('button', { name: /continue/i }));
+
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          customer: expect.objectContaining({ phone: '+343001234567' }),
+        }),
+      );
+    });
+
+    it('exposes numeric input mode and the tel-national autocomplete hint on the national number field', () => {
+      renderForm();
+
+      const input = screen.getByLabelText(/phone/i);
+      expect(input).toHaveAttribute('inputMode', 'numeric');
+      expect(input).toHaveAttribute('autoComplete', 'tel-national');
+    });
   });
 
   describe('submission', () => {
@@ -351,7 +407,10 @@ describe('PaymentForm', () => {
 
       expect(screen.getByLabelText(/full name/i)).toHaveValue(CUSTOMER.fullName);
       expect(screen.getByLabelText(/email/i)).toHaveValue(CUSTOMER.email);
-      expect(screen.getByLabelText(/phone/i)).toHaveValue(CUSTOMER.phone);
+      // The phone is split into a country selector (parsed from the
+      // persisted E.164 value) and a national-number field.
+      expect(screen.getByRole('combobox', { name: /country code/i })).toHaveValue('🇨🇴 +57');
+      expect(screen.getByLabelText(/phone/i)).toHaveValue('3001234567');
       expect(screen.getByLabelText(/^address/i)).toHaveValue(DELIVERY.address);
       expect(screen.getByLabelText(/city/i)).toHaveValue(DELIVERY.city);
       expect(screen.getByLabelText(/region/i)).toHaveValue(DELIVERY.region);
