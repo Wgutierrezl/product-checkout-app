@@ -375,8 +375,8 @@ export function parsePersistedState(
  * holds a valid card session (sessionStorage) bound to the persisted
  * idempotency key, and no payment attempt was in flight. Otherwise (new tab, closed tab, corrupted session, or a token that
  * may already have been sent) it is downgraded to `DETAILS` with no card
- * data, and the buyer re-enters the card (see design Amendment: tokenize at
- * Continue). A card session is never kept for any other step.
+ * data, and the buyer re-enters the card, which is tokenized again on
+ * Continue. A card session is never kept for any other step.
  */
 export function loadPersistedState():
   | { checkout: RehydratedCheckout; transaction: PersistedTransaction }

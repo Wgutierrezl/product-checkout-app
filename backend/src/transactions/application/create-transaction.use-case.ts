@@ -69,7 +69,7 @@ interface PendingState extends PricedProduct {
 }
 
 /**
- * ROP pipeline (per design.md): return the existing transaction on an
+ * Railway-oriented pipeline: return the existing transaction on an
  * idempotent replay; otherwise validate quantity -> load product (404) ->
  * check stock (409) -> compute server-side total -> upsert customer by
  * email -> persist a PENDING transaction with a unique reference -> build
@@ -96,8 +96,8 @@ interface PendingState extends PricedProduct {
  * failure — settled and returned with a 201.
  *
  * `cardToken` is used only to build the gateway request body — it is never
- * read back off `Transaction` or persisted (see spec's Sensitive Data
- * Protection requirement).
+ * read back off `Transaction` or persisted: it is sensitive payment data
+ * the backend must not store.
  */
 @Injectable()
 export class CreateTransactionUseCase {

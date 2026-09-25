@@ -10,12 +10,12 @@ import { ID_GENERATOR_PORT } from '../ports/id-generator.port';
  * feature module without each of them re-declaring the provider — mirrors
  * `DynamoModule`/`PaymentGatewayModule`.
  *
- * Promoted here (batch 5) from two separate, non-global registrations:
- * `AppModule`'s own `providers` array (visible only to `HealthController`,
- * declared on `AppModule` itself) and a duplicate local registration on
- * `PaymentAcceptanceModule`. Both are now removed in favor of this single
- * global source of truth — see `sdd/backend-core/apply-progress` batch 4b's
- * deviation note for the discovery that motivated this module.
+ * Replaces two separate, non-global registrations: `AppModule`'s own
+ * `providers` array (visible only to `HealthController`, declared on
+ * `AppModule` itself) and a duplicate local registration on
+ * `PaymentAcceptanceModule`. Providers registered that way are not visible
+ * to other feature modules, which forced each one to re-declare them; this
+ * module is now the single global source of truth.
  */
 @Global()
 @Module({

@@ -16,7 +16,8 @@ export { TransactionWithDelivery };
 
 /**
  * Read path for `GET /transactions/:id`, including the "lazy poll" refresh
- * (per design's hybrid settlement plan): a stale PENDING transaction is
+ * (one of the three settlement paths, next to the synchronous result and the
+ * webhook): a stale PENDING transaction is
  * checked against the gateway before responding, self-healing the status
  * without needing a public webhook URL. Two poll strategies:
  *

@@ -59,7 +59,7 @@ export interface TransactionProps {
  * write, `settle-transaction`'s status update, and tests — shares the same
  * validation instead of re-implementing it. Note that `cardToken` is
  * intentionally NOT a field here or anywhere on `Transaction` — it must
- * never be persisted (see spec's Sensitive Data Protection requirement).
+ * never be persisted, because it is sensitive payment data.
  */
 export const Transaction = {
   create(props: TransactionProps): AppResult<Transaction> {

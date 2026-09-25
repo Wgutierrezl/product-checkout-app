@@ -18,7 +18,7 @@ export interface SettleTransactionInput {
 
 /**
  * Single entry point for applying a gateway-reported status to a
- * transaction — consumed by all three settlement paths per design: the
+ * transaction — consumed by all three settlement paths: the
  * synchronous result of `POST /transactions` (via `CreateTransactionUseCase`),
  * the payment gateway webhook (`HandleWebhookUseCase`), and the lazy-poll
  * refresh on `GET /transactions/:id` (`GetTransactionUseCase`).

@@ -3,7 +3,8 @@ import { AppResult, err, ok } from '../../shared/result/result.types';
 
 /**
  * Only 'CREATED' exists today — a Delivery is created once, atomically, as
- * part of transaction settlement (see design.md TransactWriteItems). No other
+ * part of transaction settlement (the same DynamoDB `TransactWriteItems`
+ * that approves the transaction and decrements stock). No other
  * status transition is specified yet.
  */
 export const DELIVERY_STATUSES = ['CREATED'] as const;
