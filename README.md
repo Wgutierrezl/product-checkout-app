@@ -66,7 +66,7 @@ flowchart TB
     HttpApi --> Lambda
     Lambda -->|create/settle transaction| Gateway
     Lambda -->|read/write, TransactWriteItems| DDB
-    Lambda -->|GetParameter + kms:Decrypt at cold start| SSM
+    Lambda -->|"GetParameters + kms:Decrypt at cold start"| SSM
     Gateway -.->|webhook: transaction status| HttpApi
 ```
 
@@ -235,9 +235,9 @@ directly against this repository:
 
 | Package | Statements | Branches | Functions | Lines | Suites / Tests |
 |---|---|---|---|---|---|
-| `backend` (unit) | 100% | 100% | 100% | 100% | 47 suites / 387 tests |
-| `backend` (e2e) | — | — | — | — | 1 suite / 17 tests (DynamoDB Local) |
-| `frontend` | 99.39% | 97.88% | 100% | 99.35% | 47 suites / 454 tests |
+| `backend` (unit) | 100% | 100% | 100% | 100% | 47 suites / 391 tests |
+| `backend` (e2e) | — | — | — | — | 1 suite / 18 tests (DynamoDB Local) |
+| `frontend` | 99.49% | 98.17% | 100% | 99.46% | 52 suites / 556 tests |
 | `infra` | 100% | 100% | 100% | 100% | 6 suites / 38 tests |
 
 - **Backend e2e** runs against a real `AppModule` and DynamoDB Local, with a deterministic
