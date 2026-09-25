@@ -75,10 +75,10 @@ mocked `fetch`. The CI gate is 80% (`jest.config.ts`); current numbers:
 
 | Metric | Covered / Total | % |
 |---|---|---|
-| Statements | 1080 / 1080 | 100% |
-| Branches | 296 / 296 | 100% |
-| Functions | 269 / 269 | 100% |
-| Lines | 1007 / 1007 | 100% |
+| Statements | 1085 / 1085 | 100% |
+| Branches | 300 / 300 | 100% |
+| Functions | 274 / 274 | 100% |
+| Lines | 1012 / 1012 | 100% |
 
 412 tests across 49 suites, developed strict-TDD (RED → GREEN → REFACTOR) throughout.
 
@@ -151,9 +151,10 @@ DomainError>`. A single mapper at the controller boundary (`DomainErrorFilter` +
 themselves only ever call `.match(onOk, onErr)` and stay free of any `try/catch` or status-code
 logic.
 
-**Settlement is the one place true DynamoDB transactions are used**: `TransactWriteItems`
-atomically transitions a transaction to `APPROVED`, decrements the product's stock, and creates the
-delivery — all three or none.
+**Settlement uses a DynamoDB transaction**: one `TransactWriteItems` atomically transitions a
+transaction to `APPROVED`, decrements the product's stock, and creates the delivery — all three or
+none. The only other `TransactWriteItems` is the customer create, which writes an `EMAIL#` guard
+item next to the customer so two concurrent checkouts can't create two customers for one email.
 
 ## Data model
 
@@ -201,8 +202,8 @@ erDiagram
 | Table | Partition key | GSIs | Purpose |
 |---|---|---|---|
 | `Products` | `productId` | — | Direct get; catalog listing via `Scan` (a handful of items) |
-| `Customers` | `customerId` | `EmailIndex` (`email`) | Upsert-by-email dedupe on checkout |
-| `Transactions` | `transactionId` | `ReferenceIndex` (`reference`), `GatewayTxIndex` (`gatewayTransactionId`) | Idempotency on create; webhook lookup by gateway id |
+| `Customers` | `customerId` | `EmailIndex` (`email`) | Upsert-by-email dedupe on checkout (an `EMAIL#` guard item enforces one customer per email) |
+| `Transactions` | `transactionId` (= the idempotency key) | `ReferenceIndex` (`reference`), `GatewayTxIndex` (`gatewayTransactionId`) | Idempotency through the partition key; webhook lookup by gateway id, falling back to reference |
 | `Deliveries` | `deliveryId` | `TransactionIdIndex` (`transactionId`) | Embed a delivery on `GET /transactions/:id` |
 
 ## API endpoints
@@ -227,9 +228,12 @@ Full interactive documentation (with request/response schemas and examples) is a
 
 - **Idempotent checkout**: `POST /transactions` takes a client-generated `idempotencyKey` (UUID
   v4), used directly as the transaction's row id. A retried request (e.g. after a network timeout)
-  with the same key lands on the same row and **never charges the gateway a second time** — the
-  create pipeline only calls the gateway when the row was actually just inserted
-  (`wasCreated: true`).
+  with the same key **never charges the gateway a second time**. The existing row is looked up
+  **first**, before any product, stock or amount validation, and returned as-is — so a retry of
+  the purchase that took the last unit gets its original transaction back, not a 409. The replay
+  body is not compared with the stored one. For two concurrent first requests (both miss the
+  lookup), a conditional put lets only one create the row, and the gateway is only called when
+  the row was actually just inserted (`wasCreated: true`).
 - **Hybrid settlement** (sync call + webhook + lazy poll), not webhook-only: no public webhook URL
   exists for this deployment yet, so `GET /transactions/:id` self-heals a stale `PENDING` status by
   polling the gateway directly. All three paths (the synchronous `POST /transactions` result, the

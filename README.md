@@ -18,6 +18,7 @@ Each package README is the source of truth for its own internals; this document 
 ## Table of contents
 
 - [Live links](#live-links)
+- [Brief requirements → where they are met](#brief-requirements--where-they-are-met)
 - [Screenshots](#screenshots)
 - [Architecture](#architecture)
 - [Checkout flow](#checkout-flow)
@@ -30,6 +31,7 @@ Each package README is the source of truth for its own internals; this document 
 - [Key decisions](#key-decisions)
 - [Project structure](#project-structure)
 - [Development process](#development-process)
+- [Known limitations and next steps](#known-limitations-and-next-steps)
 
 ## Live links
 
@@ -47,6 +49,85 @@ Each package README is the source of truth for its own internals; this document 
 
 To import the API into Postman: *Import → Link* → paste the OpenAPI JSON URL.
 <!-- /LIVE_URLS -->
+
+## Brief requirements → where they are met
+
+One row per requirement in the brief, in its order. "Partial" marks what is only partly done;
+the gaps are listed in [Known limitations and next steps](#known-limitations-and-next-steps).
+
+**Business process**
+
+| Requirement | How it is met | Where |
+|---|---|---|
+| 1. Product page with description, price and units in stock | Catalog grid from `GET /products`; each card shows price, description and stock | [`features/catalog/`](./frontend/src/features/catalog/) |
+| 2. "Pay with credit card" button opens a modal | The button on each product card opens the payment modal | [`ProductCard.tsx`](./frontend/src/features/catalog/ProductCard.tsx), [`PaymentModalContainer.tsx`](./frontend/src/features/checkout/PaymentModalContainer.tsx) |
+| 3. Validated card data, VISA/MasterCard logos, delivery info | Luhn, expiry and CVC checks plus brand detection with a live logo; customer and delivery fields validated in the same form | [`domain/card/`](./frontend/src/domain/card/), [`customerDeliveryValidation.ts`](./frontend/src/domain/checkout/customerDeliveryValidation.ts) |
+| 4. Summary (product amount, base fee, delivery fee) with Pay in a backdrop | Material-style backdrop: the product stays as the back layer, the summary sheet slides over it, Pay is gated on both consents | [`Summary.tsx`](./frontend/src/features/checkout/Summary.tsx) |
+| 5.1 Create a PENDING transaction and get a transaction number | `POST /transactions` persists a `PENDING` row with a unique `reference` before calling the gateway | [Checkout flow](#checkout-flow), [`create-transaction.use-case.ts`](./backend/src/transactions/application/create-transaction.use-case.ts) |
+| 5.2 Call the payment gateway | Server-side call with a server-computed amount and an integrity signature; the card is tokenized in the browser, so our backend never sees the card number or CVC | [`http-payment-gateway.adapter.ts`](./backend/src/shared/payment-gateway/infrastructure/http-payment-gateway.adapter.ts) |
+| 5.3 Update the transaction, assign the product for delivery, update stock | One settle use case writes status + stock decrement + delivery in a single atomic `TransactWriteItems`; the sync result, the webhook and a lazy poll all go through it | [`settle-transaction.use-case.ts`](./backend/src/transactions/application/settle-transaction.use-case.ts), [`dynamo-transaction.repository.ts`](./backend/src/transactions/infrastructure/dynamo-transaction.repository.ts) |
+| 6. Show the result, return to the product page with stock updated | Result screen polls until final; "Back to store" (automatic after 10 s on APPROVED) refetches the catalog | [`ResultContainer.tsx`](./frontend/src/features/transaction/ResultContainer.tsx) |
+
+**Responsibilities**
+
+| Requirement | How it is met | Where |
+|---|---|---|
+| API design and information architecture | One hexagonal module per bounded context, four DynamoDB tables | [Architecture](#architecture), [Data model](#data-model) |
+| Request/response per endpoint; Postman collection or public Swagger URL | Swagger UI at `/docs`, OpenAPI JSON at `/docs-json` (Postman: *Import → Link*) | [Live links](#live-links), [API endpoints](#api-endpoints) |
+| Real-life validations per endpoint | Whitelist DTO validation (unknown field → 400), UUID ids, 404 unknown product, 409 insufficient stock, server-side price, idempotent retries (a replay returns the original before any validation), rate limits | [backend § Key decisions](./backend/README.md#key-decisions) |
+| Safe handling of sensitive data | Card tokenized in the browser; the card token is never persisted server-side; gateway secrets in SSM; PII masked on reads | [Security](#security) |
+| API with stock, transactions, customers and deliveries, with different request types | `GET` + `POST` endpoints; customers and deliveries are written inside `POST /transactions` and only exposed as `GET` on their own | [API endpoints](#api-endpoints) |
+| UI with products and units in stock | See business step 1 | [Screenshots](#screenshots) |
+| Recover the buyer's progress after a refresh | Every step survives a refresh: step, selection, customer/delivery, a non-card form draft and the in-flight transaction in `localStorage`; the card token in `sessionStorage` on SUMMARY only; card number, expiry and CVC never stored; an in-flight payment is looked up by its idempotency key on boot | [frontend § Persistence model](./frontend/README.md#persistence-model) |
+| 5-step flow | Step machine `PRODUCT → DETAILS → SUMMARY → RESULT → PRODUCT` | [`stepMachine.ts`](./frontend/src/domain/checkout/stepMachine.ts) |
+| Attention to detail | Focus trap, `aria-live` status, 44px touch targets, reduced motion, expiry auto-format, E.164 phone | [frontend § Accessibility](./frontend/README.md#accessibility), [§ Checkout UX details](./frontend/README.md#checkout-ux-details) |
+
+**Development rules**
+
+| Requirement | How it is met | Where |
+|---|---|---|
+| SPA in React or Vue | React 18 + Vite, no router | [frontend/README.md](./frontend/README.md) |
+| Mobile-first, multiple screen sizes, iPhone SE minimum | Mobile-first from 375px, breakpoints at 480/768/1024px; checked at iPhone SE 375×667 (the brief's 750×1334 physical pixels) | [frontend § Responsive design](./frontend/README.md#responsive-design) |
+| Redux/Vuex following Flux; payment data stored securely | Redux Toolkit; only `persistMiddleware` writes Web Storage, from a whitelist, validated on boot | [frontend § Flux data flow](./frontend/README.md#flux-data-flow), [§ Persistence model](./frontend/README.md#persistence-model) |
+| Own UX design | Own design (store "Lumila") | [Screenshots](#screenshots) |
+| CSS of choice, flexbox/grid encouraged | Hand-written CSS Modules and a token sheet, no CSS framework; grid for the catalog, flexbox elsewhere | [`styles/tokens.css`](./frontend/src/styles/tokens.css), [`ProductGrid.module.css`](./frontend/src/features/catalog/ProductGrid.module.css) |
+| Backend in NestJS / TypeScript | NestJS + TypeScript (strict) | [backend/README.md](./backend/README.md) |
+| Business logic out of controllers; hexagonal, ports & adapters | `domain/` → `application/` → `infrastructure/` per module; controllers only call `.match()` | [backend § Architecture](./backend/README.md#architecture) |
+| ROP in the use cases | Every use case returns `ResultAsync` (`neverthrow`) chained with `andThen`; one error-to-HTTP mapper | [`create-transaction.use-case.ts`](./backend/src/transactions/application/create-transaction.use-case.ts), [`error-http.mapper.ts`](./backend/src/shared/errors/error-http.mapper.ts) |
+| Any database; data model in the README | DynamoDB, four tables | [Data model](#data-model) |
+| ORM / serialization of choice | AWS SDK v3 document client; `class-validator` + `class-transformer` DTOs | [`dynamo-transaction.repository.ts`](./backend/src/transactions/infrastructure/dynamo-transaction.repository.ts) |
+| Seeded dummy products, no create-product endpoint | `npm run seed` (also run by the deploy) seeds 12 products; there is no create-product endpoint | [`seed-products.ts`](./backend/scripts/seed-products.ts) |
+| Jest unit tests, >80% coverage front and back, results in the README | Jest in all three packages; CI fails under 80% | [Testing & coverage](#testing--coverage) |
+| Deploy on a cloud provider | AWS: CloudFront + S3, API Gateway HTTP API + Lambda, DynamoDB | [Live links](#live-links), [Deployment & CI/CD](#deployment--cicd) |
+
+**Considerations**
+
+| Requirement | How it is met | Where |
+|---|---|---|
+| Sandbox only | All gateway keys and URLs are sandbox ones; a sandbox-only test-card helper in the form | [frontend § Checkout UX details](./frontend/README.md#checkout-ux-details) |
+| Use AI as a coding assistant | Built with AI assistance under Spec-Driven Development | [Development process](#development-process) |
+| Branches and PRs per feature | `feature/*` / `fix/*` branches, one PR per change into `develop`, then `main` | [PR history](https://github.com/Wgutierrezl/product-checkout-app/pulls?q=is%3Apr) |
+| Public repository, company name not used | Public repo; the gateway is only called "the payment gateway" | — |
+
+**Deliverables and rubric**
+
+| Requirement | How it is met | Where |
+|---|---|---|
+| Frontend app and backend API completed | Both deployed and working together | [Live links](#live-links) |
+| GitHub link with an updated README | This README plus one per package | — |
+| Deployed app connected to the backend | CloudFront SPA calling the HTTP API | [Live links](#live-links) |
+| [5] README completed | Setup, architecture, data model, API, coverage, this map | This document |
+| [5] Images render fast, nothing out of bounds | **Partial.** Explicit `width`/`height` and a 1:1 `aspect-ratio` (no layout shift), WebP, lazy loading below the fold, the first desktop row eager with `fetchpriority="high"` on the first image, clamped text. Images are hotlinked at one size with no `srcset` | [`ProductCard.tsx`](./frontend/src/features/catalog/ProductCard.tsx) |
+| [20] Full credit-card checkout onboarding | The five steps work end to end on the live app with the sandbox test cards | [Checkout flow](#checkout-flow) |
+| [20] API working correctly | 25 e2e tests against the real `AppModule` and DynamoDB Local, plus the unit suite | [backend § End-to-end tests](./backend/README.md#end-to-end-tests) |
+| [30] >80% unit coverage, backend and frontend | Backend 100%, frontend >98% on every metric | [Testing & coverage](#testing--coverage) |
+| [20] App and API deployed on a cloud provider | Three CDK stacks (`DataStack`, `WebStack`, `ApiStack`) deployed by GitHub Actions over OIDC on every push to `main` | [Deployment & CI/CD](#deployment--cicd), [infra § Stacks](./infra/README.md#stacks) |
+| [Bonus 5] OWASP, HTTPS, security headers | HTTPS only, HSTS, strict CSP, `helmet()`; Mozilla Observatory **A+** (12/12). **Partial:** CSP `connect-src` is a regional wildcard and there is no `Permissions-Policy` | [Security](#security) |
+| [Bonus 5] Responsive, works across browsers | **Partial.** Checked manually in Chromium, Firefox and Safari on an iPhone, down to iPhone SE 375×667; no automated cross-browser run | [frontend § Responsive design](./frontend/README.md#responsive-design) |
+| [Bonus 10] CSS skills | CSS Modules and design tokens, no framework; grid/flexbox, bottom sheet under 768px, `dvh` with a `vh` fallback, `prefers-reduced-motion` | [frontend § Responsive design](./frontend/README.md#responsive-design) |
+| [Bonus 10] Clean code | Strict TypeScript, pure domain functions, container/presentational split, ports with in-memory fakes in tests | [frontend § Architecture](./frontend/README.md#architecture), [backend § Architecture](./backend/README.md#architecture) |
+| [Bonus 10] Hexagonal architecture, ports & adapters | `domain/` has no framework or AWS imports; repositories and the gateway are ports with DynamoDB/HTTP adapters | [backend § Architecture](./backend/README.md#architecture) |
+| [Bonus 10] ROP | `AppResultAsync<T>` across use cases; failures are values, no `try/catch` in controllers | [backend § Architecture](./backend/README.md#architecture) |
 
 ## Screenshots
 
@@ -134,13 +215,14 @@ sequenceDiagram
 
     U->>SPA: Fill card details, click "Continue"
     SPA->>GW: Tokenize card (public key only — PAN/CVC never sent to our backend)
-    GW-->>SPA: Card token (single-use, kept in memory only)
+    GW-->>SPA: Card token (single-use, sessionStorage on SUMMARY only)
     SPA->>API: GET /payment-acceptance
     API->>GW: Fetch acceptance tokens (server-side proxy)
     GW-->>API: Fresh acceptance tokens
     API-->>SPA: Acceptance tokens
     U->>SPA: Confirm order, click "Pay"
     SPA->>API: POST /transactions (idempotencyKey = transaction id)
+    API->>DB: Look up idempotencyKey (a replay returns the original here, before any validation)
     API->>API: Recompute price server-side, check stock
     API->>DB: Persist PENDING transaction (reference)
     API->>API: Build integrity signature (server-side secret)
@@ -167,8 +249,9 @@ The sandbox is a shared account where our webhook URL can't be registered, so in
 lazy poll is what settles transactions; the webhook endpoint is implemented and tested for a
 real merchant setup.
 
-A retried `POST /transactions` with the same `idempotencyKey` lands on the same row and never
-charges the gateway twice. All three settlement paths (synchronous result, webhook, lazy poll)
+A retried `POST /transactions` with the same `idempotencyKey` returns the original transaction
+before any product, stock or price validation, and never charges the gateway twice (so a retry of
+the purchase that took the last unit gets its transaction back, not a 409). All three settlement paths (synchronous result, webhook, lazy poll)
 funnel through one use case, so a race between any two of them can never double-apply the
 `APPROVED` side effects — enforced atomically by a single DynamoDB `TransactWriteItems` on the
 transaction, product stock, and delivery. Details:
@@ -218,8 +301,8 @@ erDiagram
 | Table | Partition key | GSIs | Purpose |
 |---|---|---|---|
 | `Products` | `productId` | — | Direct get; catalog listing via `Scan` |
-| `Customers` | `customerId` | `EmailIndex` (`email`) | Upsert-by-email dedupe on checkout |
-| `Transactions` | `transactionId` | `ReferenceIndex` (`reference`), `GatewayTxIndex` (`gatewayTransactionId`) | Idempotency on create; webhook/poll lookup |
+| `Customers` | `customerId` | `EmailIndex` (`email`) | Upsert-by-email dedupe on checkout (an `EMAIL#` guard item enforces one customer per email) |
+| `Transactions` | `transactionId` (= the idempotency key) | `ReferenceIndex` (`reference`), `GatewayTxIndex` (`gatewayTransactionId`) | Idempotency through the partition key; webhook lookup by gateway id, falling back to reference |
 | `Deliveries` | `deliveryId` | `TransactionIdIndex` (`transactionId`) | Embed a delivery on `GET /transactions/:id` |
 
 ## API endpoints
@@ -265,14 +348,14 @@ Full rationale, including how guest checkout stays safe without an auth layer, i
 
 All three packages are developed strict-TDD (RED → GREEN → REFACTOR); CI enforces an **80%
 coverage gate on every PR** (`jest.config.ts` in each package). Numbers below were measured
-directly against this repository:
+on `develop` (`npm test -- --coverage` in each package; `npm run test:e2e` for the e2e row):
 
 | Package | Statements | Branches | Functions | Lines | Suites / Tests |
 |---|---|---|---|---|---|
 | `backend` (unit) | 100% | 100% | 100% | 100% | 49 suites / 412 tests |
 | `backend` (e2e) | — | — | — | — | 1 suite / 25 tests (DynamoDB Local) |
-| `frontend` | 99.57% | 98.43% | 100% | 99.54% | 54 suites / 703 tests |
-| `infra` | 100% | 100% | 100% | 100% | 6 suites / 38 tests |
+| `frontend` | 99.57% | 98.43% | 100% | 99.54% | 54 suites / 704 tests |
+| `infra` | 100% | 100% | 100% | 100% | 6 suites / 39 tests |
 
 - **Backend e2e** runs against a real `AppModule` and DynamoDB Local, with a deterministic
   fake gateway adapter (no network) — covers the full happy path, declined path, insufficient
@@ -291,8 +374,9 @@ Run any package's suite yourself: `npm test -- --coverage` in `backend/`, `front
    `npm install && npm run seed && npm run start:dev`. Full details:
    [backend/README.md § Running locally](./backend/README.md#running-locally).
    The e2e suite (`npm run test:e2e`) drops its tables, so it needs a separate DynamoDB Local on
-   port 8001: `docker run -d --rm -p 8001:8000 --name checkout-dynamodb-e2e amazon/dynamodb-local`
-   (see [backend/README.md § End-to-end tests](./backend/README.md#end-to-end-tests)).
+   port 8001: `docker run -d --rm -p 8001:8000 --name checkout-dynamodb-e2e amazon/dynamodb-local`.
+   It reads `E2E_DYNAMO_ENDPOINT` (default `http://localhost:8001`) and refuses to run against
+   port 8000, so the dev tables are never dropped (see [backend/README.md § End-to-end tests](./backend/README.md#end-to-end-tests)).
 2. **Frontend** — copy `.env.example` to `.env.local`, fill in the three `VITE_*` variables,
    `npm install && npm run dev` (`http://localhost:5173`). Full details:
    [frontend/README.md § Running locally](./frontend/README.md#running-locally).
@@ -302,8 +386,8 @@ Run any package's suite yourself: `npm test -- --coverage` in `backend/`, `front
 
 ## Deployment & CI/CD
 
-Branch flow: `feature/*` / `fix/*` → PR into `develop` (CI runs lint, typecheck, tests with
-coverage, and an offline `cdk synth`) → PR into `main` → push to `main` triggers
+Branch flow: `feature/*` / `fix/*` → PR into `develop` (CI runs typecheck, frontend lint, tests
+with coverage, and an offline `cdk synth`) → PR into `main` → push to `main` triggers
 `deploy.yml`, which deploys all 3 CDK stacks via GitHub Actions OIDC (no static AWS keys),
 seeds the product catalog, builds and uploads the SPA, and invalidates CloudFront.
 
@@ -324,8 +408,8 @@ and only needs to run once per AWS account/region.
   Secrets Manager's real advantage is automatic rotation, which can't apply to keys issued by a
   third-party gateway. `SecureString` parameters give the same protection at no cost.
 - **Idempotency key = transaction id** — a client-generated UUID v4 doubles as the DynamoDB
-  partition key, so a retried request naturally lands on the same row with no separate
-  idempotency table or lookup.
+  partition key: a replay is a `GetItem` on that id before any validation, and a conditional put
+  guards two concurrent first requests, with no separate idempotency table.
 - **Ambiguous gateway failures stay `PENDING`, never `ERROR`** — a timeout, network error, or
   5xx means the charge may have gone through; only an explicit 4xx rejection (the gateway never
   processed the request) is definite enough to mark a transaction `ERROR`.
@@ -360,3 +444,29 @@ before any code, with AI assistance directing implementation rather than freehan
 Strict TDD (RED → GREEN → REFACTOR) throughout, one feature branch and PR per change, and
 adversarial review passes (a fresh reviewer, blind to the author's reasoning, checks the diff
 before merge) ahead of every merge into `develop`.
+
+## Known limitations and next steps
+
+Consciously left out of this scope, each with the reason or the next step:
+
+- **Three error body shapes.** Domain errors use `{ statusCode, error, message, path, timestamp }`
+  (`DomainErrorFilter`), validation errors use Nest's default `{ statusCode, message[], error }`,
+  and a 429 uses the throttler's `{ statusCode, message }`. Next: one global filter emitting an
+  `ErrorResponseDto`, with the error schemas and the 429 documented in Swagger.
+- **A definite gateway rejection answers 502, but its replay answers 201 `ERROR`.** The first
+  call propagates the 4xx as `PaymentGatewayError`; a replay returns the stored `ERROR` row.
+  Next: align both on the same status code.
+- **A replay with a different body under the same key returns the original silently.** Safe (no
+  second charge), but a mismatched body could get a 409/422 instead.
+- **Product images are hotlinked from Unsplash at a single size (600px WebP).** Next: `srcset` /
+  `sizes` and serve them from our own CloudFront distribution.
+- **Google Fonts is render-blocking.** Next: self-host the two font families.
+- **The CSP `connect-src` allows any `execute-api` host in the region** (to avoid a circular
+  stack dependency, see [infra § Stacks](./infra/README.md#stacks)). Next: pin it to the API id.
+- **No `Permissions-Policy` header.** Next: add it to the CloudFront response-headers policy.
+- **The e2e suite is not run in CI**, because it needs a DynamoDB Local service container. Next:
+  add that service to `ci.yml` and run `npm run test:e2e`.
+- **WebKit is not automated in CI.** Safari was checked manually on an iPhone; there is no
+  browser-automation suite yet.
+- **GitHub Actions are pinned to tags, not commit SHAs** — see
+  [infra § Hardening Next Steps](./infra/README.md#hardening-next-steps).

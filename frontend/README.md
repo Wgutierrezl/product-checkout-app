@@ -246,22 +246,15 @@ A few refinements from a manual pass over the real checkout, on top of the flow 
 ## Testing
 
 Strict TDD throughout (RED → GREEN → REFACTOR), enforced by a coverage gate: 80% in
-`jest.config.ts`, current numbers well above the 95% target:
-
-| Metric | % |
-|---|---|
-| Statements | 99.57% |
-| Branches | 98.43% |
-| Functions | 100% |
-| Lines | 99.54% |
-
-54 suites / 703 tests. Remaining, documented gaps are defensive guard clauses unreachable via the
-UI (e.g. a disabled control's own handler) — never left silently uncovered.
+`jest.config.ts`. The current numbers (suites, tests and every coverage metric) are kept in one
+place: the root [Testing & coverage](../README.md#testing--coverage) table. Remaining, documented
+gaps are defensive guard clauses unreachable via the UI (e.g. a disabled control's own handler) —
+never left silently uncovered.
 
 ```bash
 npm test               # run once
 npm run test:watch     # watch mode
-npm test -- --coverage # with the coverage table above
+npm test -- --coverage # with coverage
 npm run typecheck      # tsc -b --noEmit
 npm run lint           # eslint .
 ```
