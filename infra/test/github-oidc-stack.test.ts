@@ -1,7 +1,7 @@
 import { App } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 
-import { GithubOidcStack } from '../lib/github-oidc-stack';
+import { DEFAULT_GITHUB_OIDC_REPO, GithubOidcStack } from '../lib/github-oidc-stack';
 import { webBucketArn } from '../lib/shared/web-bucket-name';
 
 const TEST_ACCOUNT = '123456789012';
@@ -160,6 +160,24 @@ describe('GithubOidcStack', () => {
 
     expect(trustStatement.Condition.StringEquals['token.actions.githubusercontent.com:sub']).toBe(
       'repo:Wgutierrezl/product-checkout-app:ref:refs/heads/release',
+    );
+  });
+
+  it("defaults to the repository's immutable OIDC subject (owner and repo ids), which is what GitHub sends for this repo", () => {
+    const app = new App();
+    const stack = new GithubOidcStack(app, 'ImmutableSubjectStack', {
+      env: { account: '123456789012', region: 'us-east-1' },
+      githubOrgRepo: DEFAULT_GITHUB_OIDC_REPO,
+    });
+    const template = Template.fromStack(stack);
+
+    const deployRole = findDeployRole(template);
+    const trustStatement = deployRole.AssumeRolePolicyDocument.Statement[0] as {
+      Condition: { StringEquals: Record<string, string> };
+    };
+
+    expect(trustStatement.Condition.StringEquals['token.actions.githubusercontent.com:sub']).toBe(
+      'repo:Wgutierrezl@167873254/product-checkout-app@1384356068:ref:refs/heads/main',
     );
   });
 });
