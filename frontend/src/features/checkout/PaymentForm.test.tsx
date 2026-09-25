@@ -476,6 +476,55 @@ describe('PaymentForm', () => {
     });
   });
 
+  describe('sandbox test cards helper', () => {
+    const SANDBOX_KEY = 'pub_test_0000000000';
+    const PROD_KEY = 'pub_prod_0000000000';
+
+    afterEach(() => {
+      process.env.VITE_PAYMENT_GATEWAY_PUBLIC_KEY = SANDBOX_KEY;
+    });
+
+    it('shows the sandbox helper when the gateway public key is a test key', () => {
+      renderForm();
+
+      expect(screen.getByText('Sandbox mode — use a test card')).toBeInTheDocument();
+    });
+
+    it('hides the sandbox helper when the gateway public key is a production key', () => {
+      process.env.VITE_PAYMENT_GATEWAY_PUBLIC_KEY = PROD_KEY;
+
+      renderForm();
+
+      expect(screen.queryByText('Sandbox mode — use a test card')).not.toBeInTheDocument();
+    });
+
+    it('fills the formatted approved test card, clears its error, shows the Visa mark, and focuses the cardholder field', async () => {
+      const user = userEvent.setup();
+      renderForm();
+
+      await user.type(screen.getByLabelText(/card number/i), '4111111111111112');
+      await user.tab();
+      expect(screen.getByText(/invalid card number/i)).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Use approved test card' }));
+
+      expect(screen.getByLabelText(/card number/i)).toHaveValue('4242 4242 4242 4242');
+      expect(screen.queryByText(/invalid card number/i)).not.toBeInTheDocument();
+      expect(screen.getByRole('img', { name: 'Visa' })).toBeInTheDocument();
+      expect(screen.getByLabelText(/cardholder name/i)).toHaveFocus();
+    });
+
+    it('fills the formatted declined test card and focuses the cardholder field', async () => {
+      const user = userEvent.setup();
+      renderForm();
+
+      await user.click(screen.getByRole('button', { name: 'Use declined test card' }));
+
+      expect(screen.getByLabelText(/card number/i)).toHaveValue('4111 1111 1111 1111');
+      expect(screen.getByLabelText(/cardholder name/i)).toHaveFocus();
+    });
+  });
+
   describe('loading state (tokenizing)', () => {
     it('shows an in-button "Securing your card…" label, marking the Continue button aria-busy', () => {
       renderForm({ isSubmitting: true });
