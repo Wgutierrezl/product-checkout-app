@@ -216,7 +216,7 @@ Strict TDD throughout (RED → GREEN → REFACTOR), enforced by a coverage gate:
 | Functions | 100% |
 | Lines | 99.44% |
 
-51 suites / 543 tests. Remaining, documented gaps are defensive guard clauses unreachable via the
+51 suites / 542 tests. Remaining, documented gaps are defensive guard clauses unreachable via the
 UI (e.g. a disabled control's own handler) — never left silently uncovered.
 
 ```bash
