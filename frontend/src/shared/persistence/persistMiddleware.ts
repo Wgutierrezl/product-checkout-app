@@ -26,12 +26,11 @@ const CARD_BRANDS = ['visa', 'mastercard', 'unknown'] as const;
  */
 const UUID_LIKE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /**
- * An opaque gateway token: URL-safe characters with a sane length cap. It
- * must contain at least one non-digit, so a PAN-shaped value can never be
- * taken for (or smuggled in as) a token.
+ * The gateway's card token shape: the `tok_` prefix, then URL-safe
+ * characters, with a sane length cap. The mandatory prefix means no card
+ * number, bare or dashed, can ever pass for (or be smuggled in as) a token.
  */
-const CARD_TOKEN_SHAPE = /^[A-Za-z0-9_-]{1,256}$/;
-const ALL_DIGITS = /^\d+$/;
+const CARD_TOKEN_SHAPE = /^tok_[A-Za-z0-9_-]{1,252}$/;
 const LAST4_SHAPE = /^\d{4}$/;
 /** E.164 caps a full number at 15 digits, so a national part never exceeds it. */
 const PHONE_NATIONAL_SHAPE = /^\d{0,15}$/;
@@ -182,8 +181,13 @@ function isValidCardSummary(value: unknown): value is CardSummary {
     (CARD_BRANDS as readonly string[]).includes(candidate.brand) &&
     typeof candidate.last4 === 'string' &&
     LAST4_SHAPE.test(candidate.last4) &&
-    typeof candidate.holder === 'string'
+    isDraftText(candidate.holder)
   );
+}
+
+/** Rebuilds a card summary from its known fields only; anything planted alongside them is dropped. */
+function pickCardSummary(summary: CardSummary): CardSummary {
+  return { brand: summary.brand, last4: summary.last4, holder: summary.holder };
 }
 
 function isDraftText(value: unknown): value is string {
@@ -228,7 +232,7 @@ function pickFormDraft(draft: PaymentFormDraft | null): PaymentFormDraft | null 
 }
 
 function isValidCardToken(value: unknown): value is string {
-  return typeof value === 'string' && CARD_TOKEN_SHAPE.test(value) && !ALL_DIGITS.test(value);
+  return typeof value === 'string' && CARD_TOKEN_SHAPE.test(value);
 }
 
 function isValidCardSession(value: unknown): value is PersistedCardSession {
@@ -372,7 +376,7 @@ export function loadPersistedState():
     submitAttempted: persisted.submitAttempted,
     formDraft: pickFormDraft(persisted.formDraft),
     cardToken: canResumeSummary ? cardSession.cardToken : null,
-    cardSummary: canResumeSummary ? cardSession.cardSummary : null,
+    cardSummary: canResumeSummary ? pickCardSummary(cardSession.cardSummary) : null,
   };
   const transaction: PersistedTransaction = {
     id: parsed.transaction.id,
@@ -398,7 +402,11 @@ export function clearPersistedState(): void {
 function syncCardSession(checkout: CheckoutState): void {
   const { step, cardToken, cardSummary, submitAttempted } = checkout;
   if (step === 'SUMMARY' && cardToken && cardSummary && !submitAttempted) {
-    const session: PersistedCardSession = { version: PERSISTED_VERSION, cardToken, cardSummary };
+    const session: PersistedCardSession = {
+      version: PERSISTED_VERSION,
+      cardToken,
+      cardSummary: pickCardSummary(cardSummary),
+    };
     safeSetItem(CARD_SESSION_KEY, JSON.stringify(session), 'session');
     return;
   }

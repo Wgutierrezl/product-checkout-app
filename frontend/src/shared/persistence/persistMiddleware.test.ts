@@ -5,6 +5,7 @@ import {
   cardTokenized,
   checkoutReducer,
   checkoutReset,
+  initialCheckoutState,
   customerAndDeliverySet,
   formDraftSaved,
   paymentAttemptStarted,
@@ -351,6 +352,28 @@ describe('persistMiddleware', () => {
       expect(rehydrated?.transaction).not.toHaveProperty('error');
     });
 
+    it('rebuilds the card summary from brand, last4 and holder only, so a planted field never reaches Redux or storage again', () => {
+      const store = buildStore();
+      reachSummary(store);
+      sessionStorage.setItem(
+        CARD_SESSION_KEY,
+        JSON.stringify({ ...validCardSession(), cardSummary: { ...CARD_SUMMARY, pan: '4242424242424242' } }),
+      );
+
+      const rehydrated = loadPersistedState();
+      expect(rehydrated?.checkout.cardSummary).toEqual(CARD_SUMMARY);
+
+      const reloaded = configureStore({
+        reducer: { catalog: catalogReducer, checkout: checkoutReducer, transaction: transactionReducer },
+        preloadedState: { checkout: { ...initialCheckoutState, ...rehydrated?.checkout } },
+        middleware: (getDefaultMiddleware) => getDefaultMiddleware().concat(persistMiddleware),
+      });
+      reloaded.dispatch(submitStatusSet('idle'));
+
+      expect(sessionStorage.getItem(CARD_SESSION_KEY)).not.toContain('pan');
+      expect(sessionStorage.getItem(CARD_SESSION_KEY)).not.toContain('4242424242424242');
+    });
+
     describe('corrupted card sessions downgrade SUMMARY to DETAILS and are wiped', () => {
       function persistSummaryStep() {
         const store = buildStore();
@@ -375,6 +398,15 @@ describe('persistMiddleware', () => {
         [
           'the summary last4 is not exactly 4 digits',
           JSON.stringify({ ...validCardSession(), cardSummary: { ...CARD_SUMMARY, last4: '4242424242424242' } }),
+        ],
+        [
+          'the token is a dashed PAN (no gateway token prefix)',
+          JSON.stringify({ ...validCardSession(), cardToken: '4242-4242-4242-4242' }),
+        ],
+        ['the token lacks the gateway token prefix', JSON.stringify({ ...validCardSession(), cardToken: 'abc_def' })],
+        [
+          'the summary holder is absurdly long',
+          JSON.stringify({ ...validCardSession(), cardSummary: { ...CARD_SUMMARY, holder: 'a'.repeat(501) } }),
         ],
         [
           'the summary holder is not a string',
