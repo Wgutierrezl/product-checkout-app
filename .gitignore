@@ -3,8 +3,11 @@ node_modules/
 
 # Builds
 dist/
+dist-lambda/
 build/
 coverage/
+openapi.json
+*.tsbuildinfo
 
 # CDK
 cdk.out/
@@ -17,6 +20,9 @@ cdk.out/
 # Logs
 *.log
 npm-debug.log*
+
+# Local tooling
+.atl/
 
 # OS / editors
 .DS_Store

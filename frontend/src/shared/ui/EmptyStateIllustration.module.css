@@ -1,0 +1,13 @@
+.illustration {
+  color: var(--color-text-muted);
+}
+
+.outline {
+  stroke: currentColor;
+  stroke-linejoin: round;
+}
+
+.dashed {
+  stroke: var(--color-border);
+  stroke-linecap: round;
+}

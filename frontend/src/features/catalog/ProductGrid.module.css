@@ -1,0 +1,31 @@
+.grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-5);
+  /* Grid items stretch to the row's tallest item by default; each `<li>`
+     needs to be a flex container itself so its ProductCard child (height:
+     100%) actually fills that stretched height instead of only its content. */
+  align-items: stretch;
+}
+
+.grid > li {
+  display: flex;
+}
+
+@media (min-width: 768px) {
+  .grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1024px) {
+  .grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (min-width: 1280px) {
+  .grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}

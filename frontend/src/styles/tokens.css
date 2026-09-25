@@ -1,0 +1,90 @@
+/*
+ * Design tokens for the storefront. Palette: warm ivory surface with an
+ * ink-charcoal foreground, a terracotta CTA accent, and a deep teal
+ * secondary accent — a deliberate, editorial-commerce feel rather than a
+ * generic SaaS blue. Typography pairs a characterful display serif
+ * (headings) with a highly legible grotesque sans (body/UI).
+ */
+:root {
+  /* ---- Typography ---- */
+  --font-display: 'Fraunces', 'Iowan Old Style', 'Palatino Linotype', serif;
+  --font-body:
+    'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-md: 1rem;
+  --font-size-lg: 1.25rem;
+  --font-size-xl: 1.75rem;
+  --font-size-2xl: 2.5rem;
+
+  --line-height-tight: 1.15;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.7;
+
+  /* ---- Spacing scale (4px base) ---- */
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* ---- Radius ---- */
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+
+  /* ---- Palette ---- */
+  --color-bg: #faf7f2;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f1ebe2;
+  --color-border: #e4dccf;
+
+  --color-text: #201d1a;
+  --color-text-muted: #6b6459;
+
+  /* Slightly darker than the initial pick so button text on this fill
+     reaches >=4.7:1 contrast against --color-primary-contrast, while
+     keeping the terracotta feel. */
+  --color-primary: #bd4c2a;
+  --color-primary-hover: #a63f22;
+  --color-primary-contrast: #fffaf4;
+
+  --color-accent: #2f6f5e;
+  --color-accent-contrast: #fffaf4;
+
+  --color-error: #b3261e;
+  --color-error-bg: #fbe9e7;
+  --color-success: #2f6f5e;
+  --color-success-bg: #e6efe9;
+
+  /* Neutral, teal-leaning accent for an in-progress state (PENDING) —
+     deliberately distinct from --color-success so a still-processing
+     payment never reads as already approved. */
+  --color-processing: #3d7a8c;
+  --color-processing-bg: #e6eef1;
+
+  --color-focus-ring: #a63f22;
+
+  /* ---- Elevation ---- */
+  --shadow-sm: 0 1px 2px rgba(32, 29, 26, 0.06), 0 1px 1px rgba(32, 29, 26, 0.04);
+  --shadow-md: 0 8px 24px rgba(32, 29, 26, 0.1), 0 2px 6px rgba(32, 29, 26, 0.06);
+  --shadow-lg: 0 16px 40px rgba(32, 29, 26, 0.14);
+
+  /* ---- Motion ---- */
+  --transition-fast: 150ms ease;
+  --transition-normal: 250ms ease;
+  --focus-ring-width: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --transition-fast: 0ms;
+    --transition-normal: 0ms;
+  }
+}

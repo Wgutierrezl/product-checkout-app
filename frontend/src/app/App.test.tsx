@@ -1,0 +1,119 @@
+import { configureStore } from '@reduxjs/toolkit';
+import { Provider } from 'react-redux';
+import { render, screen } from '@testing-library/react';
+import { App } from './App';
+import { catalogReducer } from '../features/catalog/catalogSlice';
+import { checkoutReducer, initialCheckoutState, type CheckoutState } from '../features/checkout/checkoutSlice';
+import { initialTransactionState, transactionReducer, type TransactionState } from '../features/transaction/transactionSlice';
+import * as backendClient from '../api/backendClient';
+
+jest.mock('../api/backendClient');
+
+const mockedFetchProducts = backendClient.fetchProducts as jest.MockedFunction<
+  typeof backendClient.fetchProducts
+>;
+const mockedFetchPaymentAcceptance = backendClient.fetchPaymentAcceptance as jest.MockedFunction<
+  typeof backendClient.fetchPaymentAcceptance
+>;
+
+function renderApp(checkoutOverrides: Partial<CheckoutState> = {}, transactionOverrides: Partial<TransactionState> = {}) {
+  const store = configureStore({
+    reducer: { catalog: catalogReducer, checkout: checkoutReducer, transaction: transactionReducer },
+    preloadedState: {
+      checkout: { ...initialCheckoutState, ...checkoutOverrides },
+      transaction: { ...initialTransactionState, ...transactionOverrides },
+    },
+  });
+  return render(
+    <Provider store={store}>
+      <App />
+    </Provider>,
+  );
+}
+
+describe('App', () => {
+  beforeEach(() => {
+    mockedFetchProducts.mockReset();
+    mockedFetchPaymentAcceptance.mockReset();
+    mockedFetchPaymentAcceptance.mockReturnValue(new Promise(() => {}));
+  });
+
+  it('renders the store name in a banner landmark', () => {
+    mockedFetchProducts.mockReturnValue(new Promise(() => {}));
+
+    renderApp();
+
+    expect(screen.getByRole('banner')).toHaveTextContent('Lumila');
+  });
+
+  it('renders a footer landmark with the store name and a security note', () => {
+    mockedFetchProducts.mockReturnValue(new Promise(() => {}));
+
+    renderApp();
+
+    const footer = screen.getByRole('contentinfo');
+    expect(footer).toHaveTextContent('Lumila');
+    expect(footer).toHaveTextContent(/never store your card details/i);
+  });
+
+  it('renders the catalog inside a main landmark', async () => {
+    mockedFetchProducts.mockResolvedValue([]);
+
+    renderApp();
+
+    const main = screen.getByRole('main');
+    expect(await screen.findByText(/no products available/i)).toBeInTheDocument();
+    expect(main).toContainElement(screen.getByText(/no products available/i));
+  });
+
+  it('does not render the payment modal while on the PRODUCT step', () => {
+    mockedFetchProducts.mockReturnValue(new Promise(() => {}));
+
+    renderApp();
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('renders the payment modal when the checkout step is DETAILS', () => {
+    mockedFetchProducts.mockReturnValue(new Promise(() => {}));
+
+    renderApp({ step: 'DETAILS', productId: 'p1', quantity: 1 });
+
+    expect(screen.getByRole('dialog', { name: 'Payment details' })).toBeInTheDocument();
+  });
+
+  it('renders the order summary when the checkout step is SUMMARY', () => {
+    mockedFetchProducts.mockReturnValue(new Promise(() => {}));
+
+    renderApp({ step: 'SUMMARY', productId: 'p1', quantity: 1 });
+
+    expect(screen.getByRole('region', { name: 'Order summary' })).toBeInTheDocument();
+  });
+
+  it('does not render the order summary while on the PRODUCT step', () => {
+    mockedFetchProducts.mockReturnValue(new Promise(() => {}));
+
+    renderApp();
+
+    expect(screen.queryByRole('region', { name: 'Order summary' })).not.toBeInTheDocument();
+  });
+
+  it('renders the result screen when the checkout step is RESULT', () => {
+    mockedFetchProducts.mockReturnValue(new Promise(() => {}));
+
+    renderApp(
+      { step: 'RESULT', productId: 'p1', quantity: 1 },
+      { id: 't1', status: 'APPROVED', reference: 'REF-1' },
+    );
+
+    expect(screen.getByRole('heading', { name: /approved/i })).toBeInTheDocument();
+  });
+
+  it('does not render the result screen while on the PRODUCT step', () => {
+    mockedFetchProducts.mockReturnValue(new Promise(() => {}));
+
+    renderApp();
+
+    expect(screen.queryByRole('heading', { name: /approved/i })).not.toBeInTheDocument();
+  });
+});

@@ -1,0 +1,205 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  background: var(--color-bg);
+}
+
+.card {
+  width: min(480px, 100%);
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-6) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  text-align: center;
+  animation: riseIn var(--transition-normal);
+  border-top: 6px solid transparent;
+}
+
+@keyframes riseIn {
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card {
+    animation: none;
+  }
+}
+
+.approved .card {
+  border-top-color: var(--color-success);
+}
+
+.approved .heading {
+  color: var(--color-success);
+}
+
+.declined .card {
+  border-top-color: var(--color-error);
+}
+
+.declined .heading {
+  color: var(--color-error);
+}
+
+.processing .card {
+  border-top-color: var(--color-processing);
+}
+
+.processing .heading {
+  color: var(--color-processing);
+}
+
+/* A subtle pulsing ring — purely decorative (aria-hidden), the accessible
+   "in progress" announcement is the Spinner's role=status right below it. */
+.processingRing {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 3px solid var(--color-processing-bg);
+  border-top-color: var(--color-processing);
+  animation:
+    spin 1.6s linear infinite,
+    pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .processingRing {
+    animation: none;
+  }
+}
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  text-align: left;
+  width: 100%;
+  list-style: none;
+}
+
+.step,
+.stepDone {
+  position: relative;
+  padding-left: var(--space-5);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.step::before,
+.stepDone::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.35em;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-border);
+}
+
+.stepDone {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.stepDone::before {
+  background: var(--color-processing);
+}
+
+.heading {
+  font-family: var(--font-display);
+  font-size: var(--font-size-xl);
+}
+
+.heading:focus-visible {
+  outline: none;
+}
+
+.message {
+  color: var(--color-text);
+}
+
+.reference {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  text-align: left;
+}
+
+.breakdownRow {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.breakdownRow.total {
+  font-weight: 700;
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-2);
+}
+
+.address {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-3);
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.autoReturn {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+/* Visually hidden but still reachable by screen readers -- the standard
+   "clip" technique (not display:none/visibility:hidden, which would also
+   hide it from assistive tech). */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
