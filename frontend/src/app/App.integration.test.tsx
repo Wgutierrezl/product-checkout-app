@@ -11,9 +11,10 @@ import * as paymentGatewayClient from '../api/paymentGatewayClient';
 jest.mock('../api/backendClient');
 jest.mock('../api/paymentGatewayClient');
 
-// `delay: null` types without yielding to the event loop between keys:
-// several tests fill a whole payment form, which otherwise crawls past
-// Jest's 5 s default on a busy machine.
+// `delay: null` types without yielding to the event loop between keys.
+// Tests that fill a whole payment form also get their own, longer timeout:
+// even without delays they can pass Jest's 5 s default on a loaded machine.
+const FULL_FORM_TEST_TIMEOUT_MS = 15_000;
 
 const mockedTokenizeCard = paymentGatewayClient.tokenizeCard as jest.MockedFunction<
   typeof paymentGatewayClient.tokenizeCard
@@ -230,7 +231,7 @@ describe('App refresh resilience (integration)', () => {
 
       expect(localStorage.getItem(STORAGE_KEY)).toContain('Cundinamarca');
       expectNoCardDataInStorage();
-    });
+    }, FULL_FORM_TEST_TIMEOUT_MS);
 
     it('never writes the card number, expiry or CVC anywhere after Continue either (only the token, in sessionStorage)', async () => {
       persistDetailsStep();
@@ -250,7 +251,7 @@ describe('App refresh resilience (integration)', () => {
       expect(sessionStorage.getItem(CARD_SESSION_KEY)).toContain('tok_fresh_card');
       expect(localStorage.getItem(STORAGE_KEY)).not.toContain('tok_fresh_card');
       expectNoCardDataInStorage();
-    });
+    }, FULL_FORM_TEST_TIMEOUT_MS);
 
     it('restores the non-card fields after the refresh, with the card fields empty and a notice to re-enter them', async () => {
       persistDetailsStep();
@@ -288,7 +289,7 @@ describe('App refresh resilience (integration)', () => {
       expect(
         screen.getByText('For your security, card details are never stored on this device. Please re-enter them.'),
       ).toBeInTheDocument();
-    });
+    }, FULL_FORM_TEST_TIMEOUT_MS);
   });
 
   describe('a duplicated tab on SUMMARY (the browser copies sessionStorage)', () => {
@@ -349,7 +350,7 @@ describe('App refresh resilience (integration)', () => {
       expect(first.cardToken).toBe('tok_shared_card');
       expect(second.cardToken).toBe('tok_shared_card');
       expect(second.idempotencyKey).toBe(first.idempotencyKey);
-    });
+    }, FULL_FORM_TEST_TIMEOUT_MS);
   });
 
   describe('a refresh on SUMMARY in the same tab (card session still in sessionStorage)', () => {

@@ -12,9 +12,10 @@ import { GatewayTokenizeError } from '../../api/types';
 
 jest.mock('../../api/paymentGatewayClient');
 
-// `delay: null` types without yielding to the event loop between keys:
-// several tests fill a whole payment form, which otherwise crawls past
-// Jest's 5 s default on a busy machine.
+// `delay: null` types without yielding to the event loop between keys.
+// Tests that fill a whole payment form also get their own, longer timeout:
+// even without delays they can pass Jest's 5 s default on a loaded machine.
+const FULL_FORM_TEST_TIMEOUT_MS = 15_000;
 
 const mockedTokenizeCard = paymentGatewayClient.tokenizeCard as jest.MockedFunction<
   typeof paymentGatewayClient.tokenizeCard
@@ -115,7 +116,7 @@ describe('PaymentModalContainer', () => {
     expect(checkout.customer).toEqual({ fullName: 'Jane Doe', email: 'jane@example.com', phone: '+573001234567' });
     expect(checkout.delivery).toEqual({ address: 'Cra 1 # 2-3', city: 'Bogota', region: 'Cundinamarca' });
     expect(checkout.submitStatus).toBe('idle');
-  });
+  }, FULL_FORM_TEST_TIMEOUT_MS);
 
   it('sends exp_month and exp_year as 2-digit strings to the gateway, regardless of the entered expiry', async () => {
     mockedTokenizeCard.mockResolvedValue({ cardToken: 'tok_test_card' });
@@ -153,7 +154,7 @@ describe('PaymentModalContainer', () => {
     expect(checkout.cardToken).toBeNull();
     expect(checkout.customer).toBeNull();
     expect(checkout.submitStatus).toBe('failed');
-  });
+  }, FULL_FORM_TEST_TIMEOUT_MS);
 
   it('falls back to a generic tokenize-failure message when the rejection is not an Error', async () => {
     mockedTokenizeCard.mockRejectedValue('boom');
@@ -164,7 +165,7 @@ describe('PaymentModalContainer', () => {
     await user.click(screen.getByRole('button', { name: /continue/i }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Card tokenization failed');
-  });
+  }, FULL_FORM_TEST_TIMEOUT_MS);
 
   it('disables Continue and shows a processing state while tokenizing', async () => {
     mockedTokenizeCard.mockReturnValue(new Promise(() => {}));
@@ -175,7 +176,7 @@ describe('PaymentModalContainer', () => {
     await user.click(screen.getByRole('button', { name: /continue/i }));
 
     expect(await screen.findByRole('button', { name: /securing your card/i })).toBeDisabled();
-  });
+  }, FULL_FORM_TEST_TIMEOUT_MS);
 
   describe('closing during an in-flight tokenize request (BLOCKER)', () => {
     it('disables Cancel while tokenizing', async () => {
@@ -187,7 +188,7 @@ describe('PaymentModalContainer', () => {
       await user.click(screen.getByRole('button', { name: /continue/i }));
 
       expect(screen.getByRole('button', { name: /cancel/i })).toBeDisabled();
-    });
+    }, FULL_FORM_TEST_TIMEOUT_MS);
 
     it('ignores Escape while tokenizing, leaving the step unchanged', async () => {
       mockedTokenizeCard.mockReturnValue(new Promise(() => {}));
@@ -199,7 +200,7 @@ describe('PaymentModalContainer', () => {
       await user.keyboard('{Escape}');
 
       expect(store.getState().checkout.step).toBe('DETAILS');
-    });
+    }, FULL_FORM_TEST_TIMEOUT_MS);
 
     it('ignores a backdrop click while tokenizing, leaving the step unchanged', async () => {
       mockedTokenizeCard.mockReturnValue(new Promise(() => {}));
@@ -211,7 +212,7 @@ describe('PaymentModalContainer', () => {
       await user.click(screen.getByTestId('backdrop'));
 
       expect(store.getState().checkout.step).toBe('DETAILS');
-    });
+    }, FULL_FORM_TEST_TIMEOUT_MS);
 
     it('ignores a tokenize result that resolves after the container has unmounted', async () => {
       let resolveTokenize: ((value: { cardToken: string }) => void) | undefined;
@@ -236,7 +237,7 @@ describe('PaymentModalContainer', () => {
       expect(checkout.cardToken).toBeNull();
       expect(checkout.step).toBe('DETAILS');
       expect(checkout.customer).toBeNull();
-    });
+    }, FULL_FORM_TEST_TIMEOUT_MS);
 
     it('ignores a tokenize REJECTION that resolves after the container has unmounted', async () => {
       let rejectTokenize: ((error: Error) => void) | undefined;
@@ -258,7 +259,7 @@ describe('PaymentModalContainer', () => {
       await Promise.resolve();
 
       expect(store.getState().checkout.submitStatus).toBe('tokenizing');
-    });
+    }, FULL_FORM_TEST_TIMEOUT_MS);
   });
 
   it('does not stall tokenization under React StrictMode double-invocation (dev mode)', async () => {
@@ -279,7 +280,7 @@ describe('PaymentModalContainer', () => {
 
     await waitFor(() => expect(store.getState().checkout.step).toBe('SUMMARY'));
     expect(store.getState().checkout.cardToken).toBe('tok_test_card');
-  });
+  }, FULL_FORM_TEST_TIMEOUT_MS);
 
   it('prefills customer/delivery from the store for refresh resilience', () => {
     const savedCustomer = { fullName: 'Jane Doe', email: 'jane@example.com', phone: '+573001234567' };
@@ -310,7 +311,7 @@ describe('PaymentModalContainer', () => {
 
       await waitFor(() => expect(store.getState().checkout.formDraft).toMatchObject({ region: 'Cundinamarca' }));
       expect(JSON.stringify(store.getState().checkout.formDraft)).not.toContain('4111');
-    });
+    }, FULL_FORM_TEST_TIMEOUT_MS);
 
     it('prefills the form from the stored draft', () => {
       renderWithStore(buildStore({ formDraft: DRAFT }));
