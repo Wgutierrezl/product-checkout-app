@@ -38,16 +38,11 @@ function buildAuthPreloadedState(): AuthState {
 
 function buildPreloadedState() {
   const persisted = loadPersistedState();
-  const auth = buildAuthPreloadedState();
-
-  if (!persisted) {
-    return { auth };
-  }
 
   return {
-    checkout: { ...initialCheckoutState, ...persisted.checkout },
-    transaction: { ...initialTransactionState, ...persisted.transaction },
-    auth,
+    checkout: persisted ? { ...initialCheckoutState, ...persisted.checkout } : initialCheckoutState,
+    transaction: persisted ? { ...initialTransactionState, ...persisted.transaction } : initialTransactionState,
+    auth: buildAuthPreloadedState(),
   };
 }
 
