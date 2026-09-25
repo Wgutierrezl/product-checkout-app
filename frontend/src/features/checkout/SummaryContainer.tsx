@@ -15,6 +15,7 @@ import {
 import { pollStartedNow, transactionReceived } from '../transaction/transactionSlice';
 import { createTransaction, fetchPaymentAcceptance } from '../../api/backendClient';
 import { BackendApiError, REQUEST_TIMEOUT_STATUS } from '../../api/types';
+import { resumeInFlightPayment } from './resumeInFlightPayment';
 import type { PaymentAcceptance } from '../../api/types';
 
 export const PAYMENT_UNCONFIRMED_MESSAGE =
@@ -240,10 +241,22 @@ export function SummaryContainer() {
         }
         if (error.status === REQUEST_TIMEOUT_STATUS) {
           // Our own timeout fired: the request may well have reached the
-          // backend and the gateway. Treat the token as spent (never back
+          // backend and the gateway. Look it up under the SAME key, exactly
+          // as a refresh would (no new POST, no new key). If it landed, the
+          // buyer sees its real status (RESULT polls a PENDING one).
+          const outcome = await resumeInFlightPayment({ idempotencyKey, dispatch, resolveOnNotFound: false });
+          if (outcome === 'found') {
+            dispatch(submitStatusSet('idle'));
+            dispatch(submitErrorSet(null));
+            return;
+          }
+          if (!isMountedRef.current) {
+            return;
+          }
+          // Not found (or unknown): treat the token as spent (never back
           // into sessionStorage) and KEEP both the key and submitAttempted,
-          // so a refresh runs resumeInFlightPayment for this key, and a
-          // retry here is a backend replay if the first attempt landed.
+          // so a refresh checks again and a retry is a backend replay if
+          // the first attempt lands after all.
           dispatch(submitErrorSet(PAYMENT_UNCONFIRMED_MESSAGE));
           dispatch(cardTokenConsumed());
           dispatch(stepChangeRequested('DETAILS'));

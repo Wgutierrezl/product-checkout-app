@@ -71,4 +71,33 @@ describe('resumeInFlightPayment', () => {
 
     expect(dispatch).not.toHaveBeenCalled();
   });
+
+  describe('reported outcome', () => {
+    it("returns 'found' when the transaction exists", async () => {
+      mockedFetchTransaction.mockResolvedValue(buildTransactionFixture({ id: KEY, status: 'APPROVED' }));
+
+      await expect(resumeInFlightPayment({ idempotencyKey: KEY, dispatch: jest.fn() })).resolves.toBe('found');
+    });
+
+    it("returns 'notFound' on 404", async () => {
+      mockedFetchTransaction.mockRejectedValue(new BackendApiError('Transaction not found', 404));
+
+      await expect(resumeInFlightPayment({ idempotencyKey: KEY, dispatch: jest.fn() })).resolves.toBe('notFound');
+    });
+
+    it("returns 'unknown' on any other failure", async () => {
+      mockedFetchTransaction.mockRejectedValue(new BackendApiError('Network error', 0));
+
+      await expect(resumeInFlightPayment({ idempotencyKey: KEY, dispatch: jest.fn() })).resolves.toBe('unknown');
+    });
+  });
+
+  it('keeps submitAttempted on 404 when asked to (a 404 right after a timeout can race a POST still in flight)', async () => {
+    mockedFetchTransaction.mockRejectedValue(new BackendApiError('Transaction not found', 404));
+    const dispatch = jest.fn();
+
+    await resumeInFlightPayment({ idempotencyKey: KEY, dispatch, resolveOnNotFound: false });
+
+    expect(dispatch).not.toHaveBeenCalled();
+  });
 });
