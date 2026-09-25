@@ -8,11 +8,11 @@ describe('CatalogSkeleton', () => {
     expect(screen.getByRole('status')).toHaveTextContent(/loading products/i);
   });
 
-  it('renders a default number of placeholder cards, hidden from assistive tech', () => {
+  it('renders 12 placeholder cards by default (complete rows at 1, 2, 3 and 4 columns), hidden from assistive tech', () => {
     const { container } = render(<CatalogSkeleton />);
 
     const placeholders = container.querySelectorAll('[aria-hidden="true"].placeholder');
-    expect(placeholders.length).toBeGreaterThan(0);
+    expect(placeholders).toHaveLength(12);
   });
 
   it('renders the requested number of placeholder cards', () => {

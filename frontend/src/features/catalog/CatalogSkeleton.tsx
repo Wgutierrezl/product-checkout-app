@@ -5,7 +5,7 @@ export interface CatalogSkeletonProps {
 }
 
 /** Placeholder cards shown while the catalog is loading, with an accessible loading announcement. */
-export function CatalogSkeleton({ count = 6 }: CatalogSkeletonProps) {
+export function CatalogSkeleton({ count = 12 }: CatalogSkeletonProps) {
   return (
     <div>
       <p role="status" className={styles.visuallyHidden}>
