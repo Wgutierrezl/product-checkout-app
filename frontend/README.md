@@ -120,30 +120,43 @@ interface TransactionState {
 ### Persistence model
 
 Storage key: `checkout-spa:v1` (localStorage) and `checkout-spa:card-session` (sessionStorage).
-Both payloads carry an internal `version` (currently `4`, independent of the key name); a mismatch
-on boot discards the payload rather than risk rehydrating an old shape. Every field is validated
-on boot (types, ranges, known enums, UUID and token shape), and only whitelisted fields are ever
-copied back into Redux, so anything else planted in storage is ignored. All storage access goes
+Both payloads carry an internal `version` (currently `5`, independent of the key name). Older
+localStorage payloads that differ only by additions (v2 to v4) are migrated, so a payment left in
+flight across a deploy is still resumed; any other version is discarded. Every field is validated
+on boot (types, ranges, known enums, UUID shape, the gateway's `tok_` token shape, text length
+caps), and only whitelisted fields are ever rebuilt into Redux, so anything else planted in
+storage is ignored. All storage access goes
 through try/catch helpers: a blocked or full storage just means "nothing was persisted".
 
 | What | Where | Why |
 |---|---|---|
 | `checkout.step`, `productId`, `quantity`, `customer`, `delivery`, `installments`, `idempotencyKey`, `submitAttempted` | localStorage | Recover the buyer's progress after a refresh, and resume a payment left in flight |
-| `checkout.formDraft`: cardholder name, installments, full name, email, phone country + number, address, city, region, postal code | localStorage (written 400 ms after typing stops) | A refresh mid-form keeps what was typed. Cleared on Cancel and on checkout reset |
+| `checkout.formDraft`: cardholder name, installments, full name, email, phone country + number, address, city, region, postal code | localStorage (written 400 ms after typing stops) | A refresh mid-form keeps what was typed. Cleared on Cancel, once the payment reaches RESULT, and on checkout reset |
 | `transaction.id`, `status`, `pollStartedAt` | localStorage | Resume the RESULT step via `GET /transactions/:id` |
-| `checkout.cardToken` + `cardSummary` (brand, last4, holder) | sessionStorage, only while on SUMMARY | A refresh on SUMMARY stays on SUMMARY; closing the tab drops it. Removed as soon as the token is spent, a Pay attempt starts, the buyer edits details, or the checkout resets |
+| `checkout.cardToken` + `cardSummary` (brand, last4, holder) + the `idempotencyKey` they are bound to | sessionStorage, only while on SUMMARY | A refresh on SUMMARY stays on SUMMARY; closing the tab drops it. Removed as soon as the token is spent, a Pay attempt starts, the buyer edits details, or the checkout resets |
 | Card number, expiry, CVC | **Never stored**, anywhere | Live only in the form's local state, sent straight to the gateway's tokenization endpoint |
 | Consent checkboxes, acceptance tokens | Memory only | Consent is given again at payment time; acceptance tokens are fetched fresh right before every Pay |
 | `transaction.amounts`, `error`, `checkout.submitStatus`, `submitError`, `catalog.*` | Memory only | Cheap to refetch or meaningless across a reload; the catalog is refetched so stock is current |
 
 On boot, a persisted `SUMMARY` step stays on `SUMMARY` only when this tab still holds a valid card
-session and no payment attempt was in flight. Otherwise (a new tab, a corrupted session, or a
-token that may already have been sent) it is downgraded to `DETAILS` with no card data. When a
-draft is restored, the form shows a short status note asking the buyer to re-enter the card, until
-they type a card number. If the gateway later rejects a restored token (the backend answers 502
-with error type `PaymentGatewayError`), the buyer goes back to `DETAILS` with "Your card session
-expired. Please re-enter your card details." and a fresh idempotency key. All persisted state is
-cleared once a final status is reached and the buyer returns to the catalog.
+session bound to the persisted idempotency key, and no payment attempt was in flight. Otherwise (a
+new tab, a corrupted session, or a token that may already have been sent) it is downgraded to
+`DETAILS` with no card data. When a draft is restored, the form shows a short status note, linked
+to the card number field, asking the buyer to re-enter the card, until they type a card number.
+
+- **Duplicated tabs.** The key is ensured the moment the card is tokenized and stored with the
+  token, so a duplicated tab (which copies sessionStorage) pays under the same key and the backend
+  replays the first transaction instead of charging again. When the other tab starts paying or
+  leaves SUMMARY, a `storage` listener makes the idle duplicate drop its token and follow that
+  tab's state ("This checkout continued in another tab.").
+- **Gateway rejection.** On a definite rejection (the backend answers 502 with error type
+  `PaymentGatewayError`) the buyer goes back to `DETAILS` with "The payment was rejected. Please
+  re-enter your card or try another one." and a fresh idempotency key.
+- **Client timeout.** If the 15 s client timeout fires on Pay (status 408), the outcome is unknown:
+  the token is dropped, but the key and `submitAttempted` are kept, so a refresh resumes the attempt
+  and a retry is a backend replay.
+
+All persisted state is cleared once a final status is reached and the buyer returns to the catalog.
 
 ## Security decisions
 
@@ -159,7 +172,8 @@ cleared once a final status is reached and the buyer returns to the catalog.
   While the buyer is on SUMMARY it is mirrored to sessionStorage, so a refresh in the same tab keeps
   the summary, but closing the tab drops it. It is removed the moment it is spent or a Pay attempt
   starts. The sandbox gateway was observed accepting a spent token a second time, so the app does
-  not rely on the gateway for single use: it drops the token itself.
+  not rely on the gateway for single use: it drops the token itself and binds it to one
+  idempotency key, so any reuse is a backend replay rather than a second charge.
 - **Acceptance tokens are fetched fresh immediately before every submission attempt**, never reused
   across attempts, matching the one-time-use contract the gateway expects of them.
 - **Idempotency and refresh resume**: one `idempotencyKey` (UUID v4) is generated per checkout
@@ -232,12 +246,12 @@ Strict TDD throughout (RED → GREEN → REFACTOR), enforced by a coverage gate:
 
 | Metric | % |
 |---|---|
-| Statements | 99.54% |
-| Branches | 98.27% |
+| Statements | 99.57% |
+| Branches | 98.39% |
 | Functions | 100% |
-| Lines | 99.51% |
+| Lines | 99.54% |
 
-53 suites / 650 tests. Remaining, documented gaps are defensive guard clauses unreachable via the
+54 suites / 691 tests. Remaining, documented gaps are defensive guard clauses unreachable via the
 UI (e.g. a disabled control's own handler) — never left silently uncovered.
 
 ```bash
@@ -255,7 +269,7 @@ Layer-by-layer approach:
 | Domain (`domain/**`) | Luhn, brand detection, money formatting, poll backoff | Pure unit tests, near-100% branch coverage |
 | API adapters | Request shape, error mapping, abort/timeout handling | Mocked `fetch` |
 | Slices/thunks | State transitions, submit sequencing | `configureStore` + dispatched thunks |
-| Persistence | Whitelist, version discard, card session resume vs SUMMARY→DETAILS downgrade, no card data in any storage | jsdom `localStorage` + `sessionStorage` |
+| Persistence | Whitelist, migration and version discard, card session resume vs SUMMARY→DETAILS downgrade, key binding, cross-tab `storage` events, no card data in any storage | jsdom `localStorage` + `sessionStorage` |
 | Components | Masking UX, focus trap, consent-gated Pay, backoff timers | RTL + `user-event` + fake timers |
 | Integration | Full flow: select → form → submit → poll → result | Container-level RTL, real store + real `localStorage` |
 
