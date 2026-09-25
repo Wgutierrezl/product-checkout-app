@@ -1,4 +1,4 @@
-# Frontend — Meridian Goods Checkout
+# Frontend — Lumila Checkout
 
 A single-page checkout: pick a product, pay by card, track the payment to a final status. Built
 with Vite + React 18 + TypeScript, Redux Toolkit, and hand-rolled CSS Modules — no router, no UI
