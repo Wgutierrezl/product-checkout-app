@@ -127,6 +127,35 @@ describe('DynamoTransactionRepository', () => {
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr().type).toBe('Unexpected');
     });
+
+    /**
+     * APPROVAL BASELINE (PR6 design amendment, hard rule #1): a guest
+     * checkout (no `userId` on the input) must never write a `userId`
+     * ATTRIBUTE at all — not merely an `undefined`-valued one, which
+     * `toEqual` above would NOT catch (Jest treats `{userId: undefined}` as
+     * equal to `{}`). This asserts attribute ABSENCE explicitly via
+     * `Object.keys`, and must keep passing unchanged after PR6 wires up the
+     * optional write-through below.
+     */
+    it('never writes a userId attribute when the input omits it (guest checkout)', async () => {
+      ddbMock.on(PutCommand).resolves({});
+      const repository = new DynamoTransactionRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      await repository.createPending(createPendingInput);
+
+      const call = ddbMock.commandCalls(PutCommand)[0].args[0].input;
+      expect(Object.keys(call.Item ?? {})).not.toContain('userId');
+    });
+
+    it('writes the userId attribute when the input includes it (authenticated write-through)', async () => {
+      ddbMock.on(PutCommand).resolves({});
+      const repository = new DynamoTransactionRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      await repository.createPending({ ...createPendingInput, userId: 'user-1' });
+
+      const call = ddbMock.commandCalls(PutCommand)[0].args[0].input;
+      expect(call.Item).toMatchObject({ userId: 'user-1' });
+    });
   });
 
   describe('updateGatewayResult', () => {

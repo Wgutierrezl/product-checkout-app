@@ -12,7 +12,7 @@ import {
   ResourceInUseException,
   ResourceNotFoundException,
 } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 
 import {
   CUSTOMERS_EMAIL_INDEX_NAME,
@@ -286,6 +286,21 @@ export async function findCustomerIdByEmail(email: string): Promise<string> {
  * queryable on the locally-recreated table, kept in sync with
  * `seed-products.ts`'s own `ensureTransactionsTable`.
  */
+/**
+ * Test-only: reads a Transaction item's raw DynamoDB attributes (bypassing
+ * `toTransaction`/`TransactionResponseDto`, which would silently normalize
+ * away a stray `userId: undefined`). Backs the PR6 guest-checkout
+ * regression test's "no `userId` ATTRIBUTE at all, not merely an undefined
+ * one" assertion — see design's hard rule #1.
+ */
+export async function getRawTransactionItem(transactionId: string): Promise<Record<string, unknown> | undefined> {
+  const documentClient = createE2eDocumentClient();
+  const result = await documentClient.send(
+    new GetCommand({ TableName: TRANSACTIONS_TABLE_NAME, Key: { transactionId } }),
+  );
+  return result.Item;
+}
+
 export async function queryTransactionsByUserId(userId: string): Promise<unknown[]> {
   const documentClient = createE2eDocumentClient();
   const result = await documentClient.send(

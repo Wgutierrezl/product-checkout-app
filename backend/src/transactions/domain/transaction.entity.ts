@@ -32,6 +32,8 @@ export interface Transaction {
   readonly delivery: TransactionDeliveryInfo;
   readonly createdAt: string;
   readonly updatedAt: string;
+  /** Set only for an authenticated checkout (PR6's optional write-through). Absent for guest checkouts. */
+  readonly userId?: string;
 }
 
 export interface TransactionProps {
@@ -50,6 +52,7 @@ export interface TransactionProps {
   delivery: TransactionDeliveryInfo;
   createdAt: string;
   updatedAt: string;
+  userId?: string;
 }
 
 /**
@@ -104,6 +107,7 @@ export const Transaction = {
       },
       createdAt: props.createdAt,
       updatedAt: props.updatedAt,
+      userId: props.userId,
     });
   },
 };

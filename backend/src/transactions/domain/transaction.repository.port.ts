@@ -22,6 +22,15 @@ export interface CreatePendingTransactionInput {
   totalAmount: Money;
   delivery: TransactionDeliveryInfo;
   createdAt: string;
+  /**
+   * Set only when `POST /transactions` carried a valid Bearer token (PR6's
+   * `OptionalJwtAuthGuard`) — omitted entirely for a guest checkout, in
+   * which case NO `userId` attribute is written at all (see
+   * `DynamoTransactionRepository.createPending`'s guest-checkout regression
+   * test). Never present on an idempotent replay's re-read either, unless
+   * the ORIGINAL request that created the row already carried it.
+   */
+  userId?: string;
 }
 
 export interface CreatePendingResult {

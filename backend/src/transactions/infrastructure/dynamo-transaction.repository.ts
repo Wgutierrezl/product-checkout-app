@@ -93,6 +93,7 @@ interface TransactionItem {
   deliveryPostalCode?: string;
   createdAt: string;
   updatedAt: string;
+  userId?: string;
 }
 
 function toTransaction(item: TransactionItem): AppResult<Transaction> {
@@ -124,6 +125,7 @@ function toTransaction(item: TransactionItem): AppResult<Transaction> {
       },
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
+      userId: item.userId,
     }),
   );
 }
@@ -159,6 +161,14 @@ export class DynamoTransactionRepository implements TransactionRepositoryPort {
       deliveryPostalCode: input.delivery.postalCode,
       createdAt: input.createdAt,
       updatedAt: input.createdAt,
+      // Conditionally spread (unlike `deliveryPostalCode` above, which is
+      // always present, possibly `undefined`, relying on the doc client's
+      // `removeUndefinedValues`): PR6's design amendment hard rule #1 makes
+      // the guest path's byte-identical response — NO `userId` ATTRIBUTE at
+      // all — an explicit, testable guarantee at the object-literal level,
+      // not merely an artifact of marshalling config. See this file's own
+      // spec: "never writes a userId attribute when the input omits it".
+      ...(input.userId ? { userId: input.userId } : {}),
     };
 
     return ResultAsync.fromPromise(
@@ -188,6 +198,7 @@ export class DynamoTransactionRepository implements TransactionRepositoryPort {
             delivery: input.delivery,
             createdAt: input.createdAt,
             updatedAt: input.createdAt,
+            userId: input.userId,
           },
           wasCreated: true,
         });
