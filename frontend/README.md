@@ -181,6 +181,29 @@ different visual shell. `max-height` on both uses a `dvh` value alongside a `vh`
 Safari's collapsing address bar never clips the sheet. All text inputs use the base `1rem` (16px)
 font size to avoid iOS Safari's automatic zoom-on-focus.
 
+## Checkout UX details
+
+A few refinements from a manual pass over the real checkout, on top of the flow above:
+
+- **Card expiry auto-format** (`domain/card/format.ts#formatExpiryInput`): typing digits only
+  ("1229") displays "12/29" as you go, a leading month digit that can't start a 2nd one (e.g. "4")
+  auto-pads to "04/", and pasting "12/2029" or "12 / 2029" normalizes to "12/29" — all still
+  validated through the existing `parseExpiry`/`isExpiryValid`.
+- **Phone as E.164 with a country selector** (`domain/phone/`, `shared/ui/CountrySelect`): the
+  phone field is a country combobox (flag + dial code, default Colombia, type-to-search by name or
+  dial code) next to a digits-only national-number field. The value sent to the backend is always
+  `+<dial><national>`; an existing plain/bare persisted phone is parsed as a Colombian national
+  number so older customer data keeps working.
+- **Symmetric catalog cards**: name/description are clamped to 2 lines each, and the price/stock
+  row, quantity stepper, and pay action are pinned to the bottom of every card, so a grid row stays
+  visually aligned regardless of how long each product's copy is.
+- **A real "processing" state**: the PENDING result screen now shares the same card container and
+  top accent stripe as the approved/declined outcomes, with a 3-step progress list instead of a
+  bare spinner.
+- **Clearer in-flight buttons**: tokenizing and paying show an in-button spinner + label (kept
+  full-colour, not washed out) instead of a faded "Processing…", with the surrounding fields
+  visually locked via a native `<fieldset disabled>`.
+
 ## Testing
 
 Strict TDD throughout (RED → GREEN → REFACTOR), enforced by a coverage gate: 80% in
@@ -188,12 +211,12 @@ Strict TDD throughout (RED → GREEN → REFACTOR), enforced by a coverage gate:
 
 | Metric | % |
 |---|---|
-| Statements | 99.39% |
+| Statements | 99.48% |
 | Branches | 98.07% |
 | Functions | 100% |
-| Lines | 99.35% |
+| Lines | 99.44% |
 
-47 suites / 454 tests. Remaining, documented gaps are defensive guard clauses unreachable via the
+51 suites / 543 tests. Remaining, documented gaps are defensive guard clauses unreachable via the
 UI (e.g. a disabled control's own handler) — never left silently uncovered.
 
 ```bash
