@@ -420,6 +420,47 @@ describe('App refresh resilience (integration)', () => {
       expect(checkout.idempotencyKey).toBe(IN_FLIGHT_KEY);
     });
 
+    it('still resumes an attempt left in flight by the previous version of the app (v3 payload, no formDraft)', async () => {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          version: 3,
+          checkout: {
+            step: 'SUMMARY',
+            productId: 'p1',
+            quantity: 1,
+            customer: { fullName: 'Jane Doe', email: 'jane@example.com', phone: '+573001234567' },
+            delivery: { address: 'Cra 1 # 2-3', city: 'Bogota', region: 'Cundinamarca' },
+            installments: 1,
+            idempotencyKey: IN_FLIGHT_KEY,
+            submitAttempted: true,
+          },
+          transaction: { id: null, status: null, pollStartedAt: null },
+        }),
+      );
+      mockedFetchTransaction.mockResolvedValue({
+        id: IN_FLIGHT_KEY,
+        reference: 'REF-1',
+        status: 'APPROVED',
+        productAmount: 300_000,
+        baseFee: 250_000,
+        deliveryFee: 800_000,
+        total: 1_350_000,
+        currency: 'COP',
+      });
+
+      const store = createAppStore();
+      render(
+        <Provider store={store}>
+          <App />
+        </Provider>,
+      );
+
+      await waitFor(() => expect(store.getState().checkout.step).toBe('RESULT'));
+      expect(mockedFetchTransaction).toHaveBeenCalledWith(IN_FLIGHT_KEY);
+      expect(store.getState().checkout.idempotencyKey).toBe(IN_FLIGHT_KEY);
+    });
+
     it('404 (nothing was ever created): clears the in-flight flag and keeps the SAME key, staying on DETAILS', async () => {
       persistInFlightAttempt();
       mockedFetchTransaction.mockRejectedValue(new BackendApiError('Transaction not found', 404));

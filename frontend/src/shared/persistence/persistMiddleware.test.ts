@@ -392,6 +392,85 @@ describe('persistMiddleware', () => {
     });
   });
 
+  describe('migrating payloads written by older versions of the app', () => {
+    const IN_FLIGHT_KEY = 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f';
+
+    /** Exactly what v2 wrote: cardSummary in localStorage, no formDraft. */
+    function v2Payload(checkout: Record<string, unknown> = {}) {
+      return {
+        version: 2,
+        checkout: {
+          step: 'DETAILS',
+          productId: 'p1',
+          quantity: 1,
+          customer: CUSTOMER,
+          delivery: DELIVERY,
+          installments: 1,
+          idempotencyKey: IN_FLIGHT_KEY,
+          cardSummary: CARD_SUMMARY,
+          submitAttempted: true,
+          ...checkout,
+        },
+        transaction: { id: IN_FLIGHT_KEY, status: 'PENDING', pollStartedAt: 123 },
+      };
+    }
+
+    /** Exactly what v3 wrote: no cardSummary, no formDraft. */
+    function v3Payload(checkout: Record<string, unknown> = {}) {
+      const rest: Record<string, unknown> = { ...v2Payload(checkout).checkout };
+      delete rest.cardSummary;
+      return { ...v2Payload(), version: 3, checkout: rest };
+    }
+
+    it.each([
+      ['v2', v2Payload],
+      ['v3', v3Payload],
+    ])('keeps a %s payment that was in flight, so it can still be resumed', (_name, build) => {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(build()));
+
+      const rehydrated = loadPersistedState();
+
+      expect(rehydrated?.checkout).toMatchObject({
+        step: 'DETAILS',
+        idempotencyKey: IN_FLIGHT_KEY,
+        submitAttempted: true,
+        customer: CUSTOMER,
+        delivery: DELIVERY,
+        formDraft: null,
+        cardToken: null,
+        cardSummary: null,
+      });
+      expect(rehydrated?.transaction).toEqual({ id: IN_FLIGHT_KEY, status: 'PENDING', pollStartedAt: 123 });
+    });
+
+    it('never carries the v2 cardSummary over from localStorage', () => {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(v2Payload({ step: 'SUMMARY', submitAttempted: false })));
+
+      const rehydrated = loadPersistedState();
+
+      expect(rehydrated?.checkout).toMatchObject({ step: 'DETAILS', cardSummary: null });
+    });
+
+    it('still validates a migrated payload as deeply as a current one', () => {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(v3Payload({ quantity: 99 })));
+
+      expect(loadPersistedState()).toBeUndefined();
+      expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+    });
+
+    it('discards an old payload whose checkout is not even an object', () => {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...v3Payload(), checkout: 'oops' }));
+
+      expect(loadPersistedState()).toBeUndefined();
+    });
+
+    it('discards versions it does not know how to migrate', () => {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...v3Payload(), version: 1 }));
+
+      expect(loadPersistedState()).toBeUndefined();
+    });
+  });
+
   describe('clearPersistedState', () => {
     it('removes the storage key entirely', () => {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: PERSISTED_VERSION, checkout: {}, transaction: {} }));

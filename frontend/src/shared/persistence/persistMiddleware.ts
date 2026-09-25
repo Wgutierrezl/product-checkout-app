@@ -290,6 +290,33 @@ function isPersistedState(value: unknown): value is PersistedState {
   );
 }
 
+/**
+ * Older payloads that differ from the current shape only by ADDITIONS are
+ * upgraded instead of discarded, so a refresh right after a deploy never
+ * loses a payment left in flight. v2 and v3 simply predate `formDraft`
+ * (v2's extra `cardSummary` is ignored, since only whitelisted fields are
+ * ever rebuilt). The result still goes through full validation.
+ */
+const MIGRATABLE_VERSIONS: readonly number[] = [2, 3];
+
+function migrate(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null) {
+    return value;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (!MIGRATABLE_VERSIONS.includes(candidate.version as number)) {
+    return value;
+  }
+  if (typeof candidate.checkout !== 'object' || candidate.checkout === null) {
+    return value;
+  }
+  return {
+    ...candidate,
+    version: PERSISTED_VERSION,
+    checkout: { ...candidate.checkout, formDraft: null },
+  };
+}
+
 /** Reads and validates the tab-scoped card session; `null` when absent or invalid. */
 function readCardSession(): PersistedCardSession | null {
   const raw = safeGetItem(CARD_SESSION_KEY, 'session');
@@ -317,7 +344,7 @@ export function loadPersistedState():
   | { checkout: RehydratedCheckout; transaction: PersistedTransaction }
   | undefined {
   const raw = safeGetItem(STORAGE_KEY);
-  const parsed = raw ? safeParse(raw) : undefined;
+  const parsed = raw ? migrate(safeParse(raw)) : undefined;
   if (!isPersistedState(parsed) || parsed.version !== PERSISTED_VERSION) {
     if (raw) {
       safeRemoveItem(STORAGE_KEY);
