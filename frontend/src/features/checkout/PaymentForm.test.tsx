@@ -39,6 +39,55 @@ async function fillValidForm(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('PaymentForm', () => {
+  describe('expiry auto-format', () => {
+    it('inserts a slash automatically as the buyer types digits only', async () => {
+      const user = userEvent.setup();
+      renderForm();
+
+      await user.type(screen.getByLabelText(/expiry/i), '1229');
+
+      expect(screen.getByLabelText(/expiry/i)).toHaveValue('12/29');
+    });
+
+    it('auto-pads a leading month digit greater than 1', async () => {
+      const user = userEvent.setup();
+      renderForm();
+
+      await user.type(screen.getByLabelText(/expiry/i), '4');
+
+      expect(screen.getByLabelText(/expiry/i)).toHaveValue('04/');
+    });
+
+    it('normalizes a pasted value with a 4-digit year and stray spaces', async () => {
+      renderForm();
+      const input = screen.getByLabelText(/expiry/i);
+
+      fireEvent.change(input, { target: { value: '12 / 2029' } });
+
+      expect(input).toHaveValue('12/29');
+    });
+
+    it('drops the auto-inserted slash naturally when backspacing the 3rd digit', async () => {
+      const user = userEvent.setup();
+      renderForm();
+      const input = screen.getByLabelText(/expiry/i);
+
+      await user.type(input, '123');
+      expect(input).toHaveValue('12/3');
+
+      await user.type(input, '{backspace}');
+      expect(input).toHaveValue('12');
+    });
+
+    it('exposes numeric input mode and the cc-exp autocomplete hint', () => {
+      renderForm();
+
+      const input = screen.getByLabelText(/expiry/i);
+      expect(input).toHaveAttribute('inputMode', 'numeric');
+      expect(input).toHaveAttribute('autoComplete', 'cc-exp');
+    });
+  });
+
   describe('card number formatting, brand detection, and masking', () => {
     it('formats the card number into 4-digit groups as the buyer types', async () => {
       const user = userEvent.setup();

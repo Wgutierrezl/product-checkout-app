@@ -6,7 +6,7 @@ import { isValidLuhn } from '../../domain/card/luhn';
 import { detectCardBrand } from '../../domain/card/brand';
 import { isExpiryValid, parseExpiry } from '../../domain/card/expiry';
 import { isValidCvc } from '../../domain/card/cvc';
-import { digitsOnly, formatCardNumberInput } from '../../domain/card/format';
+import { digitsOnly, formatCardNumberInput, formatExpiryInput } from '../../domain/card/format';
 import {
   requireNonEmpty,
   validateAddress,
@@ -283,9 +283,10 @@ export function PaymentForm({
                   }}
                   className={styles.input}
                   placeholder="MM/YY"
+                  inputMode="numeric"
                   autoComplete="cc-exp"
                   value={values.expiry}
-                  onChange={(event) => setField('expiry', event.target.value)}
+                  onChange={(event) => setField('expiry', formatExpiryInput(event.target.value))}
                   onBlur={handleBlur('expiry')}
                 />
               )}
