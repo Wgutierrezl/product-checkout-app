@@ -1,9 +1,37 @@
 # Product Checkout App
 
+[![CI](https://github.com/Wgutierrezl/product-checkout-app/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/Wgutierrezl/product-checkout-app/actions/workflows/ci.yml)
+[![Deploy](https://github.com/Wgutierrezl/product-checkout-app/actions/workflows/deploy.yml/badge.svg?branch=main)](https://github.com/Wgutierrezl/product-checkout-app/actions/workflows/deploy.yml)
+[![Backend coverage](https://img.shields.io/badge/backend%20coverage-100%25-brightgreen)](#testing--coverage)
+[![Frontend coverage](https://img.shields.io/badge/frontend%20coverage-99.6%25-brightgreen)](#testing--coverage)
+[![Mozilla Observatory](https://img.shields.io/badge/Mozilla%20Observatory-A%2B-brightgreen?logo=mozilla)](https://developer.mozilla.org/en-US/observatory/analyze?host=d17j4b8e1cjsp0.cloudfront.net)
+
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
+![React](https://img.shields.io/badge/React-20232A?logo=react&logoColor=61DAFB)
+![Redux Toolkit](https://img.shields.io/badge/Redux%20Toolkit-764ABC?logo=redux&logoColor=white)
+![NestJS](https://img.shields.io/badge/NestJS-E0234E?logo=nestjs&logoColor=white)
+![AWS](https://img.shields.io/badge/AWS-Lambda%20%C2%B7%20DynamoDB%20%C2%B7%20CloudFront-FF9900)
+![AWS CDK](https://img.shields.io/badge/AWS%20CDK-TypeScript-FF9900)
+
 A mobile-first single-page checkout: pick a product, pay by credit card through a payment
 gateway (sandbox), and follow the payment to its final status. Five steps: **product page →
 credit card & delivery info → summary → final status → product page (stock updated)**. Guest
 checkout — no accounts — and the progress survives a page refresh.
+
+> [!TIP]
+> **Try it in 30 seconds**
+>
+> 1. Open the live app: **https://d17j4b8e1cjsp0.cloudfront.net**
+> 2. Pay with a sandbox test card — any future expiry, CVC `123`:
+>
+>    | Card | Result |
+>    |---|---|
+>    | `4242 4242 4242 4242` | Approved |
+>    | `4111 1111 1111 1111` | Declined |
+>
+> 3. Browse the API in [Swagger UI](https://z40rykuvgf.execute-api.us-east-1.amazonaws.com/docs).
+>
+> The payment modal has **Use** buttons that fill in each test card for you.
 
 Monorepo, three packages:
 
