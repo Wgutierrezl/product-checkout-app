@@ -28,7 +28,12 @@ export function useCrossTabCheckoutSync(): void {
         return;
       }
       const mine = store.getState().checkout;
-      const sameCheckout = mine.cardToken !== null && other.checkout.idempotencyKey === mine.idempotencyKey;
+      // Only a tab sitting idle on SUMMARY with the token reacts. A tab that
+      // is paying itself (submitAttempted) must ignore the write-back the
+      // other tab makes after adopting, or the two would bounce state back
+      // and forth and the paying tab would abandon its own payment.
+      const idleOnSummary = mine.step === 'SUMMARY' && mine.cardToken !== null && !mine.submitAttempted;
+      const sameCheckout = idleOnSummary && other.checkout.idempotencyKey === mine.idempotencyKey;
       const otherTabMovedOn = other.checkout.submitAttempted || other.checkout.step !== 'SUMMARY';
       if (sameCheckout && otherTabMovedOn) {
         dispatch(otherTabStateAdopted(other));

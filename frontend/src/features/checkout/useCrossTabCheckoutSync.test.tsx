@@ -146,6 +146,29 @@ describe('useCrossTabCheckoutSync', () => {
     expect(store.getState().checkout.submitAttempted).toBe(false);
   });
 
+  it('ignores the event while this tab is itself paying, so the two tabs never bounce state back and forth', () => {
+    // Tab A clicked Pay; tab B adopted and wrote step DETAILS back under the same key.
+    const store = buildTabOnSummary({ submitAttempted: true, submitStatus: 'submitting' });
+    renderHost(store);
+
+    fireStorage({ key: STORAGE_KEY, newValue: otherTabPayload({ step: 'DETAILS', submitAttempted: true }) });
+
+    const { checkout } = store.getState();
+    expect(checkout.step).toBe('SUMMARY');
+    expect(checkout.cardToken).toBe('tok_shared_card');
+    expect(checkout.submitError).toBeNull();
+  });
+
+  it('ignores the event when this tab is not on SUMMARY (e.g. editing details with a leftover token)', () => {
+    const store = buildTabOnSummary({ step: 'DETAILS' });
+    renderHost(store);
+
+    fireStorage({ key: STORAGE_KEY, newValue: otherTabPayload({ step: 'DETAILS' }) });
+
+    expect(store.getState().checkout.submitError).toBeNull();
+    expect(store.getState().checkout.cardToken).toBe('tok_shared_card');
+  });
+
   it('stops listening on unmount', () => {
     const store = buildTabOnSummary();
     const { unmount } = renderHost(store);
