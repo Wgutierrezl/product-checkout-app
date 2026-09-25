@@ -33,7 +33,7 @@ flowchart TB
             HttpApi["HTTP API<br/>$default throttled stage"]
         end
 
-        SSM["SSM Parameter Store<br/>(3 SecureStrings)"]
+        SSM["SSM Parameter Store<br/>(4 SecureStrings)"]
 
         subgraph GithubOidcStack["GithubOidcStack (bootstrap, deployed manually once)"]
             OIDC["GitHub OIDC provider"]
@@ -121,7 +121,7 @@ Note the `DeployRoleArn` output — you'll need it in step 4.
 
 ### 3. SSM SecureString parameters (payment gateway secrets)
 
-`ApiStack` reads these 3 parameters at Lambda cold start (see
+`ApiStack` reads these 4 parameters at Lambda cold start (see
 `backend/src/shared/config/ssm-bootstrap.ts`), under the prefix
 `SSM_PARAM_PREFIX = /checkout/gateway` (see `lib/api-stack.ts` —
 must match exactly, including this exact path, or the Lambda fails fast
@@ -136,6 +136,10 @@ aws ssm put-parameter --type SecureString \
 
 aws ssm put-parameter --type SecureString \
   --name /checkout/gateway/events-secret --value <PLACEHOLDER>
+
+# Signing secret for the optional user accounts (at least 32 characters)
+aws ssm put-parameter --type SecureString \
+  --name /checkout/gateway/jwt-secret --value "$(openssl rand -base64 48)"
 ```
 
 Replace `<PLACEHOLDER>` with the real secret values out-of-band (never
