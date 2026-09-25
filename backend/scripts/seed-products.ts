@@ -14,7 +14,7 @@
  * runs this under has no `dynamodb:CreateTable` grant, by design — least
  * privilege).
  *
- * Puts a fixed catalog of 7 sample products (including one out-of-stock
+ * Puts a fixed catalog of 12 sample products (including one out-of-stock
  * item, stock 0, to demo the catalog's "sold out" UI state) keyed by stable
  * UUIDs, so re-running the script overwrites the same items instead of
  * duplicating them.
@@ -123,6 +123,46 @@ const SEED_PRODUCTS: SeedProductItem[] = [
     priceCents: 24_990_000,
     stock: 0,
     imageUrl: 'https://images.unsplash.com/photo-1606144042614-b2417e99c4e3?w=600&fm=webp',
+  },
+  {
+    productId: 'b6137f0d-d78c-4e61-9f7f-abfde792b65b',
+    name: 'AirBuds Pro Wireless Earbuds',
+    description: 'True wireless earbuds with active noise cancellation and a 24h charging case.',
+    priceCents: 25_990_000,
+    stock: 28,
+    imageUrl: 'https://images.unsplash.com/photo-1505236273191-1dce886b01e9?w=600&fm=webp',
+  },
+  {
+    productId: '98744d3c-994b-4118-bf85-ea8770a0eac1',
+    name: 'ExtremeCam 4K Action Camera',
+    description: '4K Ultra HD action camera with waterproof housing for extreme sports.',
+    priceCents: 34_990_000,
+    stock: 12,
+    imageUrl: 'https://images.unsplash.com/photo-1562878671-b3efe27953b9?w=600&fm=webp',
+  },
+  {
+    productId: 'd3e5bcfb-7dc2-42c3-8c0e-4950601b8204',
+    name: 'HubMax 7-in-1 USB-C Hub',
+    description: '7-in-1 USB-C hub with HDMI, USB 3.0, and 100W power delivery passthrough.',
+    priceCents: 8_990_000,
+    stock: 22,
+    imageUrl: 'https://images.unsplash.com/photo-1760376789487-994070337c76?w=600&fm=webp',
+  },
+  {
+    productId: 'be710685-8b93-460f-8f98-0a183cfa3e37',
+    name: 'DataVault 1TB Portable SSD',
+    description: '1TB portable SSD with USB-C 3.2 transfer speeds up to 1050MB/s.',
+    priceCents: 39_990_000,
+    stock: 18,
+    imageUrl: 'https://images.unsplash.com/photo-1518547606470-00ac2ae882af?w=600&fm=webp',
+  },
+  {
+    productId: 'bc265a08-df70-445e-bdc7-f60852fb585b',
+    name: 'PageTurn E-Reader',
+    description: '6-inch e-reader with a glare-free display and weeks of battery life.',
+    priceCents: 59_990_000,
+    stock: 9,
+    imageUrl: 'https://images.unsplash.com/photo-1500697017927-23abd276362a?w=600&fm=webp',
   },
 ];
 

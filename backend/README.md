@@ -31,7 +31,7 @@ intentional for local dev).
 
 ```bash
 npm install
-npm run seed   # creates the 4 tables (idempotent) and seeds 7 sample products
+npm run seed   # creates the 4 tables (idempotent) and seeds 12 sample products
 ```
 
 ### 5. Run the API
