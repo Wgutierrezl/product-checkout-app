@@ -8,7 +8,7 @@ import { checkoutReducer, initialCheckoutState, type CheckoutState } from './che
 import { catalogReducer, type CatalogState } from '../catalog/catalogSlice';
 import { transactionReducer } from '../transaction/transactionSlice';
 import * as backendClient from '../../api/backendClient';
-import { BackendApiError } from '../../api/types';
+import { BackendApiError, REQUEST_TIMEOUT_STATUS } from '../../api/types';
 import type { Product } from '../../api/types';
 
 jest.mock('../../api/backendClient');
@@ -308,8 +308,28 @@ describe('SummaryContainer', () => {
       expect(checkout.submitAttempted).toBe(false);
     });
 
-    it('network (status 0): never reached the backend -- keeps the SAME key and the SAME card token, stays on SUMMARY for a retry', async () => {
-      mockedCreateTransaction.mockRejectedValue(new BackendApiError('Network error: timeout', 0));
+    it('client timeout: the request may have landed -- consumes the token, keeps the SAME key AND the in-flight marker so a refresh resumes it', async () => {
+      mockedCreateTransaction.mockRejectedValue(new BackendApiError('Request timed out', REQUEST_TIMEOUT_STATUS));
+      const user = userEvent.setup();
+      const existingKey = 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f';
+      const { store } = renderWithStore(buildStore({ idempotencyKey: existingKey }));
+      await acceptBoth(user);
+
+      await user.click(screen.getByRole('button', { name: /^pay$/i }));
+
+      await waitFor(() => expect(store.getState().checkout.step).toBe('DETAILS'));
+      const { checkout } = store.getState();
+      expect(checkout.cardToken).toBeNull();
+      expect(checkout.idempotencyKey).toBe(existingKey);
+      expect(checkout.submitAttempted).toBe(true);
+      expect(checkout.submitStatus).toBe('failed');
+      expect(checkout.submitError).toBe(
+        "We couldn't confirm your payment in time. Re-enter your card to check it again; you won't be charged twice.",
+      );
+    });
+
+    it('network (status 0): most likely never reached the backend -- keeps the SAME key and the SAME card token, stays on SUMMARY for a retry', async () => {
+      mockedCreateTransaction.mockRejectedValue(new BackendApiError('Network error: Failed to fetch', 0));
       const user = userEvent.setup();
       const existingKey = 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f';
       const { store } = renderWithStore(buildStore({ idempotencyKey: existingKey }));

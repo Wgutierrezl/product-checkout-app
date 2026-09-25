@@ -1,6 +1,7 @@
 import { getEnv } from '../config/env';
 import {
   BackendApiError,
+  REQUEST_TIMEOUT_STATUS,
   type CreateTransactionInput,
   type PaymentAcceptance,
   type Product,
@@ -42,7 +43,7 @@ function extractErrorType(body: unknown): string | undefined {
   return undefined;
 }
 
-/** No real HTTP status applies to a network failure or a client-side timeout. */
+/** No real HTTP status applies to a network failure or an externally cancelled request. */
 const NETWORK_ERROR_STATUS = 0;
 const REQUEST_TIMEOUT_MS = 15_000;
 
@@ -57,7 +58,11 @@ async function parseJsonBody(response: Response): Promise<unknown> {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const { apiUrl } = getEnv();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, REQUEST_TIMEOUT_MS);
 
   // An external signal (e.g. a poll loop that was cancelled) aborts our OWN
   // controller too, so the underlying fetch is cancelled for either reason
@@ -80,7 +85,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       },
     });
   } catch (error) {
-    const reason = error instanceof Error && error.name === 'AbortError' ? 'Request timed out' : `Network error: ${(error as Error).message}`;
+    if (timedOut) {
+      throw new BackendApiError('Request timed out', REQUEST_TIMEOUT_STATUS);
+    }
+    const reason =
+      error instanceof Error && error.name === 'AbortError' ? 'Request cancelled' : `Network error: ${(error as Error).message}`;
     throw new BackendApiError(reason, NETWORK_ERROR_STATUS);
   } finally {
     clearTimeout(timeout);

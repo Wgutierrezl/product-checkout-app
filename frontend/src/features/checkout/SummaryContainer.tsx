@@ -14,8 +14,11 @@ import {
 } from './checkoutSlice';
 import { pollStartedNow, transactionReceived } from '../transaction/transactionSlice';
 import { createTransaction, fetchPaymentAcceptance } from '../../api/backendClient';
-import { BackendApiError } from '../../api/types';
+import { BackendApiError, REQUEST_TIMEOUT_STATUS } from '../../api/types';
 import type { PaymentAcceptance } from '../../api/types';
+
+export const PAYMENT_UNCONFIRMED_MESSAGE =
+  "We couldn't confirm your payment in time. Re-enter your card to check it again; you won't be charged twice.";
 
 export const CARD_SESSION_EXPIRED_MESSAGE = 'Your card session expired. Please re-enter your card details.';
 
@@ -230,10 +233,24 @@ export function SummaryContainer() {
           dispatch(paymentAttemptResolved());
           return;
         }
+        if (error.status === REQUEST_TIMEOUT_STATUS) {
+          // Our own timeout fired: the request may well have reached the
+          // backend and the gateway. Treat the token as spent (never back
+          // into sessionStorage) and KEEP both the key and submitAttempted,
+          // so a refresh runs resumeInFlightPayment for this key, and a
+          // retry here is a backend replay if the first attempt landed.
+          dispatch(submitErrorSet(PAYMENT_UNCONFIRMED_MESSAGE));
+          dispatch(cardTokenConsumed());
+          dispatch(stepChangeRequested('DETAILS'));
+          dispatch(submitStatusSet('failed'));
+          return;
+        }
         if (error.status === 0) {
-          // Network/client-side failure: the request never reached the
-          // backend, so the card token was never spent -- keep it (and the
-          // SAME key) for a same-tap retry from SUMMARY, no re-tokenize needed.
+          // Network failure (fetch rejected before any response): the
+          // request most likely never reached the backend. Keep the token
+          // and the SAME key for a same-tap retry from SUMMARY. Even if it
+          // did land, that key is bound to this token, so any retry with it
+          // is a backend replay, never a second charge.
           dispatch(submitErrorSet(error.message));
           dispatch(submitStatusSet('failed'));
           dispatch(paymentAttemptResolved());

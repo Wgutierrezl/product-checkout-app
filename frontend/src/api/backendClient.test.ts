@@ -4,7 +4,7 @@ import {
   fetchProducts,
   fetchTransaction,
 } from './backendClient';
-import { BackendApiError } from './types';
+import { BackendApiError, REQUEST_TIMEOUT_STATUS } from './types';
 import type { CreateTransactionInput } from './types';
 
 function jsonResponse(body: unknown, init: { ok: boolean; status: number; statusText?: string }) {
@@ -40,7 +40,7 @@ describe('backendClient', () => {
       });
     });
 
-    it('aborts the request and throws a BackendApiError with status 0 after the timeout', async () => {
+    it('aborts the request after the timeout and throws a BackendApiError with its own timeout status', async () => {
       jest.useFakeTimers();
       fetchMock.mockImplementation(
         (_url: string, init?: RequestInit) =>
@@ -54,7 +54,11 @@ describe('backendClient', () => {
       );
 
       const pending = fetchProducts();
-      const assertion = expect(pending).rejects.toMatchObject({ status: 0, name: 'BackendApiError' });
+      const assertion = expect(pending).rejects.toMatchObject({
+        status: REQUEST_TIMEOUT_STATUS,
+        message: 'Request timed out',
+        name: 'BackendApiError',
+      });
       await jest.advanceTimersByTimeAsync(15_000);
       await assertion;
     });
@@ -363,7 +367,11 @@ describe('backendClient', () => {
       );
 
       const pending = fetchTransaction('t1', { signal: externalController.signal });
-      const assertion = expect(pending).rejects.toMatchObject({ status: 0, name: 'BackendApiError' });
+      const assertion = expect(pending).rejects.toMatchObject({
+        status: 0,
+        message: 'Request cancelled',
+        name: 'BackendApiError',
+      });
       externalController.abort();
       await assertion;
       expect(capturedInternalSignal?.aborted).toBe(true);
