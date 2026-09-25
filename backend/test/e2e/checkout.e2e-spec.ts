@@ -497,4 +497,87 @@ describe('Accounts E2E (register -> login)', () => {
       await throttledAccountsApp.close();
     }
   });
+
+  describe('GET /me, PUT /me/preferences', () => {
+    // A dedicated Nest app instance (own in-memory ThrottlerStorage, same
+    // isolation pattern as the 'Rate limiting' describe's throttledApp)
+    // keeps this block's register/login calls off the shared accountsServer
+    // counter above, which already spends 4 of its 5-per-60s register quota
+    // on the sibling tests in this file.
+    let meApp: INestApplication;
+    let meServer: ReturnType<INestApplication['getHttpServer']>;
+    let accessToken: string;
+    let userId: string;
+    let email: string;
+
+    beforeAll(async () => {
+      const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+      meApp = moduleRef.createNestApplication();
+      applyGlobalConfig(meApp);
+      await meApp.init();
+      meServer = meApp.getHttpServer();
+
+      const body = uniqueRegisterBody();
+      await request(meServer).post('/auth/register').send(body).expect(201);
+      const loginResponse = await request(meServer)
+        .post('/auth/login')
+        .send({ email: body.email, password: body.password })
+        .expect(200);
+      accessToken = loginResponse.body.accessToken;
+      userId = loginResponse.body.userId;
+      email = body.email;
+    }, 30_000);
+
+    afterAll(async () => {
+      await meApp?.close();
+    });
+
+    it('rejects GET /me and PUT /me/preferences with no Authorization header (401)', async () => {
+      await request(meServer).get('/me').expect(401);
+      await request(meServer).put('/me/preferences').send({}).expect(401);
+    });
+
+    it('rejects both routes with a tampered token (401), never leaking a stack trace', async () => {
+      const tampered = jwt.sign({ sub: 'user-x', email: 'x@example.test' }, 'wrong-secret', {
+        algorithm: 'HS256',
+        expiresIn: '1h',
+      });
+
+      const getResponse = await request(meServer).get('/me').set('Authorization', `Bearer ${tampered}`).expect(401);
+      expect(getResponse.body).not.toHaveProperty('stack');
+    });
+
+    it('returns the fresh profile with no preferences yet, then reflects a PUT with the new preferences', async () => {
+      const before = await request(meServer).get('/me').set('Authorization', `Bearer ${accessToken}`).expect(200);
+      expect(before.body).toEqual({ userId, email, fullName: 'E2E Auth Buyer', preferences: undefined });
+      expect(JSON.stringify(before.body)).not.toMatch(/passwordHash/);
+
+      const preferences = {
+        phone: '+573001234567',
+        address: 'Cra 1 # 2-3',
+        city: 'Bogota',
+        region: 'Cundinamarca',
+        postalCode: '110111',
+      };
+
+      const putResponse = await request(meServer)
+        .put('/me/preferences')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send(preferences)
+        .expect(200);
+      expect(putResponse.body.preferences).toEqual(preferences);
+
+      const after = await request(meServer).get('/me').set('Authorization', `Bearer ${accessToken}`).expect(200);
+      expect(after.body.preferences).toEqual(preferences);
+    });
+
+    it('rejects PUT /me/preferences missing a required field (400), mirroring checkout DTO validation', async () => {
+      const response = await request(meServer)
+        .put('/me/preferences')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ phone: '+573001234567', address: 'Cra 1 # 2-3', city: 'Bogota' })
+        .expect(400);
+      expect(response.body).not.toHaveProperty('stack');
+    });
+  });
 });
