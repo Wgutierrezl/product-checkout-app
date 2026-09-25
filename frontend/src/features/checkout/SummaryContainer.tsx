@@ -14,8 +14,31 @@ import {
 } from './checkoutSlice';
 import { pollStartedNow, transactionReceived } from '../transaction/transactionSlice';
 import { createTransaction, fetchPaymentAcceptance } from '../../api/backendClient';
-import { BackendApiError } from '../../api/types';
+import { BackendApiError, REQUEST_TIMEOUT_STATUS } from '../../api/types';
+import { resumeInFlightPayment } from './resumeInFlightPayment';
 import type { PaymentAcceptance } from '../../api/types';
+
+export const PAYMENT_UNCONFIRMED_MESSAGE =
+  "We couldn't confirm your payment in time. Re-enter your card to check it again; you won't be charged twice.";
+
+/**
+ * Deliberately neutral: the gateway rejects for many reasons (an expired
+ * token, but also e.g. a configuration problem), so the buyer is never told
+ * something specific that may be untrue and just retry forever.
+ */
+export const PAYMENT_REJECTED_MESSAGE = 'The payment was rejected. Please re-enter your card or try another one.';
+
+/**
+ * The backend answers POST /transactions with 502 + `PaymentGatewayError`
+ * ONLY when the gateway definitively rejected the charge request (a 4xx,
+ * e.g. an expired or already used card token): ambiguous gateway failures
+ * come back as 201 PENDING instead, and the backend has already marked the
+ * attempt ERROR under its idempotencyKey. A bare 502 (e.g. from a proxy)
+ * carries no such error type and stays on the generic 5xx path.
+ */
+function isGatewayRejection(error: BackendApiError): boolean {
+  return error.status === 502 && error.errorType === 'PaymentGatewayError';
+}
 
 /**
  * The SUMMARY step: a Material-style backdrop (dimmed selected-product
@@ -204,10 +227,48 @@ export function SummaryContainer() {
           dispatch(paymentAttemptResolved());
           return;
         }
+        if (isGatewayRejection(error)) {
+          // A definite rejection: ask for the card again (or another one).
+          // The key IS rotated: replaying the old one would only return
+          // that ERROR.
+          dispatch(submitErrorSet(PAYMENT_REJECTED_MESSAGE));
+          dispatch(cardTokenConsumed());
+          dispatch(idempotencyKeyRotated());
+          dispatch(stepChangeRequested('DETAILS'));
+          dispatch(submitStatusSet('failed'));
+          dispatch(paymentAttemptResolved());
+          return;
+        }
+        if (error.status === REQUEST_TIMEOUT_STATUS) {
+          // Our own timeout fired: the request may well have reached the
+          // backend and the gateway. Look it up under the SAME key, exactly
+          // as a refresh would (no new POST, no new key). If it landed, the
+          // buyer sees its real status (RESULT polls a PENDING one).
+          const outcome = await resumeInFlightPayment({ idempotencyKey, dispatch, resolveOnNotFound: false });
+          if (outcome === 'found') {
+            dispatch(submitStatusSet('idle'));
+            dispatch(submitErrorSet(null));
+            return;
+          }
+          if (!isMountedRef.current) {
+            return;
+          }
+          // Not found (or unknown): treat the token as spent (never back
+          // into sessionStorage) and KEEP both the key and submitAttempted,
+          // so a refresh checks again and a retry is a backend replay if
+          // the first attempt lands after all.
+          dispatch(submitErrorSet(PAYMENT_UNCONFIRMED_MESSAGE));
+          dispatch(cardTokenConsumed());
+          dispatch(stepChangeRequested('DETAILS'));
+          dispatch(submitStatusSet('failed'));
+          return;
+        }
         if (error.status === 0) {
-          // Network/client-side failure: the request never reached the
-          // backend, so the card token was never spent -- keep it (and the
-          // SAME key) for a same-tap retry from SUMMARY, no re-tokenize needed.
+          // Network failure (fetch rejected before any response): the
+          // request most likely never reached the backend. Keep the token
+          // and the SAME key for a same-tap retry from SUMMARY. Even if it
+          // did land, that key is bound to this token, so any retry with it
+          // is a backend replay, never a second charge.
           dispatch(submitErrorSet(error.message));
           dispatch(submitStatusSet('failed'));
           dispatch(paymentAttemptResolved());

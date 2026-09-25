@@ -104,8 +104,9 @@ flowchart TB
 ```
 
 - **Frontend** — React 18 SPA (Vite), Redux Toolkit as the Flux store, a step machine
-  (`PRODUCT → DETAILS → SUMMARY → RESULT`) instead of a router, and a `localStorage`
-  persistence whitelist that never persists the card token. See
+  (`PRODUCT → DETAILS → SUMMARY → RESULT`) instead of a router, and a persistence
+  whitelist: progress and a non-card form draft in `localStorage`, the single-use card token in
+  `sessionStorage` while on SUMMARY only, and card number, expiry and CVC never stored. See
   [frontend/README.md](./frontend/README.md).
 - **Backend** — NestJS, Hexagonal Architecture (Ports & Adapters): each bounded context
   (`products`, `customers`, `transactions`, `deliveries`, `payment-acceptance`) has a
@@ -270,7 +271,7 @@ directly against this repository:
 |---|---|---|---|---|---|
 | `backend` (unit) | 100% | 100% | 100% | 100% | 49 suites / 412 tests |
 | `backend` (e2e) | — | — | — | — | 1 suite / 25 tests (DynamoDB Local) |
-| `frontend` | 99.5% | 98.2% | 100% | 99.46% | 53 suites / 578 tests |
+| `frontend` | 99.57% | 98.43% | 100% | 99.54% | 54 suites / 703 tests |
 | `infra` | 100% | 100% | 100% | 100% | 6 suites / 38 tests |
 
 - **Backend e2e** runs against a real `AppModule` and DynamoDB Local, with a deterministic

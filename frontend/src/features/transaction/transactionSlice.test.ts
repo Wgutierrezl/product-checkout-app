@@ -7,6 +7,7 @@ import {
   transactionReceived,
   transactionReducer,
 } from './transactionSlice';
+import { otherTabStateAdopted } from '../checkout/checkoutSlice';
 
 function buildStore() {
   return configureStore({ reducer: { transaction: transactionReducer } });
@@ -102,6 +103,48 @@ describe('transactionSlice', () => {
       error: null,
       pollStartedAt: null,
       reference: null,
+    });
+  });
+
+  describe('otherTabStateAdopted', () => {
+    const CHECKOUT = {
+      step: 'RESULT' as const,
+      productId: 'p1',
+      quantity: 1,
+      customer: null,
+      delivery: null,
+      installments: 1,
+      idempotencyKey: 't1',
+      submitAttempted: false,
+      formDraft: null,
+    };
+
+    it('adopts the other tab\'s transaction, dropping amounts that belonged to a different one', () => {
+      const store = buildStore();
+      store.dispatch(transactionReceived({ id: 't0', status: 'APPROVED', amounts: AMOUNTS, reference: 'ref-0' }));
+
+      store.dispatch(
+        otherTabStateAdopted({ checkout: CHECKOUT, transaction: { id: 't1', status: 'PENDING', pollStartedAt: 5 } }),
+      );
+
+      expect(store.getState().transaction).toMatchObject({
+        id: 't1',
+        status: 'PENDING',
+        pollStartedAt: 5,
+        amounts: null,
+        reference: null,
+      });
+    });
+
+    it('keeps the amounts it already has for the same transaction', () => {
+      const store = buildStore();
+      store.dispatch(transactionReceived({ id: 't1', status: 'PENDING', amounts: AMOUNTS, reference: 'ref-1' }));
+
+      store.dispatch(
+        otherTabStateAdopted({ checkout: CHECKOUT, transaction: { id: 't1', status: 'APPROVED', pollStartedAt: 5 } }),
+      );
+
+      expect(store.getState().transaction).toMatchObject({ id: 't1', status: 'APPROVED', amounts: AMOUNTS });
     });
   });
 });
