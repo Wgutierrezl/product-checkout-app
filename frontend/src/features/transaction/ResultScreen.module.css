@@ -11,14 +11,6 @@
   background: var(--color-bg);
 }
 
-.pending {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-4);
-  text-align: center;
-}
-
 .card {
   width: min(480px, 100%);
   background: var(--color-surface);
@@ -65,6 +57,81 @@
 
 .declined .heading {
   color: var(--color-error);
+}
+
+.processing .card {
+  border-top-color: var(--color-processing);
+}
+
+.processing .heading {
+  color: var(--color-processing);
+}
+
+/* A subtle pulsing ring — purely decorative (aria-hidden), the accessible
+   "in progress" announcement is the Spinner's role=status right below it. */
+.processingRing {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 3px solid var(--color-processing-bg);
+  border-top-color: var(--color-processing);
+  animation:
+    spin 1.6s linear infinite,
+    pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .processingRing {
+    animation: none;
+  }
+}
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  text-align: left;
+  width: 100%;
+  list-style: none;
+}
+
+.step,
+.stepDone {
+  position: relative;
+  padding-left: var(--space-5);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.step::before,
+.stepDone::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.35em;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-border);
+}
+
+.stepDone {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.stepDone::before {
+  background: var(--color-processing);
 }
 
 .heading {

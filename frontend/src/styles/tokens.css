@@ -63,6 +63,12 @@
   --color-success: #2f6f5e;
   --color-success-bg: #e6efe9;
 
+  /* Neutral, teal-leaning accent for an in-progress state (PENDING) —
+     deliberately distinct from --color-success so a still-processing
+     payment never reads as already approved. */
+  --color-processing: #3d7a8c;
+  --color-processing-bg: #e6eef1;
+
   --color-focus-ring: #a63f22;
 
   /* ---- Elevation ---- */

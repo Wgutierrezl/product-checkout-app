@@ -1,10 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '../../shared/ui/Button';
 import { ResultIcon } from '../../shared/ui/ResultIcon';
 import { Spinner } from '../../shared/ui/Spinner';
 import { useOverlayA11y } from '../../shared/ui/useOverlayA11y';
 import { formatCOP } from '../../domain/money/formatCOP';
+import { PROCESSING_STEPS, resolveProcessingStepIndex } from '../../domain/checkout/processingProgress';
 import type { DeliveryInput, TransactionStatus } from '../../api/types';
 import type { TransactionAmounts } from './transactionSlice';
 import styles from './ResultScreen.module.css';
@@ -17,9 +18,37 @@ export interface ResultScreenProps {
   delivery: DeliveryInput | null;
   /** True once the 60s poll budget has been spent without reaching a final status. */
   pollExhausted: boolean;
+  /** When polling started; drives the cosmetic 3-step progress list. `null` before it's known. */
+  pollStartedAt: number | null;
   onCheckAgain: () => void;
   onTryAgain: () => void;
   onBackToStore: () => void;
+}
+
+const PROCESSING_TICK_MS = 1_000;
+
+/** The Nth breakdown row shown on both the PENDING and final states, sourced from either `TransactionAmounts`. */
+function AmountsBreakdown({ amounts }: { amounts: TransactionAmounts }) {
+  return (
+    <div className={styles.breakdown}>
+      <div className={styles.breakdownRow}>
+        <span>Product</span>
+        <span>{formatCOP(amounts.productAmount)}</span>
+      </div>
+      <div className={styles.breakdownRow}>
+        <span>Base fee</span>
+        <span>{formatCOP(amounts.baseFee)}</span>
+      </div>
+      <div className={styles.breakdownRow}>
+        <span>Delivery fee</span>
+        <span>{formatCOP(amounts.deliveryFee)}</span>
+      </div>
+      <div className={`${styles.breakdownRow} ${styles.total}`}>
+        <span>Total</span>
+        <span>{formatCOP(amounts.total)}</span>
+      </div>
+    </div>
+  );
 }
 
 const FAILURE_MESSAGES: Record<'DECLINED' | 'VOIDED' | 'ERROR', string> = {
@@ -51,6 +80,7 @@ export function ResultScreen({
   amounts,
   delivery,
   pollExhausted,
+  pollStartedAt,
   onCheckAgain,
   onTryAgain,
   onBackToStore,
@@ -60,6 +90,7 @@ export function ResultScreen({
   const isApproved = status === 'APPROVED';
   const isFailure = status === 'DECLINED' || status === 'VOIDED' || status === 'ERROR';
   const isFinal = isApproved || isFailure;
+  const isPending = status === 'PENDING';
 
   useOverlayA11y({
     overlayRef,
@@ -74,9 +105,27 @@ export function ResultScreen({
     }
   }, [isFinal, status]);
 
+  // A 1s tick just forces a re-render so the elapsed-time-derived progress
+  // step below stays current; it carries no state of its own, and stops
+  // entirely once there's nothing left to advance towards (exhausted, or no
+  // pollStartedAt yet).
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    if (!isPending || pollExhausted || pollStartedAt === null) {
+      return;
+    }
+    const intervalId = window.setInterval(() => forceTick((tick) => tick + 1), PROCESSING_TICK_MS);
+    return () => window.clearInterval(intervalId);
+  }, [isPending, pollExhausted, pollStartedAt]);
+
+  const processingStepIndex =
+    pollStartedAt === null ? 0 : resolveProcessingStepIndex(Date.now() - pollStartedAt);
+
   return createPortal(
     <div
-      className={`${styles.overlay} ${isApproved ? styles.approved : isFailure ? styles.declined : ''}`}
+      className={`${styles.overlay} ${
+        isApproved ? styles.approved : isFailure ? styles.declined : isPending ? styles.processing : ''
+      }`}
       ref={overlayRef}
     >
       {status === null && (
@@ -88,22 +137,49 @@ export function ResultScreen({
         </>
       )}
 
-      {status === 'PENDING' &&
-        (pollExhausted ? (
-          <div className={styles.pending}>
-            {/* aria-live="polite": announces ONCE when this text first
-                appears (screen readers only announce on a real content
-                change, and this string is static across re-renders while
-                exhausted stays true, so background polling never spams
-                repeat announcements). */}
-            <p aria-live="polite">Still processing your payment. This is taking longer than usual.</p>
-            <Button type="button" onClick={onCheckAgain}>
-              Check again
-            </Button>
-          </div>
-        ) : (
-          <Spinner label="Checking payment status…" />
-        ))}
+      {isPending && (
+        <div className={styles.card}>
+          {pollExhausted ? (
+            <>
+              <h2 className={styles.heading}>Processing your payment</h2>
+              {/* aria-live="polite": announces ONCE when this text first
+                  appears (screen readers only announce on a real content
+                  change, and this string is static across re-renders while
+                  exhausted stays true, so background polling never spams
+                  repeat announcements). */}
+              <p className={styles.message} aria-live="polite">
+                Still processing your payment. This is taking longer than usual.
+              </p>
+              <Button type="button" onClick={onCheckAgain}>
+                Check again
+              </Button>
+            </>
+          ) : (
+            <>
+              {/* Purely decorative pulse — the accessible "in progress"
+                  announcement is the role=status Spinner right below it. */}
+              <span className={styles.processingRing} aria-hidden="true" />
+              <h2 className={styles.heading}>Processing your payment</h2>
+              <p className={styles.message}>Hang tight — this only takes a few seconds.</p>
+              <Spinner label="Checking payment status…" />
+              <ol className={styles.steps} aria-label="Payment progress">
+                {PROCESSING_STEPS.map((step, index) => (
+                  <li
+                    key={step}
+                    className={index <= processingStepIndex ? styles.stepDone : styles.step}
+                    aria-current={index === processingStepIndex ? 'step' : undefined}
+                  >
+                    {step}
+                  </li>
+                ))}
+              </ol>
+            </>
+          )}
+
+          {reference && <p className={styles.reference}>Reference: {reference}</p>}
+          {amounts && <AmountsBreakdown amounts={amounts} />}
+        </div>
+      )}
 
       {isFinal && (
         <div className={styles.card}>
@@ -116,26 +192,7 @@ export function ResultScreen({
           </p>
           {reference && <p className={styles.reference}>Reference: {reference}</p>}
 
-          {amounts && (
-            <div className={styles.breakdown}>
-              <div className={styles.breakdownRow}>
-                <span>Product</span>
-                <span>{formatCOP(amounts.productAmount)}</span>
-              </div>
-              <div className={styles.breakdownRow}>
-                <span>Base fee</span>
-                <span>{formatCOP(amounts.baseFee)}</span>
-              </div>
-              <div className={styles.breakdownRow}>
-                <span>Delivery fee</span>
-                <span>{formatCOP(amounts.deliveryFee)}</span>
-              </div>
-              <div className={`${styles.breakdownRow} ${styles.total}`}>
-                <span>Total</span>
-                <span>{formatCOP(amounts.total)}</span>
-              </div>
-            </div>
-          )}
+          {amounts && <AmountsBreakdown amounts={amounts} />}
 
           {isApproved && delivery && (
             <p className={styles.address}>

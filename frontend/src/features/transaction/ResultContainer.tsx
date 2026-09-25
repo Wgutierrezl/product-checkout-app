@@ -26,6 +26,7 @@ export function ResultContainer() {
   const status = useAppSelector((state) => state.transaction.status);
   const reference = useAppSelector((state) => state.transaction.reference);
   const amounts = useAppSelector((state) => state.transaction.amounts);
+  const pollStartedAt = useAppSelector((state) => state.transaction.pollStartedAt);
   const delivery = useAppSelector((state) => state.checkout.delivery);
 
   const [pollExhausted, setPollExhausted] = useState(false);
@@ -127,6 +128,7 @@ export function ResultContainer() {
       amounts={amounts}
       delivery={delivery}
       pollExhausted={pollExhausted}
+      pollStartedAt={pollStartedAt}
       onCheckAgain={handleCheckAgain}
       onTryAgain={handleTryAgain}
       onBackToStore={handleBackToStore}
