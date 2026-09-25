@@ -117,6 +117,15 @@ describe('ProductCard', () => {
     expect(image).not.toHaveAttribute('fetchpriority');
   });
 
+  it('groups the price/stock row, quantity stepper, and pay button into one pinned footer region', () => {
+    render(<ProductCard product={PRODUCT} onBuy={jest.fn()} />);
+
+    const footer = screen.getByTestId('product-card-footer');
+    expect(footer).toContainElement(screen.getByText(/3 in stock/i));
+    expect(footer).toContainElement(screen.getByLabelText('Quantity'));
+    expect(footer).toContainElement(screen.getByRole('button', { name: /pay with credit card/i }));
+  });
+
   it('calls onBuy with the product id and the currently selected quantity', async () => {
     const user = userEvent.setup();
     const onBuy = jest.fn();

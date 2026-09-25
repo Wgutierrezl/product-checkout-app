@@ -42,6 +42,30 @@
   outline-offset: 1px;
 }
 
+.input:disabled {
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}
+
+/* Resets the browser's default fieldset chrome (border/margin/padding) and
+   takes it out of the box model entirely (`display: contents`) so wrapping
+   the form's 3 sections in a <fieldset disabled={isSubmitting}> — for its
+   native "disable every descendant control at once" behavior — doesn't
+   change the form's layout at all. */
+.fieldset {
+  display: contents;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.statusLine {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
 /*
  * CVC masking via CSS rather than type="password": password managers may
  * offer to save/autofill a password-type field, which a CVC must never be.
@@ -62,6 +86,21 @@
 
 .cardNumberRow .input {
   flex: 1;
+}
+
+.phoneRow {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.phoneCountry {
+  flex: 0 0 auto;
+  width: 7.5rem;
+}
+
+.phoneRow .input {
+  flex: 1;
+  min-width: 0;
 }
 
 .brandMessage {

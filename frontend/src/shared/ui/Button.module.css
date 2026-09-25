@@ -26,6 +26,49 @@
   opacity: 0.55;
 }
 
+/* A loading button is usually ALSO `disabled` (to block a double-submit),
+   but it must stay full-colour instead of the washed-out disabled look —
+   the spinner + label already communicate its state. */
+.button:disabled.loading {
+  cursor: wait;
+  opacity: 1;
+}
+
+/* Stacks the idle-label and loading-label spans in the same grid cell (both
+   get `grid-area: 1 / 1` via .slot) so the button's rendered width is
+   whichever of the two is wider, from the very first render — switching
+   `loading` on/off never resizes the button. */
+.stack {
+  display: inline-grid;
+}
+
+.slot {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+}
+
+.slotHidden {
+  visibility: hidden;
+}
+
+.spinnerRing {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: currentColor;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .primary {
   background: var(--color-primary);
   color: var(--color-primary-contrast);
@@ -55,5 +98,9 @@
 
   .primary:hover:not(:disabled) {
     transform: none;
+  }
+
+  .spinnerRing {
+    animation: none;
   }
 }

@@ -6,7 +6,7 @@ import { ResultContainer } from '../features/transaction/ResultContainer';
 import { useAppSelector } from './hooks';
 import styles from './App.module.css';
 
-const STORE_NAME = 'Meridian Goods';
+const STORE_NAME = 'Lumila';
 
 export function App() {
   useResumeInFlightPayment();

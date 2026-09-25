@@ -43,7 +43,7 @@ describe('App', () => {
 
     renderApp();
 
-    expect(screen.getByRole('banner')).toHaveTextContent('Meridian Goods');
+    expect(screen.getByRole('banner')).toHaveTextContent('Lumila');
   });
 
   it('renders a footer landmark with the store name and a security note', () => {
@@ -52,7 +52,7 @@ describe('App', () => {
     renderApp();
 
     const footer = screen.getByRole('contentinfo');
-    expect(footer).toHaveTextContent('Meridian Goods');
+    expect(footer).toHaveTextContent('Lumila');
     expect(footer).toHaveTextContent(/never store your card details/i);
   });
 

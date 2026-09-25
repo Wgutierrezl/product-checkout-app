@@ -45,38 +45,42 @@ export function ProductCard({ product, onBuy, priority = false }: ProductCardPro
       <h3 className={styles.name}>{product.name}</h3>
       <p className={styles.description}>{product.description}</p>
 
-      <div className={styles.meta}>
-        <span className={styles.price}>{formatCOP(product.price)}</span>
-        <span className={inStock ? styles.badgeInStock : styles.badgeOutOfStock}>
-          {inStock ? `${product.stock} in stock` : 'Out of stock'}
-        </span>
-      </div>
+      {/* Pinned to the bottom of the card (margin-top: auto) so every card in a
+          grid row lines up its price/stock, stepper, and pay action at the
+          same baseline regardless of how many lines the name/description
+          above happen to wrap to. */}
+      <div className={styles.footer} data-testid="product-card-footer">
+        <div className={styles.meta}>
+          <span className={styles.price}>{formatCOP(product.price)}</span>
+          <span className={inStock ? styles.badgeInStock : styles.badgeOutOfStock}>
+            {inStock ? `${product.stock} in stock` : 'Out of stock'}
+          </span>
+        </div>
 
-      <div className={styles.stepper}>
-        <button
-          type="button"
-          className={styles.stepperButton}
-          aria-label="Decrease quantity"
-          onClick={decrease}
-          disabled={!inStock || quantity <= 1}
-        >
-          −
-        </button>
-        <output className={styles.quantityValue} aria-label="Quantity" aria-live="polite">
-          {quantity}
-        </output>
-        <button
-          type="button"
-          className={styles.stepperButton}
-          aria-label="Increase quantity"
-          onClick={increase}
-          disabled={!inStock || quantity >= max}
-        >
-          +
-        </button>
-      </div>
+        <div className={styles.stepper}>
+          <button
+            type="button"
+            className={styles.stepperButton}
+            aria-label="Decrease quantity"
+            onClick={decrease}
+            disabled={!inStock || quantity <= 1}
+          >
+            −
+          </button>
+          <output className={styles.quantityValue} aria-label="Quantity" aria-live="polite">
+            {quantity}
+          </output>
+          <button
+            type="button"
+            className={styles.stepperButton}
+            aria-label="Increase quantity"
+            onClick={increase}
+            disabled={!inStock || quantity >= max}
+          >
+            +
+          </button>
+        </div>
 
-      <div className={styles.actions}>
         <Button
           className={styles.payButton}
           disabled={!inStock}

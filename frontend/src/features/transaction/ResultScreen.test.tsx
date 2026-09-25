@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ResultScreen } from './ResultScreen';
 import { formatCOP } from '../../domain/money/formatCOP';
@@ -25,6 +25,7 @@ function renderResult(overrides: Partial<React.ComponentProps<typeof ResultScree
       amounts={null}
       delivery={DELIVERY}
       pollExhausted={false}
+      pollStartedAt={null}
       onCheckAgain={onCheckAgain}
       onTryAgain={onTryAgain}
       onBackToStore={onBackToStore}
@@ -36,6 +37,14 @@ function renderResult(overrides: Partial<React.ComponentProps<typeof ResultScree
 
 describe('ResultScreen', () => {
   describe('PENDING', () => {
+    beforeEach(() => {
+      jest.useFakeTimers({ now: new Date(2026, 0, 1) });
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
     it('shows a loading spinner announced via role=status while polling', () => {
       renderResult({ status: 'PENDING', pollExhausted: false });
 
@@ -57,6 +66,49 @@ describe('ResultScreen', () => {
 
       const message = screen.getByText(/still processing/i);
       expect(message).toHaveAttribute('aria-live', 'polite');
+    });
+
+    it('shows a "Processing your payment" title and a 3-step progress list, starting at step 1', () => {
+      renderResult({ status: 'PENDING', pollExhausted: false, pollStartedAt: Date.now() });
+
+      expect(screen.getByRole('heading', { name: /processing your payment/i })).toBeInTheDocument();
+      const steps = screen.getAllByRole('listitem');
+      expect(steps.map((step) => step.textContent)).toEqual([
+        'Payment sent',
+        'Confirming with your bank',
+        'Updating your order',
+      ]);
+      expect(steps[0]).toHaveAttribute('aria-current', 'step');
+    });
+
+    it('advances the current progress step as time passes', () => {
+      renderResult({ status: 'PENDING', pollExhausted: false, pollStartedAt: Date.now() });
+
+      act(() => {
+        jest.advanceTimersByTime(21_000);
+      });
+
+      const steps = screen.getAllByRole('listitem');
+      expect(steps[1]).toHaveAttribute('aria-current', 'step');
+    });
+
+    it('shows the reference and amounts breakdown while still PENDING, if already available', () => {
+      renderResult({
+        status: 'PENDING',
+        pollExhausted: false,
+        pollStartedAt: Date.now(),
+        reference: 'REF-1',
+        amounts: AMOUNTS,
+      });
+
+      expect(screen.getByText(/REF-1/)).toBeInTheDocument();
+      expect(screen.getByText(formatCOP(AMOUNTS.total).replace(/\s/g, ' '))).toBeInTheDocument();
+    });
+
+    it('does not show the progress list once the poll budget is exhausted', () => {
+      renderResult({ status: 'PENDING', pollExhausted: true, pollStartedAt: Date.now() });
+
+      expect(screen.queryAllByRole('listitem')).toHaveLength(0);
     });
   });
 

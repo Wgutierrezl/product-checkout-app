@@ -2,18 +2,20 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Field } from '../../shared/ui/Field';
 import { Button } from '../../shared/ui/Button';
 import { CardBrandIcon } from '../../shared/ui/CardBrandIcon';
+import { CountrySelect } from '../../shared/ui/CountrySelect';
 import { isValidLuhn } from '../../domain/card/luhn';
 import { detectCardBrand } from '../../domain/card/brand';
 import { isExpiryValid, parseExpiry } from '../../domain/card/expiry';
 import { isValidCvc } from '../../domain/card/cvc';
-import { digitsOnly, formatCardNumberInput } from '../../domain/card/format';
+import { digitsOnly, formatCardNumberInput, formatExpiryInput } from '../../domain/card/format';
+import { DEFAULT_COUNTRY_ISO2, findCountryByDialCode, findCountryByIso2 } from '../../domain/phone/countries';
+import { DEFAULT_DIAL_CODE, isValidE164Phone, parsePhone, toE164 } from '../../domain/phone/phone';
 import {
   requireNonEmpty,
   validateAddress,
   validateCity,
   validateEmail,
   validateFullName,
-  validatePhone,
   validateRegion,
 } from '../../domain/checkout/customerDeliveryValidation';
 import type { CustomerInput, DeliveryInput } from '../../api/types';
@@ -44,7 +46,10 @@ interface FormValues {
   installments: number;
   fullName: string;
   email: string;
-  phone: string;
+  /** ISO2 of the selected country (drives the E.164 dial code prefix). */
+  phoneCountry: string;
+  /** Digits-only national number, WITHOUT the country's dial code. */
+  phoneNational: string;
   address: string;
   city: string;
   region: string;
@@ -83,17 +88,43 @@ function validateCvc(value: string): string | null {
   return isValidCvc(value) ? null : 'Enter a valid 3-digit CVC';
 }
 
-const VALIDATORS: Record<FieldName, (value: string) => string | null> = {
-  cardNumber: validateCardNumber,
-  cardHolder: (value) => requireNonEmpty(value, 'Cardholder name is required'),
-  expiry: validateExpiry,
-  cvc: validateCvc,
-  fullName: validateFullName,
-  email: validateEmail,
-  phone: validatePhone,
-  address: validateAddress,
-  city: validateCity,
-  region: validateRegion,
+/** The dial code (no leading "+") for a country selector's ISO2 value, falling back to the default country. */
+function dialCodeForCountry(iso2: string): string {
+  return findCountryByIso2(iso2)?.dialCode ?? DEFAULT_DIAL_CODE;
+}
+
+/**
+ * Validates the NATIONAL number against the E.164 value it would produce
+ * once combined with the selected country's dial code — the field the
+ * buyer edits only ever holds digits, so its own length bounds depend on
+ * which country is selected.
+ */
+function validatePhoneField(nationalNumber: string, countryIso2: string): string | null {
+  const required = requireNonEmpty(nationalNumber, 'Phone is required');
+  if (required) {
+    return required;
+  }
+  return isValidE164Phone(toE164(dialCodeForCountry(countryIso2), nationalNumber))
+    ? null
+    : 'Enter a valid phone number';
+}
+
+/**
+ * Every validator takes the FULL `FormValues` (rather than just its own
+ * field's value) so `phone` can read both `phoneNational` and
+ * `phoneCountry` without a special case in the submit/blur call sites.
+ */
+const VALIDATORS: Record<FieldName, (values: FormValues) => string | null> = {
+  cardNumber: (values) => validateCardNumber(values.cardNumber),
+  cardHolder: (values) => requireNonEmpty(values.cardHolder, 'Cardholder name is required'),
+  expiry: (values) => validateExpiry(values.expiry),
+  cvc: (values) => validateCvc(values.cvc),
+  fullName: (values) => validateFullName(values.fullName),
+  email: (values) => validateEmail(values.email),
+  phone: (values) => validatePhoneField(values.phoneNational, values.phoneCountry),
+  address: (values) => validateAddress(values.address),
+  city: (values) => validateCity(values.city),
+  region: (values) => validateRegion(values.region),
 };
 
 export interface PaymentFormSubmitValues {
@@ -133,19 +164,33 @@ export function PaymentForm({
   onCancel,
   onSubmit,
 }: PaymentFormProps) {
-  const [values, setValues] = useState<FormValues>({
-    cardNumber: '',
-    cardHolder: '',
-    expiry: '',
-    cvc: '',
-    installments: initialInstallments,
-    fullName: initialCustomer?.fullName ?? '',
-    email: initialCustomer?.email ?? '',
-    phone: initialCustomer?.phone ?? '',
-    address: initialDelivery?.address ?? '',
-    city: initialDelivery?.city ?? '',
-    region: initialDelivery?.region ?? '',
-    postalCode: initialDelivery?.postalCode ?? '',
+  const [values, setValues] = useState<FormValues>(() => {
+    // Gracefully migrates an existing plain/bare phone (persisted before
+    // this country selector existed) by treating it as a Colombian
+    // national number — see `parsePhone`.
+    const initialPhone = parsePhone(initialCustomer?.phone ?? '');
+    return {
+      cardNumber: '',
+      cardHolder: '',
+      expiry: '',
+      cvc: '',
+      installments: initialInstallments,
+      fullName: initialCustomer?.fullName ?? '',
+      email: initialCustomer?.email ?? '',
+      // NOTE: dial codes shared by several countries (e.g. "1" for the US,
+      // Canada, and a few Caribbean nations — see `findCountryByDialCode`)
+      // always resolve back to the same one; a persisted Canadian number,
+      // for example, would reopen showing "United States". The phone VALUE
+      // sent to the backend is unaffected — only which flag/name the
+      // selector shows can be wrong. Full disambiguation would need
+      // NANP-area-code-level data, out of scope for this hand-written list.
+      phoneCountry: findCountryByDialCode(initialPhone.dialCode)?.iso2 ?? DEFAULT_COUNTRY_ISO2,
+      phoneNational: initialPhone.nationalNumber,
+      address: initialDelivery?.address ?? '',
+      city: initialDelivery?.city ?? '',
+      region: initialDelivery?.region ?? '',
+      postalCode: initialDelivery?.postalCode ?? '',
+    };
   });
   const [errors, setErrors] = useState<Partial<Record<FieldName, string>>>({});
   const fieldRefs = useRef<Partial<Record<FieldName, HTMLInputElement>>>({});
@@ -168,9 +213,26 @@ export function PaymentForm({
     setValues((current) => ({ ...current, [field]: value }));
   }
 
+  /**
+   * The phone field's validity depends on BOTH `phoneNational` and
+   * `phoneCountry` (a national number can be too short for one country and
+   * fine for another) — if the phone was already touched (has a visible
+   * error from a previous blur), switching countries must re-check it
+   * immediately rather than leaving a now-stale error/pass on screen until
+   * the national field is blurred again.
+   */
+  function handlePhoneCountryChange(iso2: string) {
+    setValues((current) => ({ ...current, phoneCountry: iso2 }));
+    setErrors((current) =>
+      current.phone === undefined
+        ? current
+        : { ...current, phone: validatePhoneField(values.phoneNational, iso2) ?? undefined },
+    );
+  }
+
   function handleBlur(field: FieldName) {
     return () => {
-      setErrors((current) => ({ ...current, [field]: VALIDATORS[field](values[field]) ?? undefined }));
+      setErrors((current) => ({ ...current, [field]: VALIDATORS[field](values) ?? undefined }));
     };
   }
 
@@ -182,7 +244,7 @@ export function PaymentForm({
 
     const nextErrors: Partial<Record<FieldName, string>> = {};
     for (const field of FIELD_NAMES) {
-      const message = VALIDATORS[field](values[field]);
+      const message = VALIDATORS[field](values);
       if (message) {
         nextErrors[field] = message;
       }
@@ -217,7 +279,7 @@ export function PaymentForm({
       customer: {
         fullName: values.fullName.trim(),
         email: values.email.trim(),
-        phone: values.phone.trim(),
+        phone: toE164(dialCodeForCountry(values.phoneCountry), values.phoneNational),
       },
       delivery,
     });
@@ -231,6 +293,12 @@ export function PaymentForm({
         </p>
       )}
 
+      {/* `disabled` on a <fieldset> propagates to every descendant form
+          control (inputs, the installments <select>, and CountrySelect's
+          own combobox input), giving a native "fieldset disabled" visual +
+          functional lock on the whole form while a request is in flight —
+          without having to thread `disabled` through every single field. */}
+      <fieldset className={styles.fieldset} disabled={isSubmitting}>
       <section>
         <h3 className={styles.sectionTitle}>Card</h3>
         <div className={styles.grid}>
@@ -283,9 +351,10 @@ export function PaymentForm({
                   }}
                   className={styles.input}
                   placeholder="MM/YY"
+                  inputMode="numeric"
                   autoComplete="cc-exp"
                   value={values.expiry}
-                  onChange={(event) => setField('expiry', event.target.value)}
+                  onChange={(event) => setField('expiry', formatExpiryInput(event.target.value))}
                   onBlur={handleBlur('expiry')}
                 />
               )}
@@ -368,18 +437,28 @@ export function PaymentForm({
 
           <Field id="phone" label="Phone" error={errors.phone}>
             {(aria) => (
-              <input
-                {...aria}
-                ref={(el) => {
-                  fieldRefs.current.phone = el ?? undefined;
-                }}
-                className={styles.input}
-                type="tel"
-                autoComplete="tel"
-                value={values.phone}
-                onChange={(event) => setField('phone', event.target.value)}
-                onBlur={handleBlur('phone')}
-              />
+              <div className={styles.phoneRow}>
+                <div className={styles.phoneCountry}>
+                  <CountrySelect
+                    id="phoneCountry"
+                    value={values.phoneCountry}
+                    onChange={handlePhoneCountryChange}
+                  />
+                </div>
+                <input
+                  {...aria}
+                  ref={(el) => {
+                    fieldRefs.current.phone = el ?? undefined;
+                  }}
+                  className={styles.input}
+                  type="tel"
+                  inputMode="numeric"
+                  autoComplete="tel-national"
+                  value={values.phoneNational}
+                  onChange={(event) => setField('phoneNational', digitsOnly(event.target.value))}
+                  onBlur={handleBlur('phone')}
+                />
+              </div>
             )}
           </Field>
         </div>
@@ -449,15 +528,21 @@ export function PaymentForm({
           </Field>
         </div>
       </section>
+      </fieldset>
 
       <div className={styles.actions}>
         <Button type="button" variant="secondary" onClick={onCancel} disabled={isSubmitting}>
           Cancel
         </Button>
-        <Button type="submit" disabled={isSubmitting}>
-          {isSubmitting ? 'Processing…' : 'Continue'}
+        <Button type="submit" disabled={isSubmitting} loading={isSubmitting} loadingLabel="Securing your card…">
+          Continue
         </Button>
       </div>
+      {isSubmitting && (
+        <p className={styles.statusLine} role="status">
+          Securing your card — please don&rsquo;t close this window.
+        </p>
+      )}
     </form>
   );
 }

@@ -42,7 +42,9 @@ async function fillValidForm(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText(/cvc/i), '123');
   await user.type(screen.getByLabelText(/full name/i), 'Jane Doe');
   await user.type(screen.getByLabelText(/email/i), 'jane@example.com');
-  await user.type(screen.getByLabelText(/phone/i), '+573001234567');
+  // Default country is Colombia (+57), so typing only the national number
+  // reconstructs the same '+573001234567' E.164 value used elsewhere.
+  await user.type(screen.getByLabelText(/phone/i), '3001234567');
   await user.type(screen.getByLabelText(/^address/i), 'Cra 1 # 2-3');
   await user.type(screen.getByLabelText(/city/i), 'Bogota');
   await user.type(screen.getByLabelText(/region/i), 'Cundinamarca');
@@ -168,7 +170,7 @@ describe('PaymentModalContainer', () => {
     await fillValidForm(user);
     await user.click(screen.getByRole('button', { name: /continue/i }));
 
-    expect(await screen.findByRole('button', { name: /processing/i })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: /securing your card/i })).toBeDisabled();
   });
 
   describe('closing during an in-flight tokenize request (BLOCKER)', () => {

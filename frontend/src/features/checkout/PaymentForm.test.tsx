@@ -32,13 +32,64 @@ async function fillValidForm(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText(/cvc/i), '123');
   await user.type(screen.getByLabelText(/full name/i), 'Jane Doe');
   await user.type(screen.getByLabelText(/email/i), 'jane@example.com');
-  await user.type(screen.getByLabelText(/phone/i), '+573001234567');
+  // Default country is Colombia (+57), so typing only the national number
+  // reconstructs the same '+573001234567' E.164 value used elsewhere.
+  await user.type(screen.getByLabelText(/phone/i), '3001234567');
   await user.type(screen.getByLabelText(/^address/i), 'Cra 1 # 2-3');
   await user.type(screen.getByLabelText(/city/i), 'Bogota');
   await user.type(screen.getByLabelText(/region/i), 'Cundinamarca');
 }
 
 describe('PaymentForm', () => {
+  describe('expiry auto-format', () => {
+    it('inserts a slash automatically as the buyer types digits only', async () => {
+      const user = userEvent.setup();
+      renderForm();
+
+      await user.type(screen.getByLabelText(/expiry/i), '1229');
+
+      expect(screen.getByLabelText(/expiry/i)).toHaveValue('12/29');
+    });
+
+    it('auto-pads a leading month digit greater than 1', async () => {
+      const user = userEvent.setup();
+      renderForm();
+
+      await user.type(screen.getByLabelText(/expiry/i), '4');
+
+      expect(screen.getByLabelText(/expiry/i)).toHaveValue('04/');
+    });
+
+    it('normalizes a pasted value with a 4-digit year and stray spaces', async () => {
+      renderForm();
+      const input = screen.getByLabelText(/expiry/i);
+
+      fireEvent.change(input, { target: { value: '12 / 2029' } });
+
+      expect(input).toHaveValue('12/29');
+    });
+
+    it('drops the auto-inserted slash naturally when backspacing the 3rd digit', async () => {
+      const user = userEvent.setup();
+      renderForm();
+      const input = screen.getByLabelText(/expiry/i);
+
+      await user.type(input, '123');
+      expect(input).toHaveValue('12/3');
+
+      await user.type(input, '{backspace}');
+      expect(input).toHaveValue('12');
+    });
+
+    it('exposes numeric input mode and the cc-exp autocomplete hint', () => {
+      renderForm();
+
+      const input = screen.getByLabelText(/expiry/i);
+      expect(input).toHaveAttribute('inputMode', 'numeric');
+      expect(input).toHaveAttribute('autoComplete', 'cc-exp');
+    });
+  });
+
   describe('card number formatting, brand detection, and masking', () => {
     it('formats the card number into 4-digit groups as the buyer types', async () => {
       const user = userEvent.setup();
@@ -181,6 +232,81 @@ describe('PaymentForm', () => {
 
       expect(screen.getByText(/enter a valid email address/i)).toBeInTheDocument();
     });
+
+    it('shows an error when the national phone number is too short', async () => {
+      const user = userEvent.setup();
+      renderForm();
+
+      await user.type(screen.getByLabelText(/phone/i), '123');
+      await user.tab();
+
+      expect(screen.getByText(/enter a valid phone number/i)).toBeInTheDocument();
+    });
+  });
+
+  describe('phone with country code', () => {
+    it('defaults the country to Colombia (+57)', () => {
+      renderForm();
+
+      expect(screen.getByRole('combobox', { name: /country code/i })).toHaveValue('🇨🇴 +57');
+    });
+
+    it('restricts the national number field to digits only', async () => {
+      const user = userEvent.setup();
+      renderForm();
+
+      await user.type(screen.getByLabelText(/phone/i), 'abc300-123-4567');
+
+      expect(screen.getByLabelText(/phone/i)).toHaveValue('3001234567');
+    });
+
+    it('submits the phone as E.164 using the selected country dial code', async () => {
+      const user = userEvent.setup();
+      const { onSubmit } = renderForm();
+
+      await fillValidForm(user);
+      const combobox = screen.getByRole('combobox', { name: /country code/i });
+      await user.click(combobox);
+      await user.type(combobox, 'Spain');
+      await user.keyboard('{ArrowDown}{Enter}');
+
+      await user.click(screen.getByRole('button', { name: /continue/i }));
+
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          customer: expect.objectContaining({ phone: '+343001234567' }),
+        }),
+      );
+    });
+
+    it('exposes numeric input mode and the tel-national autocomplete hint on the national number field', () => {
+      renderForm();
+
+      const input = screen.getByLabelText(/phone/i);
+      expect(input).toHaveAttribute('inputMode', 'numeric');
+      expect(input).toHaveAttribute('autoComplete', 'tel-national');
+    });
+
+    it('re-validates an already-shown phone error immediately when the country changes', async () => {
+      const user = userEvent.setup();
+      renderForm();
+
+      // 5 national digits + Colombia's 2-digit dial code = 7 total, below
+      // the 8-digit minimum -> invalid, and blurring surfaces that error.
+      await user.type(screen.getByLabelText(/phone/i), '12345');
+      await user.tab();
+      expect(screen.getByText(/enter a valid phone number/i)).toBeInTheDocument();
+
+      // Switching to Ecuador (dial code 593, 3 digits) makes the SAME 5
+      // national digits add up to 8 total -> now valid. The error must
+      // clear right away, not stay stuck until the field is blurred again.
+      const combobox = screen.getByRole('combobox', { name: /country code/i });
+      await user.click(combobox);
+      await user.type(combobox, 'Ecuador');
+      await user.keyboard('{ArrowDown}{Enter}');
+
+      expect(screen.queryByText(/enter a valid phone number/i)).not.toBeInTheDocument();
+    });
   });
 
   describe('submission', () => {
@@ -227,10 +353,10 @@ describe('PaymentForm', () => {
       );
     });
 
-    it('disables Continue and shows a processing label while isSubmitting is true', () => {
+    it('disables Continue and shows a loading label while isSubmitting is true', () => {
       renderForm({ isSubmitting: true });
 
-      const button = screen.getByRole('button', { name: /processing/i });
+      const button = screen.getByRole('button', { name: /securing your card/i });
       expect(button).toBeDisabled();
     });
 
@@ -244,7 +370,7 @@ describe('PaymentForm', () => {
       const user = userEvent.setup();
       const { onSubmit } = renderForm({ isSubmitting: true });
 
-      await user.click(screen.getByRole('button', { name: /processing/i }));
+      await user.click(screen.getByRole('button', { name: /securing your card/i }));
 
       expect(onSubmit).not.toHaveBeenCalled();
     });
@@ -302,7 +428,10 @@ describe('PaymentForm', () => {
 
       expect(screen.getByLabelText(/full name/i)).toHaveValue(CUSTOMER.fullName);
       expect(screen.getByLabelText(/email/i)).toHaveValue(CUSTOMER.email);
-      expect(screen.getByLabelText(/phone/i)).toHaveValue(CUSTOMER.phone);
+      // The phone is split into a country selector (parsed from the
+      // persisted E.164 value) and a national-number field.
+      expect(screen.getByRole('combobox', { name: /country code/i })).toHaveValue('🇨🇴 +57');
+      expect(screen.getByLabelText(/phone/i)).toHaveValue('3001234567');
       expect(screen.getByLabelText(/^address/i)).toHaveValue(DELIVERY.address);
       expect(screen.getByLabelText(/city/i)).toHaveValue(DELIVERY.city);
       expect(screen.getByLabelText(/region/i)).toHaveValue(DELIVERY.region);
@@ -340,10 +469,39 @@ describe('PaymentForm', () => {
       // The Continue button is disabled (browsers block clicks on disabled
       // buttons), so submit the <form> directly to exercise the internal
       // isSubmitting guard as defense-in-depth against any other submit path.
-      const form = screen.getByRole('button', { name: /processing/i }).closest('form');
+      const form = screen.getByRole('button', { name: /securing your card/i }).closest('form');
       fireEvent.submit(form as HTMLFormElement);
 
       expect(onSubmit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('loading state (tokenizing)', () => {
+    it('shows an in-button "Securing your card…" label, marking the Continue button aria-busy', () => {
+      renderForm({ isSubmitting: true });
+
+      const button = screen.getByRole('button', { name: /securing your card/i });
+      expect(button).toHaveAttribute('aria-busy', 'true');
+    });
+
+    it('shows an inline status line announcing progress via role=status', () => {
+      renderForm({ isSubmitting: true });
+
+      expect(screen.getByRole('status')).toHaveTextContent(/securing your card/i);
+    });
+
+    it('visually disables the card/customer/delivery fields (fieldset disabled) while submitting', () => {
+      renderForm({ isSubmitting: true });
+
+      expect(screen.getByLabelText(/card number/i)).toBeDisabled();
+      expect(screen.getByLabelText(/full name/i)).toBeDisabled();
+      expect(screen.getByLabelText(/^address/i)).toBeDisabled();
+    });
+
+    it('leaves the fields enabled when not submitting', () => {
+      renderForm({ isSubmitting: false });
+
+      expect(screen.getByLabelText(/card number/i)).toBeEnabled();
     });
   });
 });
