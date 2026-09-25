@@ -176,6 +176,34 @@ describe('CountrySelect', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it('keeps the open listbox out of the tab order (options are reached with arrow keys)', async () => {
+    const user = userEvent.setup();
+    renderSelect();
+
+    await user.click(screen.getByRole('combobox'));
+
+    // Firefox makes a scrollable element keyboard-focusable unless it has a
+    // negative tabindex, and Tab then lands on this listbox just as the Tab
+    // handler unmounts it, dropping focus to <body>.
+    expect(screen.getByRole('listbox')).toHaveAttribute('tabindex', '-1');
+  });
+
+  it('moves focus to the next field on Tab from the open combobox', async () => {
+    const user = userEvent.setup();
+    render(
+      <>
+        <CountrySelect id="phoneCountry" value="CO" onChange={jest.fn()} />
+        <input aria-label="Phone" />
+      </>,
+    );
+
+    await user.click(screen.getByRole('combobox'));
+    await user.tab();
+
+    expect(screen.getByRole('textbox', { name: 'Phone' })).toHaveFocus();
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
+
   it('does nothing on Enter when nothing matches the typed query', async () => {
     const user = userEvent.setup();
     const { onChange } = renderSelect();

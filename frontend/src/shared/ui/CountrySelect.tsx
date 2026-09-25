@@ -138,7 +138,11 @@ export function CountrySelect({ id, value, onChange, label = 'Country code' }: C
         }}
       />
       {open && (
-        <ul role="listbox" id={listboxId} aria-label={label} className={styles.listbox}>
+        // tabIndex={-1}: Firefox makes a scrollable element keyboard-focusable,
+        // so Tab from the input would land here just as the Tab handler
+        // unmounts the list, dropping focus to <body> (a keyboard trap).
+        // Options are reached with the arrow keys via aria-activedescendant.
+        <ul role="listbox" id={listboxId} aria-label={label} className={styles.listbox} tabIndex={-1}>
           {filtered.length === 0 && <li className={styles.empty}>No matching country</li>}
           {filtered.map((country, index) => (
             <li
