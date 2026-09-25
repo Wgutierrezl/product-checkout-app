@@ -18,6 +18,7 @@ Each package README is the source of truth for its own internals; this document 
 ## Table of contents
 
 - [Live links](#live-links)
+- [Screenshots](#screenshots)
 - [Architecture](#architecture)
 - [Checkout flow](#checkout-flow)
 - [Data model](#data-model)
@@ -47,7 +48,33 @@ Each package README is the source of truth for its own internals; this document 
 To import the API into Postman: *Import → Link* → paste the OpenAPI JSON URL.
 <!-- /LIVE_URLS -->
 
-<!-- TODO: link docs/screenshots/ once captured -->
+## Screenshots
+
+Captured from the live production app (store "Lumila").
+
+**Mobile (375px, the primary breakpoint):**
+
+<table>
+<tr>
+<td align="center" width="180"><img src="docs/screenshots/mobile-01-catalog.webp" width="180" alt="Product catalog on mobile"><br><sub>Catalog</sub></td>
+<td align="center" width="180"><img src="docs/screenshots/mobile-02-modal.webp" width="180" alt="Payment modal with the sandbox test card helper"><br><sub>Payment details (sandbox helper)</sub></td>
+<td align="center" width="180"><img src="docs/screenshots/mobile-03-summary.webp" width="180" alt="Order summary with both consent checkboxes checked"><br><sub>Order summary</sub></td>
+</tr>
+<tr>
+<td align="center" width="180"><img src="docs/screenshots/mobile-04-processing.webp" width="180" alt="Processing payment screen"><br><sub>Processing</sub></td>
+<td align="center" width="180"><img src="docs/screenshots/mobile-05-approved.webp" width="180" alt="Payment approved screen with auto-return countdown"><br><sub>Approved</sub></td>
+<td align="center" width="180"><img src="docs/screenshots/mobile-06-declined.webp" width="180" alt="Payment declined screen"><br><sub>Declined</sub></td>
+</tr>
+</table>
+
+**Desktop (1440px, 4-column catalog grid):**
+
+<table>
+<tr>
+<td align="center"><img src="docs/screenshots/desktop-01-catalog.webp" width="420" alt="Product catalog on desktop, 4 columns"><br><sub>Catalog</sub></td>
+<td align="center"><img src="docs/screenshots/desktop-05-approved.webp" width="420" alt="Payment approved screen on desktop"><br><sub>Approved</sub></td>
+</tr>
+</table>
 
 ## Architecture
 
