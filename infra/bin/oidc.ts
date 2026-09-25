@@ -3,7 +3,7 @@ import 'source-map-support/register';
 
 import { App } from 'aws-cdk-lib';
 
-import { GithubOidcStack } from '../lib/github-oidc-stack';
+import { DEFAULT_GITHUB_OIDC_REPO, GithubOidcStack } from '../lib/github-oidc-stack';
 
 /**
  * Separate CDK app entry point, deployed MANUALLY and ONCE by an operator
@@ -23,5 +23,5 @@ const app = new App();
 
 new GithubOidcStack(app, 'GithubOidcStack', {
   env,
-  githubOrgRepo: process.env.GITHUB_OIDC_REPO ?? 'Wgutierrezl/product-checkout-app',
+  githubOrgRepo: process.env.GITHUB_OIDC_REPO ?? DEFAULT_GITHUB_OIDC_REPO,
 });

@@ -17,8 +17,20 @@ const CDK_BOOTSTRAP_QUALIFIER = 'hnb659fds';
 /** Matches DataStack's Products table name (see data-stack.ts). */
 const PRODUCTS_TABLE_NAME = 'Products';
 
+/**
+ * This repository emits GitHub's immutable OIDC subject claim, which embeds the
+ * owner and repository ids: `repo:<owner>@<ownerId>/<repo>@<repoId>:ref:...`.
+ * Trusting the ids (not just the names) also means a deleted-and-recreated repo
+ * with the same name can never assume the deploy role. Check the current
+ * format with `gh api repos/<owner>/<repo>/actions/oidc/customization/sub`.
+ */
+export const DEFAULT_GITHUB_OIDC_REPO = 'Wgutierrezl@167873254/product-checkout-app@1384356068';
+
 export interface GithubOidcStackProps extends StackProps {
-  /** `<org>/<repo>`, e.g. `Wgutierrezl/product-checkout-app`. */
+  /**
+   * Repository part of the OIDC `sub` claim: `<org>/<repo>`, or the immutable
+   * form `<org>@<orgId>/<repo>@<repoId>` (see DEFAULT_GITHUB_OIDC_REPO).
+   */
   readonly githubOrgRepo: string;
   /** @default 'refs/heads/main' */
   readonly trustedBranch?: string;
