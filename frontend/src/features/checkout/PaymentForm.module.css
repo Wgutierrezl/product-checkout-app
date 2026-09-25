@@ -124,11 +124,16 @@
 
 /* Keeps Cancel/Continue reachable without scrolling through the whole
    form on small screens, where the sheet (Modal.module.css's .sheet) is
-   the scrolling ancestor these coordinates are relative to. */
+   the scrolling ancestor these coordinates are relative to. A sticky
+   offset is resolved against the scroll container's padding box, so
+   `bottom: 0` would stop flush with the bottom of .sheet's content box —
+   leaving a gap the size of .sheet's own bottom padding below the bar.
+   The negative bottom margin already bleeds this element past that
+   padding, so bottom must match it to land flush with .sheet's edge. */
 @media (max-width: 767.98px) {
   .actions {
     position: sticky;
-    bottom: 0;
+    bottom: calc(var(--space-5) * -1);
     background: var(--color-surface);
     margin: 0 calc(var(--space-5) * -1) calc(var(--space-5) * -1);
     padding: var(--space-4) var(--space-5);
