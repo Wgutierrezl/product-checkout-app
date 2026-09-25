@@ -31,7 +31,7 @@ describe('seedProducts', () => {
     });
 
     expect(ddbMock.commandCalls(CreateTableCommand)).toHaveLength(4);
-    expect(docMock.commandCalls(PutCommand)).toHaveLength(7);
+    expect(docMock.commandCalls(PutCommand)).toHaveLength(12);
     expect(docMock.commandCalls(PutCommand)[0].args[0].input.TableName).toBe(PRODUCTS_TABLE_NAME);
   });
 
@@ -41,6 +41,6 @@ describe('seedProducts', () => {
     });
 
     expect(ddbMock.commandCalls(CreateTableCommand)).toHaveLength(0);
-    expect(docMock.commandCalls(PutCommand)).toHaveLength(7);
+    expect(docMock.commandCalls(PutCommand)).toHaveLength(12);
   });
 });
