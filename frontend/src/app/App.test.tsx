@@ -1,7 +1,9 @@
 import { configureStore } from '@reduxjs/toolkit';
 import { Provider } from 'react-redux';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { App } from './App';
+import { authReducer, initialAuthState, type AuthState } from '../features/auth/authSlice';
 import { catalogReducer } from '../features/catalog/catalogSlice';
 import { checkoutReducer, initialCheckoutState, type CheckoutState } from '../features/checkout/checkoutSlice';
 import { initialTransactionState, transactionReducer, type TransactionState } from '../features/transaction/transactionSlice';
@@ -16,12 +18,17 @@ const mockedFetchPaymentAcceptance = backendClient.fetchPaymentAcceptance as jes
   typeof backendClient.fetchPaymentAcceptance
 >;
 
-function renderApp(checkoutOverrides: Partial<CheckoutState> = {}, transactionOverrides: Partial<TransactionState> = {}) {
+function renderApp(
+  checkoutOverrides: Partial<CheckoutState> = {},
+  transactionOverrides: Partial<TransactionState> = {},
+  authOverrides: Partial<AuthState> = {},
+) {
   const store = configureStore({
-    reducer: { catalog: catalogReducer, checkout: checkoutReducer, transaction: transactionReducer },
+    reducer: { catalog: catalogReducer, checkout: checkoutReducer, transaction: transactionReducer, auth: authReducer },
     preloadedState: {
       checkout: { ...initialCheckoutState, ...checkoutOverrides },
       transaction: { ...initialTransactionState, ...transactionOverrides },
+      auth: { ...initialAuthState, ...authOverrides },
     },
   });
   return render(
@@ -115,5 +122,56 @@ describe('App', () => {
     renderApp();
 
     expect(screen.queryByRole('heading', { name: /approved/i })).not.toBeInTheDocument();
+  });
+
+  describe('auth header menu', () => {
+    it('shows Log in / Register in the header when logged out', () => {
+      mockedFetchProducts.mockReturnValue(new Promise(() => {}));
+
+      renderApp();
+
+      expect(screen.getByRole('button', { name: /log in/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /register/i })).toBeInTheDocument();
+    });
+
+    it('shows the account menu trigger (no Log in / Register) when authenticated', () => {
+      mockedFetchProducts.mockReturnValue(new Promise(() => {}));
+
+      renderApp({}, {}, { status: 'authenticated', token: 't', userId: 'u1', email: 'jane@example.com', fullName: 'Jane Doe' });
+
+      expect(screen.getByRole('button', { name: /jane doe/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^log in$/i })).not.toBeInTheDocument();
+    });
+
+    it('opens the register modal when Register is clicked in the header', async () => {
+      mockedFetchProducts.mockReturnValue(new Promise(() => {}));
+      const user = userEvent.setup();
+      renderApp();
+
+      await user.click(screen.getByRole('button', { name: /register/i }));
+
+      expect(screen.getByRole('dialog', { name: /create account/i })).toBeInTheDocument();
+    });
+
+    it('opens the login modal when Log in is clicked in the header', async () => {
+      mockedFetchProducts.mockReturnValue(new Promise(() => {}));
+      const user = userEvent.setup();
+      renderApp();
+
+      await user.click(screen.getByRole('button', { name: /log in/i }));
+
+      expect(screen.getByRole('dialog', { name: /^log in$/i })).toBeInTheDocument();
+    });
+
+    it('closes the auth modal on Escape', async () => {
+      mockedFetchProducts.mockReturnValue(new Promise(() => {}));
+      const user = userEvent.setup();
+      renderApp();
+      await user.click(screen.getByRole('button', { name: /log in/i }));
+
+      await user.keyboard('{Escape}');
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
   });
 });

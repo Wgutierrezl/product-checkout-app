@@ -77,4 +77,10 @@ describe('LoginForm', () => {
 
     expect(onSwitchToRegister).toHaveBeenCalled();
   });
+
+  it('prefills the email field from initialEmail (e.g. right after registering)', () => {
+    renderForm({ initialEmail: 'jane@example.com' });
+
+    expect(screen.getByLabelText(/email/i)).toHaveValue('jane@example.com');
+  });
 });

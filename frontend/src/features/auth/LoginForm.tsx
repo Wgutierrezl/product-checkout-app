@@ -22,6 +22,8 @@ export interface LoginFormProps {
   submitError: string | null;
   /** e.g. "Account created — log in to continue" after a successful registration. */
   infoMessage: string | null;
+  /** Prefills the email field, e.g. right after registering with this address. */
+  initialEmail?: string;
   onSubmit: (values: LoginFormSubmitValues) => void;
   onSwitchToRegister: () => void;
 }
@@ -37,8 +39,15 @@ const VALIDATORS: Record<FieldName, (v: FormValues) => string | null> = {
  * was the wrong one — see spec Requirement "User Login" (bad-credentials
  * scenario).
  */
-export function LoginForm({ isSubmitting, submitError, infoMessage, onSubmit, onSwitchToRegister }: LoginFormProps) {
-  const [values, setValues] = useState<FormValues>({ email: '', password: '' });
+export function LoginForm({
+  isSubmitting,
+  submitError,
+  infoMessage,
+  initialEmail = '',
+  onSubmit,
+  onSwitchToRegister,
+}: LoginFormProps) {
+  const [values, setValues] = useState<FormValues>({ email: initialEmail, password: '' });
   const [errors, setErrors] = useState<Partial<Record<FieldName, string>>>({});
   const fieldRefs = useRef<Partial<Record<FieldName, HTMLInputElement>>>({});
 
