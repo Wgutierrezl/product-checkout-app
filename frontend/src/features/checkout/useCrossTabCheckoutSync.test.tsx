@@ -1,11 +1,20 @@
 import { configureStore } from '@reduxjs/toolkit';
 import { Provider } from 'react-redux';
-import { act, render } from '@testing-library/react';
+import { act, render, waitFor } from '@testing-library/react';
 import { useCrossTabCheckoutSync } from './useCrossTabCheckoutSync';
 import { checkoutReducer, initialCheckoutState, type CheckoutState } from './checkoutSlice';
 import { catalogReducer } from '../catalog/catalogSlice';
 import { transactionReducer } from '../transaction/transactionSlice';
 import { PERSISTED_VERSION, STORAGE_KEY } from '../../shared/persistence/persistMiddleware';
+import * as backendClient from '../../api/backendClient';
+import { BackendApiError } from '../../api/types';
+import { buildTransactionFixture } from '../transaction/transactionFixtures';
+
+jest.mock('../../api/backendClient');
+
+const mockedFetchTransaction = backendClient.fetchTransaction as jest.MockedFunction<
+  typeof backendClient.fetchTransaction
+>;
 
 const KEY = 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f';
 const OTHER_KEY = 'd4e5f6a7-b8c9-4d0e-8f1a-2b3c4d5e6f70';
@@ -75,6 +84,80 @@ function renderHost(store: ReturnType<typeof buildTabOnSummary>) {
 }
 
 describe('useCrossTabCheckoutSync', () => {
+  beforeEach(() => {
+    mockedFetchTransaction.mockReset();
+    mockedFetchTransaction.mockRejectedValue(new BackendApiError('Transaction not found', 404));
+  });
+
+  describe('resuming the other tab\'s in-flight attempt, exactly as a refresh would', () => {
+    it('looks the attempt up under the same key and shows its real status when it already landed', async () => {
+      mockedFetchTransaction.mockResolvedValue(buildTransactionFixture({ id: KEY, status: 'APPROVED' }));
+      const store = buildTabOnSummary();
+      renderHost(store);
+
+      fireStorage({ key: STORAGE_KEY, newValue: otherTabPayload({ submitAttempted: true }) });
+
+      await waitFor(() => expect(store.getState().checkout.step).toBe('RESULT'));
+      expect(mockedFetchTransaction).toHaveBeenCalledWith(KEY);
+      expect(store.getState().transaction).toMatchObject({ id: KEY, status: 'APPROVED' });
+      expect(store.getState().checkout.idempotencyKey).toBe(KEY);
+    });
+
+    it('stays on DETAILS and keeps the in-flight marker when the lookup finds nothing yet (the POST is still on its way)', async () => {
+      const store = buildTabOnSummary();
+      renderHost(store);
+
+      fireStorage({ key: STORAGE_KEY, newValue: otherTabPayload({ submitAttempted: true }) });
+
+      await waitFor(() => expect(mockedFetchTransaction).toHaveBeenCalledWith(KEY));
+      await act(async () => {});
+      expect(store.getState().checkout.step).toBe('DETAILS');
+      expect(store.getState().checkout.submitAttempted).toBe(true);
+      expect(store.getState().checkout.idempotencyKey).toBe(KEY);
+    });
+
+    it('then follows the other tab to RESULT once its payment is answered', async () => {
+      const store = buildTabOnSummary();
+      renderHost(store);
+      fireStorage({ key: STORAGE_KEY, newValue: otherTabPayload({ submitAttempted: true }) });
+      await waitFor(() => expect(mockedFetchTransaction).toHaveBeenCalled());
+
+      fireStorage({
+        key: STORAGE_KEY,
+        newValue: otherTabPayload({ step: 'RESULT' }, { id: KEY, status: 'PENDING', pollStartedAt: 123 }),
+      });
+
+      expect(store.getState().checkout.step).toBe('RESULT');
+      expect(store.getState().transaction).toMatchObject({ id: KEY, status: 'PENDING' });
+    });
+
+    it('does not follow a RESULT written under a different key', async () => {
+      const store = buildTabOnSummary();
+      renderHost(store);
+      fireStorage({ key: STORAGE_KEY, newValue: otherTabPayload({ submitAttempted: true }) });
+      await waitFor(() => expect(mockedFetchTransaction).toHaveBeenCalled());
+
+      fireStorage({
+        key: STORAGE_KEY,
+        newValue: otherTabPayload(
+          { step: 'RESULT', idempotencyKey: OTHER_KEY },
+          { id: OTHER_KEY, status: 'PENDING', pollStartedAt: 1 },
+        ),
+      });
+
+      expect(store.getState().checkout.step).toBe('DETAILS');
+    });
+
+    it('does not look anything up when the other tab merely left SUMMARY without paying', () => {
+      const store = buildTabOnSummary();
+      renderHost(store);
+
+      fireStorage({ key: STORAGE_KEY, newValue: otherTabPayload({ step: 'DETAILS' }) });
+
+      expect(mockedFetchTransaction).not.toHaveBeenCalled();
+    });
+  });
+
   it('drops the card token and leaves SUMMARY when another tab starts paying under the same key', () => {
     const store = buildTabOnSummary();
     renderHost(store);
