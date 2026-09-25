@@ -50,6 +50,7 @@ import {
   PRODUCT_A_STOCK,
   PRODUCT_B_ID,
   PRODUCT_B_STOCK,
+  queryTransactionsByUserId,
 } from './support/dynamo-e2e.support';
 
 const EVENTS_SECRET = process.env.PAYMENT_GATEWAY_EVENTS_SECRET!;
@@ -392,6 +393,15 @@ describe('Accounts E2E (register -> login)', () => {
       password: 'correct-horse-battery-staple',
     };
   }
+
+  it('provisions a queryable UserIdIndex GSI on Transactions locally, kept in sync with seed-products.ts', async () => {
+    // Additive GSI, not yet queried by any production code path — this only
+    // asserts the local e2e table provisioning (dynamo-e2e.support.ts)
+    // actually created it, matching what seed-products.ts provisions for
+    // local dev. A missing GSI would throw ValidationException here instead
+    // of resolving to an empty array.
+    await expect(queryTransactionsByUserId('no-such-user')).resolves.toEqual([]);
+  });
 
   it('registers, then logs in with the same credentials and receives a usable JWT', async () => {
     const body = uniqueRegisterBody();

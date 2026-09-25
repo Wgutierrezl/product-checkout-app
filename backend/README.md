@@ -15,8 +15,11 @@ Oriented Programming (ROP) via [`neverthrow`](https://github.com/supermacro/neve
 
 Copy `.env.example` to `.env` and fill in the values (`PAYMENT_GATEWAY_*` credentials point at a
 sandbox environment for the payment gateway integration; `CORS_ALLOWED_ORIGINS` is a
-comma-separated allowlist; `ACCOUNTS_JWT_SECRET` is the accounts module's JWT signing secret —
-any long random string works locally, e.g. `openssl rand -hex 32`). See
+comma-separated allowlist; `ACCOUNTS_JWT_SECRET` is the accounts module's JWT signing secret,
+**minimum 32 characters** — any long random string works locally, e.g. `openssl rand -hex 32`
+(64 hex chars, well above the floor); the production value is generated from 48 random bytes and
+stored as SSM SecureString `/checkout/gateway/jwt-secret` — see `infra/README.md`'s SSM setup
+section for the exact `aws ssm put-parameter` invocation used for the other 3 secrets). See
 [`src/shared/config/env.validation.ts`](./src/shared/config/env.validation.ts) for the full list
 of variables, their defaults, and validation rules.
 

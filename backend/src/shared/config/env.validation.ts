@@ -8,6 +8,7 @@ import {
   IsUrl,
   Max,
   Min,
+  MinLength,
   validateSync,
 } from 'class-validator';
 
@@ -113,9 +114,15 @@ export class EnvironmentVariables {
    * Sourced from SSM in production (see `ssm-bootstrap.ts`'s
    * `jwt-secret` entry) or `.env` locally. Rotation is manual-only for the
    * MVP — no rotation code path exists (per the signed-off decision).
+   *
+   * `@MinLength(32)`: a short secret is brute-forceable against HS256; 32
+   * chars is a practical floor for local/dev values. The production SSM
+   * value is generated from 48 random bytes (far above this floor) — see
+   * README/deploy notes for the exact `aws ssm put-parameter` invocation.
    */
   @IsNotEmpty()
   @IsString()
+  @MinLength(32)
   ACCOUNTS_JWT_SECRET!: string;
 }
 

@@ -33,6 +33,11 @@ import {
   USERS_TABLE_NAME,
 } from '../../../src/accounts/infrastructure/dynamo-user.repository';
 
+// Mirrors infra/lib/data-stack.ts's TRANSACTIONS_USER_ID_INDEX_NAME and
+// scripts/seed-products.ts's local equivalent. Not exported from
+// dynamo-transaction.repository.ts because no backend code queries it yet.
+const TRANSACTIONS_USER_ID_INDEX_NAME = 'UserIdIndex';
+
 export const E2E_AWS_REGION = process.env.AWS_REGION ?? 'us-east-1';
 export const E2E_DYNAMO_ENDPOINT = process.env.DYNAMO_ENDPOINT ?? 'http://localhost:8000';
 
@@ -153,6 +158,7 @@ async function recreateTransactionsTable(client: DynamoDBClient): Promise<void> 
         { AttributeName: 'transactionId', AttributeType: 'S' },
         { AttributeName: 'reference', AttributeType: 'S' },
         { AttributeName: 'gatewayTransactionId', AttributeType: 'S' },
+        { AttributeName: 'userId', AttributeType: 'S' },
       ],
       KeySchema: [{ AttributeName: 'transactionId', KeyType: 'HASH' }],
       GlobalSecondaryIndexes: [
@@ -164,6 +170,11 @@ async function recreateTransactionsTable(client: DynamoDBClient): Promise<void> 
         {
           IndexName: TRANSACTIONS_GATEWAY_TX_INDEX_NAME,
           KeySchema: [{ AttributeName: 'gatewayTransactionId', KeyType: 'HASH' }],
+          Projection: { ProjectionType: 'ALL' },
+        },
+        {
+          IndexName: TRANSACTIONS_USER_ID_INDEX_NAME,
+          KeySchema: [{ AttributeName: 'userId', KeyType: 'HASH' }],
           Projection: { ProjectionType: 'ALL' },
         },
       ],
@@ -266,4 +277,24 @@ export async function findCustomerIdByEmail(email: string): Promise<string> {
     throw new Error(`E2E setup error: no customer found for email ${email}`);
   }
   return item.customerId;
+}
+
+/**
+ * Test-only: queries the Transactions table's `UserIdIndex` GSI (additive,
+ * not yet queried by any production code path — see design's PR6). Exists
+ * so the e2e suite can assert this GSI is actually provisioned and
+ * queryable on the locally-recreated table, kept in sync with
+ * `seed-products.ts`'s own `ensureTransactionsTable`.
+ */
+export async function queryTransactionsByUserId(userId: string): Promise<unknown[]> {
+  const documentClient = createE2eDocumentClient();
+  const result = await documentClient.send(
+    new QueryCommand({
+      TableName: TRANSACTIONS_TABLE_NAME,
+      IndexName: TRANSACTIONS_USER_ID_INDEX_NAME,
+      KeyConditionExpression: 'userId = :userId',
+      ExpressionAttributeValues: { ':userId': userId },
+    }),
+  );
+  return result.Items ?? [];
 }

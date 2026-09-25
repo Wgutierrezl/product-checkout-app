@@ -102,4 +102,17 @@ describe('validateEnv', () => {
 
     expect(result.THROTTLE_LIMIT).toBe(5);
   });
+
+  it('rejects an ACCOUNTS_JWT_SECRET shorter than 32 characters', () => {
+    expect(() =>
+      validateEnv({ ...requiredEnv, ACCOUNTS_JWT_SECRET: 'too-short-secret' }),
+    ).toThrow(/ACCOUNTS_JWT_SECRET/);
+  });
+
+  it('accepts an ACCOUNTS_JWT_SECRET exactly 32 characters long (boundary)', () => {
+    const secret = 'a'.repeat(32);
+    const result = validateEnv({ ...requiredEnv, ACCOUNTS_JWT_SECRET: secret });
+
+    expect(result.ACCOUNTS_JWT_SECRET).toBe(secret);
+  });
 });
