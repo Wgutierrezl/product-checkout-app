@@ -203,6 +203,9 @@ A few refinements from a manual pass over the real checkout, on top of the flow 
 - **Clearer in-flight buttons**: tokenizing and paying show an in-button spinner + label (kept
   full-colour, not washed out) instead of a faded "Processing…", with the surrounding fields
   visually locked via a native `<fieldset disabled>`.
+- **Auto-return on APPROVED** (`features/transaction/ResultScreen.tsx`, `shared/ui/useCountdown.ts`):
+  once a transaction is APPROVED, a 10s countdown runs the same "Back to store" flow automatically
+  unless the buyer picks "Stay on this page" to cancel it or "Back to store now" to skip the wait.
 
 ## Testing
 
@@ -211,12 +214,12 @@ Strict TDD throughout (RED → GREEN → REFACTOR), enforced by a coverage gate:
 
 | Metric | % |
 |---|---|
-| Statements | 99.48% |
-| Branches | 98.07% |
+| Statements | 99.49% |
+| Branches | 98.17% |
 | Functions | 100% |
-| Lines | 99.44% |
+| Lines | 99.46% |
 
-51 suites / 542 tests. Remaining, documented gaps are defensive guard clauses unreachable via the
+52 suites / 556 tests. Remaining, documented gaps are defensive guard clauses unreachable via the
 UI (e.g. a disabled control's own handler) — never left silently uncovered.
 
 ```bash

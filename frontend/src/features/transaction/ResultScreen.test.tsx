@@ -189,6 +189,91 @@ describe('ResultScreen', () => {
 
       expect(screen.getByTestId('result-icon-check')).toBeInTheDocument();
     });
+
+    describe('auto-return countdown', () => {
+      beforeEach(() => {
+        jest.useFakeTimers({ now: new Date(2026, 0, 1) });
+      });
+
+      afterEach(() => {
+        jest.useRealTimers();
+      });
+
+      /** Advances one second at a time so each re-scheduled tick is a pre-existing timer before the next advance. */
+      async function advanceSeconds(times: number) {
+        for (let i = 0; i < times; i += 1) {
+          await act(async () => {
+            await jest.advanceTimersByTimeAsync(1000);
+          });
+        }
+      }
+
+      it('shows a visible countdown from 10s, and offers "Back to store now" plus "Stay on this page"', async () => {
+        renderResult({ status: 'APPROVED', reference: 'REF-1', amounts: AMOUNTS });
+
+        expect(screen.getByText(/returning to the store in/i)).toHaveTextContent('10');
+        expect(screen.getByRole('button', { name: /back to store now/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /stay on this page/i })).toBeInTheDocument();
+
+        await advanceSeconds(3);
+
+        expect(screen.getByText(/returning to the store in/i)).toHaveTextContent('7');
+      });
+
+      it('runs the same Back to store flow automatically once the countdown reaches zero', async () => {
+        const { onBackToStore } = renderResult({ status: 'APPROVED', reference: 'REF-1', amounts: AMOUNTS });
+
+        await advanceSeconds(10);
+
+        expect(onBackToStore).toHaveBeenCalledTimes(1);
+      });
+
+      it('"Stay on this page" cancels the countdown, replaces the line with a note, and never auto-returns', async () => {
+        const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+        const { onBackToStore } = renderResult({ status: 'APPROVED', reference: 'REF-1', amounts: AMOUNTS });
+
+        await user.click(screen.getByRole('button', { name: /stay on this page/i }));
+
+        // Both the visible note and the (separate) SR-only live region say
+        // this -- see the dedicated live-region test below for that split.
+        expect(screen.getAllByText(/auto-return cancelled/i).length).toBeGreaterThan(0);
+        expect(screen.queryByText(/returning to the store in/i)).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /stay on this page/i })).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^back to store$/i })).toBeInTheDocument();
+
+        await advanceSeconds(10);
+        expect(onBackToStore).not.toHaveBeenCalled();
+      });
+
+      it('announces the countdown start, and its cancellation, via a visually-hidden polite live region (not every tick)', async () => {
+        const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+        renderResult({ status: 'APPROVED', reference: 'REF-1', amounts: AMOUNTS });
+
+        const liveRegion = screen.getByTestId('auto-return-announcement');
+        expect(liveRegion).toHaveAttribute('aria-live', 'polite');
+        expect(liveRegion).toHaveTextContent(/returning to the store automatically/i);
+
+        await advanceSeconds(3);
+        // Ticking must not change the live region's (still-static) text.
+        expect(liveRegion).toHaveTextContent(/returning to the store automatically/i);
+
+        await user.click(screen.getByRole('button', { name: /stay on this page/i }));
+
+        expect(liveRegion).toHaveTextContent(/auto-return cancelled/i);
+      });
+    });
+
+    describe.each(['DECLINED', 'ERROR', 'VOIDED', 'PENDING'] as const)(
+      'never shows the auto-return countdown when status is %s',
+      (status) => {
+        it('renders neither the countdown line nor "Stay on this page"', () => {
+          renderResult({ status, reference: 'REF-1' });
+
+          expect(screen.queryByText(/returning to the store in/i)).not.toBeInTheDocument();
+          expect(screen.queryByRole('button', { name: /stay on this page/i })).not.toBeInTheDocument();
+        });
+      },
+    );
   });
 
   describe.each(['DECLINED', 'ERROR', 'VOIDED'] as const)('%s (failure outcomes)', (status) => {

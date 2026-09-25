@@ -237,7 +237,7 @@ directly against this repository:
 |---|---|---|---|---|---|
 | `backend` (unit) | 100% | 100% | 100% | 100% | 47 suites / 391 tests |
 | `backend` (e2e) | — | — | — | — | 1 suite / 18 tests (DynamoDB Local) |
-| `frontend` | 99.48% | 98.1% | 100% | 99.44% | 51 suites / 542 tests |
+| `frontend` | 99.49% | 98.17% | 100% | 99.46% | 52 suites / 556 tests |
 | `infra` | 100% | 100% | 100% | 100% | 6 suites / 38 tests |
 
 - **Backend e2e** runs against a real `AppModule` and DynamoDB Local, with a deterministic

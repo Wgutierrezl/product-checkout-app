@@ -4,6 +4,7 @@ import { Button } from '../../shared/ui/Button';
 import { ResultIcon } from '../../shared/ui/ResultIcon';
 import { Spinner } from '../../shared/ui/Spinner';
 import { useOverlayA11y } from '../../shared/ui/useOverlayA11y';
+import { useCountdown } from '../../shared/ui/useCountdown';
 import { formatCOP } from '../../domain/money/formatCOP';
 import {
   msUntilNextProcessingStep,
@@ -53,6 +54,9 @@ function AmountsBreakdown({ amounts }: { amounts: TransactionAmounts }) {
   );
 }
 
+/** How long the APPROVED screen waits before automatically returning to the store. */
+const AUTO_RETURN_SECONDS = 10;
+
 const FAILURE_MESSAGES: Record<'DECLINED' | 'VOIDED' | 'ERROR', string> = {
   DECLINED: 'Your payment was declined by the card issuer.',
   VOIDED: 'This transaction was voided and was not charged.',
@@ -93,6 +97,14 @@ export function ResultScreen({
   const isFailure = status === 'DECLINED' || status === 'VOIDED' || status === 'ERROR';
   const isFinal = isApproved || isFailure;
   const isPending = status === 'PENDING';
+
+  // Only ever armed while APPROVED is showing; `onBackToStore` runs the
+  // EXACT same reset/refetch flow "Back to store" already triggers manually,
+  // so reaching zero is indistinguishable from the buyer clicking it
+  // themselves. Cancelling (via "Stay on this page") or leaving the
+  // APPROVED screen (unmount/step change) both stop it for good --
+  // `useCountdown` owns that cleanup.
+  const autoReturn = useCountdown(AUTO_RETURN_SECONDS, { enabled: isApproved, onDone: onBackToStore });
 
   useOverlayA11y({
     overlayRef,
@@ -212,14 +224,42 @@ export function ResultScreen({
             </p>
           )}
 
+          {isApproved &&
+            (autoReturn.cancelled ? (
+              <p className={styles.autoReturn}>Auto-return cancelled.</p>
+            ) : (
+              <p className={styles.autoReturn}>
+                Returning to the store in <span aria-hidden="true">{autoReturn.remaining}</span> s…
+              </p>
+            ))}
+
+          {/* Announces the countdown starting and being cancelled -- NOT
+              every tick: this text only changes at those two moments, so a
+              screen reader is never spammed with a fresh announcement every
+              second (same "static text across re-renders" convention as the
+              PENDING "still processing" message above). The ticking number
+              itself lives in the visible line above, marked aria-hidden. */}
+          {isApproved && (
+            <p className={styles.srOnly} aria-live="polite" data-testid="auto-return-announcement">
+              {autoReturn.cancelled
+                ? 'Auto-return cancelled.'
+                : `Returning to the store automatically in ${AUTO_RETURN_SECONDS} seconds.`}
+            </p>
+          )}
+
           <div className={styles.actions}>
             {isFailure && (
               <Button type="button" variant="secondary" onClick={onTryAgain}>
                 Try again
               </Button>
             )}
+            {isApproved && !autoReturn.cancelled && (
+              <Button type="button" variant="secondary" onClick={autoReturn.cancel}>
+                Stay on this page
+              </Button>
+            )}
             <Button type="button" onClick={onBackToStore}>
-              Back to store
+              {isApproved && !autoReturn.cancelled ? 'Back to store now' : 'Back to store'}
             </Button>
           </div>
         </div>
