@@ -153,47 +153,58 @@ export function Summary({
           </p>
         )}
 
-        <label className={styles.consent}>
-          <input type="checkbox" checked={termsAccepted} onChange={onToggleTerms} disabled={!acceptanceLinks} />
-          <span>
-            I accept the{' '}
-            {acceptanceLinks ? (
-              <a href={acceptanceLinks.termsUrl} target="_blank" rel="noopener noreferrer">
-                terms and conditions
-              </a>
-            ) : (
-              'terms and conditions'
-            )}
-          </span>
-        </label>
+        {/* `disabled` on a <fieldset> propagates to both checkboxes, adding
+            "paying" as a 2nd reason (alongside acceptance links still
+            loading) they can be locked — a native visual + functional
+            disabled look without repeating `|| isSubmitting` on each input. */}
+        <fieldset className={styles.consentFieldset} disabled={isSubmitting}>
+          <label className={styles.consent}>
+            <input type="checkbox" checked={termsAccepted} onChange={onToggleTerms} disabled={!acceptanceLinks} />
+            <span>
+              I accept the{' '}
+              {acceptanceLinks ? (
+                <a href={acceptanceLinks.termsUrl} target="_blank" rel="noopener noreferrer">
+                  terms and conditions
+                </a>
+              ) : (
+                'terms and conditions'
+              )}
+            </span>
+          </label>
 
-        <label className={styles.consent}>
-          <input
-            type="checkbox"
-            checked={personalDataAccepted}
-            onChange={onTogglePersonalData}
-            disabled={!acceptanceLinks}
-          />
-          <span>
-            I authorize the use of my{' '}
-            {acceptanceLinks ? (
-              <a href={acceptanceLinks.personalDataUrl} target="_blank" rel="noopener noreferrer">
-                personal data
-              </a>
-            ) : (
-              'personal data'
-            )}
-          </span>
-        </label>
+          <label className={styles.consent}>
+            <input
+              type="checkbox"
+              checked={personalDataAccepted}
+              onChange={onTogglePersonalData}
+              disabled={!acceptanceLinks}
+            />
+            <span>
+              I authorize the use of my{' '}
+              {acceptanceLinks ? (
+                <a href={acceptanceLinks.personalDataUrl} target="_blank" rel="noopener noreferrer">
+                  personal data
+                </a>
+              ) : (
+                'personal data'
+              )}
+            </span>
+          </label>
+        </fieldset>
 
         <div className={styles.actions}>
           <Button type="button" variant="secondary" onClick={onEditDetails} disabled={isSubmitting}>
             Edit details
           </Button>
-          <Button type="button" disabled={!canPay} onClick={onPay}>
-            {isSubmitting ? 'Processing…' : 'Pay'}
+          <Button type="button" disabled={!canPay} loading={isSubmitting} loadingLabel="Processing payment…" onClick={onPay}>
+            Pay
           </Button>
         </div>
+        {isSubmitting && (
+          <p className={styles.statusLine} role="status">
+            Processing your payment — please don&rsquo;t close this window.
+          </p>
+        )}
       </section>
     </div>,
     document.body,

@@ -168,6 +168,26 @@ describe('Summary', () => {
     expect(screen.getByRole('button', { name: /processing/i })).toBeDisabled();
   });
 
+  it('marks the Pay button aria-busy while isSubmitting is true', () => {
+    renderSummary({ termsAccepted: true, personalDataAccepted: true, isSubmitting: true });
+
+    expect(screen.getByRole('button', { name: /processing payment/i })).toHaveAttribute('aria-busy', 'true');
+  });
+
+  it('shows an inline status line announcing progress via role=status while paying', () => {
+    renderSummary({ termsAccepted: true, personalDataAccepted: true, isSubmitting: true });
+
+    expect(screen.getByRole('status')).toHaveTextContent(/processing your payment/i);
+  });
+
+  it('visually disables the consent checkboxes (fieldset disabled) while paying', () => {
+    renderSummary({ termsAccepted: true, personalDataAccepted: true, isSubmitting: true });
+
+    const [terms, personalData] = screen.getAllByRole('checkbox');
+    expect(terms).toBeDisabled();
+    expect(personalData).toBeDisabled();
+  });
+
   it('shows the submit error as an alert', () => {
     renderSummary({ submitError: 'Insufficient stock' });
 

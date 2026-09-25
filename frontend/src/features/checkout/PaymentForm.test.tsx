@@ -332,10 +332,10 @@ describe('PaymentForm', () => {
       );
     });
 
-    it('disables Continue and shows a processing label while isSubmitting is true', () => {
+    it('disables Continue and shows a loading label while isSubmitting is true', () => {
       renderForm({ isSubmitting: true });
 
-      const button = screen.getByRole('button', { name: /processing/i });
+      const button = screen.getByRole('button', { name: /securing your card/i });
       expect(button).toBeDisabled();
     });
 
@@ -349,7 +349,7 @@ describe('PaymentForm', () => {
       const user = userEvent.setup();
       const { onSubmit } = renderForm({ isSubmitting: true });
 
-      await user.click(screen.getByRole('button', { name: /processing/i }));
+      await user.click(screen.getByRole('button', { name: /securing your card/i }));
 
       expect(onSubmit).not.toHaveBeenCalled();
     });
@@ -448,10 +448,39 @@ describe('PaymentForm', () => {
       // The Continue button is disabled (browsers block clicks on disabled
       // buttons), so submit the <form> directly to exercise the internal
       // isSubmitting guard as defense-in-depth against any other submit path.
-      const form = screen.getByRole('button', { name: /processing/i }).closest('form');
+      const form = screen.getByRole('button', { name: /securing your card/i }).closest('form');
       fireEvent.submit(form as HTMLFormElement);
 
       expect(onSubmit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('loading state (tokenizing)', () => {
+    it('shows an in-button "Securing your card…" label, marking the Continue button aria-busy', () => {
+      renderForm({ isSubmitting: true });
+
+      const button = screen.getByRole('button', { name: /securing your card/i });
+      expect(button).toHaveAttribute('aria-busy', 'true');
+    });
+
+    it('shows an inline status line announcing progress via role=status', () => {
+      renderForm({ isSubmitting: true });
+
+      expect(screen.getByRole('status')).toHaveTextContent(/securing your card/i);
+    });
+
+    it('visually disables the card/customer/delivery fields (fieldset disabled) while submitting', () => {
+      renderForm({ isSubmitting: true });
+
+      expect(screen.getByLabelText(/card number/i)).toBeDisabled();
+      expect(screen.getByLabelText(/full name/i)).toBeDisabled();
+      expect(screen.getByLabelText(/^address/i)).toBeDisabled();
+    });
+
+    it('leaves the fields enabled when not submitting', () => {
+      renderForm({ isSubmitting: false });
+
+      expect(screen.getByLabelText(/card number/i)).toBeEnabled();
     });
   });
 });

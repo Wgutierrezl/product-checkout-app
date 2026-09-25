@@ -152,6 +152,17 @@
   font-size: var(--font-size-sm);
 }
 
+/* Resets the browser's default fieldset chrome and takes it out of the box
+   model (`display: contents`) so wrapping the 2 consent checkboxes in a
+   <fieldset disabled={isSubmitting}> — for its native "disable every
+   descendant control" behavior while paying — doesn't change the layout. */
+.consentFieldset {
+  display: contents;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
 .consent {
   display: flex;
   align-items: flex-start;
@@ -164,8 +175,18 @@
   text-decoration: underline;
 }
 
+.consent input:disabled {
+  cursor: not-allowed;
+}
+
 .actions {
   display: flex;
   gap: var(--space-3);
   justify-content: flex-end;
+}
+
+.statusLine {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  text-align: right;
 }

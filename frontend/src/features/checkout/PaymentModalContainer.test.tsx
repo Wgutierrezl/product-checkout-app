@@ -170,7 +170,7 @@ describe('PaymentModalContainer', () => {
     await fillValidForm(user);
     await user.click(screen.getByRole('button', { name: /continue/i }));
 
-    expect(await screen.findByRole('button', { name: /processing/i })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: /securing your card/i })).toBeDisabled();
   });
 
   describe('closing during an in-flight tokenize request (BLOCKER)', () => {

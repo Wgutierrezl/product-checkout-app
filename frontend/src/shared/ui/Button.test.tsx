@@ -53,4 +53,35 @@ describe('Button', () => {
 
     expect(screen.getByRole('button')).toHaveAttribute('type', 'button');
   });
+
+  describe('loading state', () => {
+    it('swaps the accessible name to the loading label and sets aria-busy when loading', () => {
+      render(
+        <Button loading loadingLabel="Processing payment…">
+          Pay
+        </Button>,
+      );
+
+      const button = screen.getByRole('button', { name: /processing payment/i });
+      expect(button).toHaveAttribute('aria-busy', 'true');
+    });
+
+    it('keeps the normal label and no aria-busy when not loading, even with a loadingLabel prop set', () => {
+      render(
+        <Button loadingLabel="Processing payment…" disabled={false}>
+          Pay
+        </Button>,
+      );
+
+      const button = screen.getByRole('button', { name: 'Pay' });
+      expect(button).not.toHaveAttribute('aria-busy');
+    });
+
+    it('renders no loading slot at all (behaves exactly like a plain button) when loadingLabel is never provided', () => {
+      render(<Button>Cancel</Button>);
+
+      const button = screen.getByRole('button', { name: 'Cancel' });
+      expect(button).not.toHaveAttribute('aria-busy');
+    });
+  });
 });

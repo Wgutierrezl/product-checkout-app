@@ -269,6 +269,12 @@ export function PaymentForm({
         </p>
       )}
 
+      {/* `disabled` on a <fieldset> propagates to every descendant form
+          control (inputs, the installments <select>, and CountrySelect's
+          own combobox input), giving a native "fieldset disabled" visual +
+          functional lock on the whole form while a request is in flight —
+          without having to thread `disabled` through every single field. */}
+      <fieldset className={styles.fieldset} disabled={isSubmitting}>
       <section>
         <h3 className={styles.sectionTitle}>Card</h3>
         <div className={styles.grid}>
@@ -498,15 +504,21 @@ export function PaymentForm({
           </Field>
         </div>
       </section>
+      </fieldset>
 
       <div className={styles.actions}>
         <Button type="button" variant="secondary" onClick={onCancel} disabled={isSubmitting}>
           Cancel
         </Button>
-        <Button type="submit" disabled={isSubmitting}>
-          {isSubmitting ? 'Processing…' : 'Continue'}
+        <Button type="submit" disabled={isSubmitting} loading={isSubmitting} loadingLabel="Securing your card…">
+          Continue
         </Button>
       </div>
+      {isSubmitting && (
+        <p className={styles.statusLine} role="status">
+          Securing your card — please don&rsquo;t close this window.
+        </p>
+      )}
     </form>
   );
 }

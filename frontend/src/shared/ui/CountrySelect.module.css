@@ -18,6 +18,12 @@
   outline-offset: 1px;
 }
 
+.trigger:disabled {
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}
+
 .listbox {
   position: absolute;
   z-index: 20;
