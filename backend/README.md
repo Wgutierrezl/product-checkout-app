@@ -80,7 +80,7 @@ mocked `fetch`. The CI gate is 80% (`jest.config.ts`); current numbers:
 | Functions | 269 / 269 | 100% |
 | Lines | 1007 / 1007 | 100% |
 
-391 tests across 47 suites, developed strict-TDD (RED → GREEN → REFACTOR) throughout.
+409 tests across 49 suites, developed strict-TDD (RED → GREEN → REFACTOR) throughout.
 
 ### End-to-end tests
 
@@ -109,11 +109,12 @@ part of the unit coverage gate) and `supertest` against the real `AppModule`, wi
   (mirroring the real sandbox's observed behavior) and resolves APPROVED on the first poll, so the
   suite exercises the actual lazy-poll code path, not just a shortcut.
 
-18 tests cover: catalog listing/detail (400 malformed id, 404 unknown id), the payment-acceptance
+24 tests cover: catalog listing/detail (400 malformed id, 404 unknown id), the payment-acceptance
 proxy, the full happy path (create → PENDING → lazy-polled to APPROVED → stock decremented →
 delivery embedded → idempotent replay → masked customer/delivery reads), the declined path,
-insufficient stock (409), whitelist validation (400 on an unknown extra field), an invalid webhook
-checksum (400), and a hardening block: helmet headers, CORS allowlist behavior, per-route rate
+insufficient stock (409), whitelist validation (400 on an unknown extra field, and 400, not 500,
+for a missing or `null` customer/delivery object), an invalid or missing webhook signature (400),
+and a hardening block: helmet headers, CORS allowlist behavior and preflight caching, per-route rate
 limiting (429, with `/health` and the webhook explicitly exempt), and "no stack trace in any error
 body".
 
