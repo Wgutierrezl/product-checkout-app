@@ -108,6 +108,24 @@ describe('WebStack', () => {
     });
   });
 
+  it('sends a Permissions-Policy header that disables browser features the checkout never uses', () => {
+    const template = synthWebStack();
+
+    template.hasResourceProperties('AWS::CloudFront::ResponseHeadersPolicy', {
+      ResponseHeadersPolicyConfig: Match.objectLike({
+        CustomHeadersConfig: {
+          Items: [
+            {
+              Header: 'Permissions-Policy',
+              Value: 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+              Override: true,
+            },
+          ],
+        },
+      }),
+    });
+  });
+
   it('attaches a security headers policy with HSTS and the required CSP directives', () => {
     const template = synthWebStack();
 

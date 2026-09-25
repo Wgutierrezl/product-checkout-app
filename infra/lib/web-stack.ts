@@ -73,6 +73,18 @@ export class WebStack extends Stack {
 
     const securityHeadersPolicy = new ResponseHeadersPolicy(this, 'SecurityHeadersPolicy', {
       responseHeadersPolicyName: 'checkout-web-security-headers',
+      // Deny powerful browser features the checkout never uses. `payment=()`
+      // is safe: card entry is our own form plus tokenization over fetch,
+      // not the browser Payment Request API.
+      customHeadersBehavior: {
+        customHeaders: [
+          {
+            header: 'Permissions-Policy',
+            value: 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+            override: true,
+          },
+        ],
+      },
       securityHeadersBehavior: {
         contentSecurityPolicy: { contentSecurityPolicy, override: true },
         contentTypeOptions: { override: true },
