@@ -14,7 +14,7 @@ import { SettleTransactionUseCase } from './settle-transaction.use-case';
 
 export const EVENTS_SECRET = Symbol('EVENTS_SECRET');
 
-/** This whole system is COP-only — see design ADR-6. */
+/** This whole system is COP-only: every price and total is in COP cents. */
 const TRANSACTION_CURRENCY = 'COP';
 
 const AMOUNT_PROPERTY_PATH = 'transaction.amount_in_cents';
@@ -31,7 +31,8 @@ interface VerifiedAmount {
  * up a transaction. A checksum-valid payload that doesn't resolve to a known
  * transaction (unknown gateway id/reference, or an unparseable shape) is
  * treated as a no-op success (`null`) rather than an error, so the endpoint
- * can always respond 200 quickly and idempotently, per spec.
+ * can always respond 200 quickly and idempotently: the gateway retries an
+ * event that does not get a 200, and may deliver the same event twice.
  */
 @Injectable()
 export class HandleWebhookUseCase {

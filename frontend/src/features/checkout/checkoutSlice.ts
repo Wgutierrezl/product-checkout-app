@@ -228,7 +228,8 @@ const checkoutSlice = createSlice({
      * display data) and everything else untouched. Used once a token has
      * been spent one way or another: a successful `POST /transactions`, or
      * any backend response that means the token can no longer be trusted
-     * for a retry (see design Amendment).
+     * for a retry: a gateway card token is single-use, so the buyer must
+     * tokenize the card again.
      */
     cardTokenConsumed: (state) => {
       state.cardToken = null;

@@ -65,7 +65,7 @@ export class ApiStack extends Stack {
         TRANSACTIONS_TABLE_NAME: props.transactionsTable.tableName,
         // Non-secret backend config (backend's env.validation.ts requires
         // both at boot). Real values come from GitHub Actions vars in
-        // deploy.yml (see design's Manual Prerequisites); these generic
+        // deploy.yml (see infra/README.md, Manual prerequisites); these generic
         // placeholders keep offline `cdk synth` working and never name the
         // payment gateway vendor.
         PAYMENT_GATEWAY_URL: process.env.PAYMENT_GATEWAY_URL ?? 'https://payment-gateway.invalid',

@@ -6,8 +6,8 @@ import { Quantity } from './quantity.vo';
  * A non-negative integer amount of units of a product available for purchase.
  * Distinct from `Quantity` (positive integer >=1, used for order amounts):
  * stock legitimately reaches zero once a product sells out, but an order can
- * never request zero or fewer units. See design ADR-6 amendment (out-of-stock
- * products must be representable and shown as such in the catalog).
+ * never request zero or fewer units. Zero must be valid so out-of-stock
+ * products can be represented and shown as such in the catalog.
  */
 export class Stock {
   private constructor(private readonly amount: number) {}

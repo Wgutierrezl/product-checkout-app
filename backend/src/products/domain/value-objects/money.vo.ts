@@ -3,7 +3,7 @@ import { AppResult, err, ok } from '../../../shared/result/result.types';
 
 /**
  * Represents a COP amount in integer cents. Never use floats for currency math —
- * see design ADR-6 (Money/Quantity as value objects, integer cents).
+ * floating-point arithmetic cannot represent many decimal amounts exactly.
  */
 export class Money {
   private constructor(private readonly amountCents: number) {}

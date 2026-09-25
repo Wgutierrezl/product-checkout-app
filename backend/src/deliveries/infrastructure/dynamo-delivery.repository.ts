@@ -62,8 +62,8 @@ export class DynamoDeliveryRepository implements DeliveryRepositoryPort {
 
   /**
    * At most one delivery is expected per transaction (a transaction settles
-   * — and creates its delivery — exactly once; see design's TransactWriteItems
-   * settlement). `Limit: 2` (not 1) is intentional: it lets us *detect* a
+   * — and creates its delivery — exactly once, inside the settlement
+   * `TransactWriteItems`). `Limit: 2` (not 1) is intentional: it lets us *detect* a
    * violation of that invariant instead of silently hiding it behind a
    * `Limit: 1` truncation.
    */

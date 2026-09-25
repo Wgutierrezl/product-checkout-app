@@ -25,8 +25,9 @@ const MODAL_TITLE_ID = 'payment-modal-title';
  * On successful tokenization dispatches `cardTokenized` + the card summary
  * + customer/delivery, and moves the step to SUMMARY. On failure, records
  * the error and keeps the buyer on DETAILS — customer/delivery are only
- * ever committed to the store on a SUCCESSFUL Continue (see design
- * Amendment: tokenize at Continue). Meanwhile a debounced draft of the
+ * ever committed to the store on a SUCCESSFUL Continue, because the card is
+ * tokenized at that moment and a failed tokenization must not leave a
+ * half-committed checkout behind. Meanwhile a debounced draft of the
  * non-card fields is kept in the store (and persisted) so a refresh does
  * not lose what the buyer typed; Cancel forgets it.
  */
