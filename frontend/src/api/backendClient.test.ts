@@ -226,6 +226,29 @@ describe('backendClient', () => {
       });
     });
 
+    it('carries the backend error type, so callers can tell a gateway rejection from a proxy 502', async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(
+          { statusCode: 502, error: 'PaymentGatewayError', message: 'Payment provider unavailable' },
+          { ok: false, status: 502 },
+        ),
+      );
+
+      await expect(createTransaction(input)).rejects.toMatchObject({
+        status: 502,
+        errorType: 'PaymentGatewayError',
+      });
+    });
+
+    it('leaves the error type undefined when the body has none (e.g. an HTML page from a proxy)', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(undefined, { ok: false, status: 502, statusText: 'Bad Gateway' }));
+
+      const error = await createTransaction(input).catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(BackendApiError);
+      expect((error as BackendApiError).errorType).toBeUndefined();
+    });
+
     it('throws BackendApiError with status 409 on insufficient stock', async () => {
       fetchMock.mockResolvedValueOnce(
         jsonResponse(

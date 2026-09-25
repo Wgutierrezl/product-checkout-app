@@ -17,6 +17,20 @@ import { createTransaction, fetchPaymentAcceptance } from '../../api/backendClie
 import { BackendApiError } from '../../api/types';
 import type { PaymentAcceptance } from '../../api/types';
 
+export const CARD_SESSION_EXPIRED_MESSAGE = 'Your card session expired. Please re-enter your card details.';
+
+/**
+ * The backend answers POST /transactions with 502 + `PaymentGatewayError`
+ * ONLY when the gateway definitively rejected the charge request (a 4xx,
+ * e.g. an expired or already used card token): ambiguous gateway failures
+ * come back as 201 PENDING instead, and the backend has already marked the
+ * attempt ERROR under its idempotencyKey. A bare 502 (e.g. from a proxy)
+ * carries no such error type and stays on the generic 5xx path.
+ */
+function isGatewayRejection(error: BackendApiError): boolean {
+  return error.status === 502 && error.errorType === 'PaymentGatewayError';
+}
+
 /**
  * The SUMMARY step: a Material-style backdrop (dimmed selected-product
  * context behind a sliding-up summary sheet). Fetches payment-acceptance
@@ -197,6 +211,18 @@ export function SummaryContainer() {
           // request outright. Safe to rotate -- the backend already
           // recorded a definitive outcome under the old key.
           dispatch(submitErrorSet(error.message));
+          dispatch(cardTokenConsumed());
+          dispatch(idempotencyKeyRotated());
+          dispatch(stepChangeRequested('DETAILS'));
+          dispatch(submitStatusSet('failed'));
+          dispatch(paymentAttemptResolved());
+          return;
+        }
+        if (isGatewayRejection(error)) {
+          // The stored card token is the most likely culprit (a restored
+          // one may have expired), so ask for the card again. The key IS
+          // rotated: replaying the old one would only return that ERROR.
+          dispatch(submitErrorSet(CARD_SESSION_EXPIRED_MESSAGE));
           dispatch(cardTokenConsumed());
           dispatch(idempotencyKeyRotated());
           dispatch(stepChangeRequested('DETAILS'));

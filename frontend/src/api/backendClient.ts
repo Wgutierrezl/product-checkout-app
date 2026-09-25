@@ -33,6 +33,15 @@ function extractErrorMessage(body: unknown, fallback: string): string {
   return fallback || 'Unexpected backend error';
 }
 
+/** The backend's `error` field (its domain error type), when present. */
+function extractErrorType(body: unknown): string | undefined {
+  if (body && typeof body === 'object' && 'error' in body) {
+    const errorType = (body as { error: unknown }).error;
+    return typeof errorType === 'string' ? errorType : undefined;
+  }
+  return undefined;
+}
+
 /** No real HTTP status applies to a network failure or a client-side timeout. */
 const NETWORK_ERROR_STATUS = 0;
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -81,7 +90,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const body = await parseJsonBody(response);
 
   if (!response.ok) {
-    throw new BackendApiError(extractErrorMessage(body, response.statusText), response.status);
+    throw new BackendApiError(
+      extractErrorMessage(body, response.statusText),
+      response.status,
+      extractErrorType(body),
+    );
   }
 
   return body as T;

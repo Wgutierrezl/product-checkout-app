@@ -85,9 +85,15 @@ export interface PaymentAcceptance {
  * either error shape the backend can return (see `backendClient.ts`).
  */
 export class BackendApiError extends Error {
+  /**
+   * @param errorType the backend's `error` field (e.g. `PaymentGatewayError`)
+   *   when the body carried one; `undefined` for network failures or bodies
+   *   that did not come from the backend's own error filter (e.g. a proxy).
+   */
   constructor(
     message: string,
     readonly status: number,
+    readonly errorType?: string,
   ) {
     super(message);
     this.name = 'BackendApiError';
