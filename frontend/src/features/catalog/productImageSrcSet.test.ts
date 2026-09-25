@@ -3,8 +3,10 @@ import { buildProductImageSrcSet, PRODUCT_IMAGE_WIDTHS } from './productImageSrc
 const SEED_URL = 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=600&fm=webp';
 
 describe('buildProductImageSrcSet', () => {
-  it('offers 320, 480, 640 and 960 pixel candidates', () => {
-    expect(PRODUCT_IMAGE_WIDTHS).toEqual([320, 480, 640, 960]);
+  it('offers 320, 480, 600, 640 and 960 pixel candidates', () => {
+    // 600 is the seed width: a ~578-586 device px slot (1.75x-2x phones)
+    // must never download more than the original 600 px image.
+    expect(PRODUCT_IMAGE_WIDTHS).toEqual([320, 480, 600, 640, 960]);
   });
 
   it('rewrites the w parameter of an Unsplash URL once per width, with a matching w descriptor', () => {
@@ -12,6 +14,7 @@ describe('buildProductImageSrcSet', () => {
       [
         'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=320&fm=webp 320w',
         'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=480&fm=webp 480w',
+        'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=600&fm=webp 600w',
         'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=640&fm=webp 640w',
         'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=960&fm=webp 960w',
       ].join(', '),
@@ -31,7 +34,7 @@ describe('buildProductImageSrcSet', () => {
   it('adds the w parameter when the Unsplash URL has none', () => {
     const srcSet = buildProductImageSrcSet('https://images.unsplash.com/photo-1?fm=webp');
 
-    expect(srcSet?.split(', ')[3]).toBe('https://images.unsplash.com/photo-1?fm=webp&w=960 960w');
+    expect(srcSet?.split(', ')[4]).toBe('https://images.unsplash.com/photo-1?fm=webp&w=960 960w');
   });
 
   it('returns undefined for a URL on any other host, so the caller renders src only', () => {

@@ -1,5 +1,10 @@
-/** Candidate widths (px) offered to the browser for a product image. */
-export const PRODUCT_IMAGE_WIDTHS = [320, 480, 640, 960] as const;
+/**
+ * Candidate widths (px) offered to the browser for a product image. 600 is the
+ * seed width and matches the 1-column phone slot at 1.75x-2x (~578-586 device
+ * px), so those phones never download more than the original image; 640 still
+ * spares 960 for slots needing 601-640 device px (e.g. 768px tablets at 2x).
+ */
+export const PRODUCT_IMAGE_WIDTHS = [320, 480, 600, 640, 960] as const;
 
 /**
  * Rendered width of a product image in the catalog grid, derived from
