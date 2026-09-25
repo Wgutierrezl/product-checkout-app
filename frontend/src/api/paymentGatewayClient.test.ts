@@ -29,6 +29,10 @@ describe('paymentGatewayClient', () => {
     global.fetch = fetchMock as unknown as typeof fetch;
   });
 
+  afterEach(() => {
+    process.env.VITE_PAYMENT_GATEWAY_PUBLIC_KEY = PUBLIC_KEY;
+  });
+
   it('POSTs to /tokens/cards with only the public key, never the private key', async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({ status: 'CREATED', data: { id: 'tok_test_card' } }, { ok: true, status: 201 }),
@@ -61,7 +65,21 @@ describe('paymentGatewayClient', () => {
     await expect(tokenizeCard(input)).rejects.toBeInstanceOf(GatewayTokenizeError);
   });
 
-  it('maps a "number" field error to the allowlisted invalid-card-number message, never the raw gateway text', async () => {
+  it('maps a "number" field error to the sandbox test-card message when running against a sandbox key, never the raw gateway text', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        { error: { type: 'INVALID_REQUEST_ERROR', messages: { number: ['4111111111111111 is invalid'] } } },
+        { ok: false, status: 422 },
+      ),
+    );
+
+    await expect(tokenizeCard(input)).rejects.toMatchObject({
+      message: "This card isn't accepted in sandbox mode. Use one of the test cards above.",
+    });
+  });
+
+  it('keeps the allowlisted invalid-card-number message for a "number" field error outside sandbox mode', async () => {
+    process.env.VITE_PAYMENT_GATEWAY_PUBLIC_KEY = 'pub_prod_0000000000';
     fetchMock.mockResolvedValueOnce(
       jsonResponse(
         { error: { type: 'INVALID_REQUEST_ERROR', messages: { number: ['4111111111111111 is invalid'] } } },

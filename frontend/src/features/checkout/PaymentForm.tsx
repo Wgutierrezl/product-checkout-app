@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { getEnv } from '../../config/env';
 import { Field } from '../../shared/ui/Field';
 import { Button } from '../../shared/ui/Button';
 import { CardBrandIcon } from '../../shared/ui/CardBrandIcon';
 import { CountrySelect } from '../../shared/ui/CountrySelect';
+import { SandboxTestCardsHelper } from './SandboxTestCardsHelper';
 import { isValidLuhn } from '../../domain/card/luhn';
 import { detectCardBrand } from '../../domain/card/brand';
 import { isExpiryValid, parseExpiry } from '../../domain/card/expiry';
@@ -208,9 +210,22 @@ export function PaymentForm({
   const cardDigits = digitsOnly(values.cardNumber);
   const brand = detectCardBrand(cardDigits);
   const showUnsupportedBrandMessage = cardDigits.length >= 6 && brand === 'unknown';
+  const { isSandbox } = getEnv();
 
   function setField<K extends keyof FormValues>(field: K, value: FormValues[K]) {
     setValues((current) => ({ ...current, [field]: value }));
+  }
+
+  /**
+   * Fills the card number field with one of the sandbox's two accepted
+   * test PANs (formatted, same as manual typing), clears any stale
+   * cardNumber validation error, and moves focus to the cardholder field
+   * so the buyer can keep going without reaching for the mouse.
+   */
+  function handleUseTestCard(cardNumber: string) {
+    setField('cardNumber', formatCardNumberInput(cardNumber));
+    setErrors((current) => ({ ...current, cardNumber: undefined }));
+    fieldRefs.current.cardHolder?.focus();
   }
 
   /**
@@ -324,6 +339,8 @@ export function PaymentForm({
           {showUnsupportedBrandMessage && (
             <p className={styles.brandMessage}>Unsupported card brand — only Visa and Mastercard are accepted.</p>
           )}
+
+          {isSandbox && <SandboxTestCardsHelper onUseCard={handleUseTestCard} />}
 
           <Field id="cardHolder" label="Cardholder name" error={errors.cardHolder}>
             {(aria) => (

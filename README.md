@@ -35,10 +35,16 @@ Each package README is the source of truth for its own internals; this document 
 <!-- LIVE_URLS -->
 | Resource | URL |
 |---|---|
-| Web app | TBD after first deploy (CloudFront URL) |
-| API base URL | TBD after first deploy |
-| Swagger UI | TBD after first deploy (`<api>/docs`) |
-| OpenAPI JSON (Postman-importable) | TBD after first deploy (`<api>/docs-json`) |
+| Web app | https://d17j4b8e1cjsp0.cloudfront.net |
+| API base URL | https://z40rykuvgf.execute-api.us-east-1.amazonaws.com |
+| Swagger UI | https://z40rykuvgf.execute-api.us-east-1.amazonaws.com/docs |
+| OpenAPI JSON (import into Postman) | https://z40rykuvgf.execute-api.us-east-1.amazonaws.com/docs-json |
+| Health check | https://z40rykuvgf.execute-api.us-east-1.amazonaws.com/health |
+| Security headers scan (Mozilla Observatory: **A+**, 12/12) | https://developer.mozilla.org/en-US/observatory/analyze?host=d17j4b8e1cjsp0.cloudfront.net |
+
+**Test cards (sandbox):** approved `4242 4242 4242 4242`, declined `4111 1111 1111 1111` — any holder name, a future expiry (e.g. `12/29`) and CVC `123`.
+
+To import the API into Postman: *Import → Link* → paste the OpenAPI JSON URL.
 <!-- /LIVE_URLS -->
 
 <!-- TODO: link docs/screenshots/ once captured -->

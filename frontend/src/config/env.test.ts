@@ -1,4 +1,4 @@
-import { getEnv } from './env';
+import { getEnv, isSandboxPublicKey } from './env';
 
 const FIXTURES = {
   VITE_API_URL: 'https://api.checkout.test',
@@ -45,5 +45,35 @@ describe('getEnv', () => {
     expect(() => getEnv()).toThrow(
       /VITE_API_URL.*VITE_PAYMENT_GATEWAY_URL/s,
     );
+  });
+
+  it('marks the environment as sandbox when the public key is a test key', () => {
+    process.env.VITE_PAYMENT_GATEWAY_PUBLIC_KEY = 'pub_test_0000000000';
+
+    expect(getEnv().isSandbox).toBe(true);
+  });
+
+  it('marks the environment as non-sandbox when the public key is a production key', () => {
+    process.env.VITE_PAYMENT_GATEWAY_PUBLIC_KEY = 'pub_prod_0000000000';
+
+    expect(getEnv().isSandbox).toBe(false);
+  });
+});
+
+describe('isSandboxPublicKey', () => {
+  it('returns true for a pub_test_ prefixed key', () => {
+    expect(isSandboxPublicKey('pub_test_0000000000')).toBe(true);
+  });
+
+  it('returns true for a pub_stagtest_ prefixed key', () => {
+    expect(isSandboxPublicKey('pub_stagtest_0000000000')).toBe(true);
+  });
+
+  it('returns false for a pub_prod_ prefixed key', () => {
+    expect(isSandboxPublicKey('pub_prod_0000000000')).toBe(false);
+  });
+
+  it('returns false for an unrecognized key prefix', () => {
+    expect(isSandboxPublicKey('unknown_0000000000')).toBe(false);
   });
 });

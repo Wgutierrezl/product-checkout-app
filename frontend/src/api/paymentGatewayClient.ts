@@ -45,16 +45,24 @@ const REQUEST_TIMEOUT_MS = 15_000;
  */
 const SAFE_GATEWAY_MESSAGES = {
   invalidCardNumber: 'The card number appears to be invalid.',
+  sandboxCardNotAccepted: "This card isn't accepted in sandbox mode. Use one of the test cards above.",
   expiredCard: 'The card has expired.',
   invalidCvc: 'The security code (CVC) appears to be invalid.',
   generic: 'The card was rejected by the payment provider. Please check your details and try again.',
 } as const;
 
-function classifyGatewayFieldNames(fieldNames: string[]): string {
+/**
+ * In sandbox mode the gateway only accepts a couple of fixed test card
+ * numbers and rejects everything else on the `number` field — that
+ * rejection is indistinguishable, by field name, from a genuinely
+ * malformed number, so in sandbox mode we point the buyer at the test
+ * cards instead of implying their (well-formed) card is invalid.
+ */
+function classifyGatewayFieldNames(fieldNames: string[], isSandbox: boolean): string {
   const lowered = fieldNames.map((name) => name.toLowerCase());
 
   if (lowered.some((name) => name.includes('number'))) {
-    return SAFE_GATEWAY_MESSAGES.invalidCardNumber;
+    return isSandbox ? SAFE_GATEWAY_MESSAGES.sandboxCardNotAccepted : SAFE_GATEWAY_MESSAGES.invalidCardNumber;
   }
   if (lowered.some((name) => name.includes('exp'))) {
     return SAFE_GATEWAY_MESSAGES.expiredCard;
@@ -73,7 +81,7 @@ function classifyGatewayFieldNames(fieldNames: string[]): string {
  * message TEXT (`messages[field]` values, `reason`) is deliberately never
  * read — only field NAMES and the mere presence of `reason` are inspected.
  */
-function extractGatewayErrorMessage(body: unknown): string | undefined {
+function extractGatewayErrorMessage(body: unknown, isSandbox: boolean): string | undefined {
   if (typeof body !== 'object' || body === null) {
     return undefined;
   }
@@ -87,7 +95,7 @@ function extractGatewayErrorMessage(body: unknown): string | undefined {
   if (typeof errorFields.messages === 'object' && errorFields.messages !== null) {
     const fieldNames = Object.keys(errorFields.messages as Record<string, unknown>);
     if (fieldNames.length > 0) {
-      return classifyGatewayFieldNames(fieldNames);
+      return classifyGatewayFieldNames(fieldNames, isSandbox);
     }
   }
 
@@ -105,7 +113,7 @@ function extractGatewayErrorMessage(body: unknown): string | undefined {
  * them (see design Amendment: tokenize at Continue).
  */
 export async function tokenizeCard(input: TokenizeCardInput): Promise<TokenizeCardResult> {
-  const { paymentGatewayUrl, paymentGatewayPublicKey } = getEnv();
+  const { paymentGatewayUrl, paymentGatewayPublicKey, isSandbox } = getEnv();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
@@ -142,7 +150,7 @@ export async function tokenizeCard(input: TokenizeCardInput): Promise<TokenizeCa
   if (!response.ok) {
     throw new GatewayTokenizeError(
       redactCardNumbers(
-        extractGatewayErrorMessage(body) ?? `Payment gateway rejected the card (status ${response.status})`,
+        extractGatewayErrorMessage(body, isSandbox) ?? `Payment gateway rejected the card (status ${response.status})`,
       ),
     );
   }

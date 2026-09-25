@@ -2,6 +2,8 @@ export interface AppEnv {
   apiUrl: string;
   paymentGatewayUrl: string;
   paymentGatewayPublicKey: string;
+  /** True when `paymentGatewayPublicKey` belongs to a sandbox/test environment. */
+  isSandbox: boolean;
 }
 
 const REQUIRED_KEYS = [
@@ -11,6 +13,19 @@ const REQUIRED_KEYS = [
 ] as const;
 
 type RequiredKey = (typeof REQUIRED_KEYS)[number];
+
+/** Public key prefixes issued for sandbox/test environments. */
+const SANDBOX_PUBLIC_KEY_PREFIXES = ['pub_test_', 'pub_stagtest_'] as const;
+
+/**
+ * True when a payment gateway PUBLIC key belongs to a sandbox/test
+ * environment rather than production. Test keys start with `pub_test_` or
+ * `pub_stagtest_`; production keys start with `pub_prod_`. Pure and
+ * prefix-only — it never needs the payment company's name or URLs to decide.
+ */
+export function isSandboxPublicKey(publicKey: string): boolean {
+  return SANDBOX_PUBLIC_KEY_PREFIXES.some((prefix) => publicKey.startsWith(prefix));
+}
 
 /**
  * Single point of access to `import.meta.env`. Jest cannot parse
@@ -41,5 +56,6 @@ export function getEnv(): AppEnv {
     apiUrl: raw.VITE_API_URL,
     paymentGatewayUrl: raw.VITE_PAYMENT_GATEWAY_URL,
     paymentGatewayPublicKey: raw.VITE_PAYMENT_GATEWAY_PUBLIC_KEY,
+    isSandbox: isSandboxPublicKey(raw.VITE_PAYMENT_GATEWAY_PUBLIC_KEY),
   };
 }

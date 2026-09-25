@@ -206,6 +206,10 @@ A few refinements from a manual pass over the real checkout, on top of the flow 
 - **Auto-return on APPROVED** (`features/transaction/ResultScreen.tsx`, `shared/ui/useCountdown.ts`):
   once a transaction is APPROVED, a 10s countdown runs the same "Back to store" flow automatically
   unless the buyer picks "Stay on this page" to cancel it or "Back to store now" to skip the wait.
+- **Sandbox test cards helper** (`features/checkout/SandboxTestCardsHelper.tsx`): shown only when
+  `VITE_PAYMENT_GATEWAY_PUBLIC_KEY` is a sandbox key (`config/env.ts#isSandboxPublicKey`), just below
+  the card number field — the gateway's sandbox only tokenizes two fixed PANs, so reviewers get a
+  one-click "Use" for the approved/declined test card instead of guessing.
 
 ## Testing
 
