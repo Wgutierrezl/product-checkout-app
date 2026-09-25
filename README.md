@@ -13,6 +13,11 @@
 ![AWS](https://img.shields.io/badge/AWS-Lambda%20%C2%B7%20DynamoDB%20%C2%B7%20CloudFront-FF9900)
 ![AWS CDK](https://img.shields.io/badge/AWS%20CDK-TypeScript-FF9900)
 
+<p align="center">
+  <img src="docs/screenshots/checkout-flow.gif" width="320" alt="Full mobile checkout: catalog, card and delivery form filled with the approved test card, summary, processing, payment approved, back to the store with the stock updated"><br>
+  <sub>Live checkout on a phone (sandbox card)</sub>
+</p>
+
 A mobile-first single-page checkout: pick a product, pay by credit card through a payment
 gateway (sandbox), and follow the payment to its final status. Five steps: **product page →
 credit card & delivery info → summary → final status → product page (stock updated)**. Guest
