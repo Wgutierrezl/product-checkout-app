@@ -91,10 +91,22 @@ export class EnvironmentVariables {
   @Min(1)
   THROTTLE_TTL: number = 60;
 
+  /**
+   * Applies per-route (each controller+handler+client gets its own
+   * independent counter — @nestjs/throttler never pools requests across
+   * routes). 10 was too tight for a route a client can legitimately hit
+   * more than once per window during normal browsing/retries (GET
+   * /products, GET /payment-acceptance, POST /transactions retried after a
+   * network hiccup, etc). GET /transactions/:id, which the SPA polls up to
+   * ~16 times in 60s while a payment settles, needs a much higher ceiling
+   * than this and gets its own override (see
+   * TransactionsController#getById) rather than raising this default that
+   * high for every route.
+   */
   @IsOptional()
   @IsInt()
   @Min(1)
-  THROTTLE_LIMIT: number = 10;
+  THROTTLE_LIMIT: number = 30;
 }
 
 export function validateEnv(config: Record<string, unknown>): EnvironmentVariables {

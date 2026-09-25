@@ -349,4 +349,19 @@ describe('Rate limiting', () => {
       await request(throttledServer).post('/transactions/webhook').send(payload).expect(200);
     }
   });
+
+  it('does not 429 GET /transactions/:id under its own higher limit, unlike the still-throttled global default', async () => {
+    // GET /transactions/:id carries its own @Throttle({ default: { limit: 60, ttl: 60_000 } })
+    // (see TransactionsController#getById), independent of this app's THROTTLE_LIMIT=2 global
+    // default — the same default `/products` throttles at 2 requests in the sibling test above.
+    // The id itself doesn't need to resolve to a real transaction: the guard runs before the
+    // route handler, so a well-formed-but-unknown UUID still exercises the throttle decision on
+    // every request while keeping this test independent of the main app's seeded data.
+    const unknownId = '00000000-0000-4000-8000-000000000000';
+
+    for (let i = 0; i < 20; i += 1) {
+      const response = await request(throttledServer).get(`/transactions/${unknownId}`);
+      expect(response.status).not.toBe(429);
+    }
+  });
 });
