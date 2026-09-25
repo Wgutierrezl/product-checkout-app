@@ -558,6 +558,20 @@ Consciously left out of this scope, each with the reason or the next step:
   Next: align both on the same status code.
 - **A replay with a different body under the same key returns the original silently.** Safe (no
   second charge), but a mismatched body could get a 409/422 instead.
+- **The last unit can be oversold under concurrency.** Stock is checked when the PENDING
+  transaction is created (`CreateTransactionUseCase`), but decremented only at settlement, inside
+  the atomic `TransactWriteItems` guarded by `stock >= :qty` (`settleApproved` in
+  `dynamo-transaction.repository.ts`, reached through `SettleTransactionUseCase`). If two buyers
+  pay for the last unit at the same time, the gateway can approve both; the second settlement's
+  stock condition fails, and the code treats that as oversold: the transaction stays `APPROVED`
+  (the buyer was charged), with no stock decrement and no delivery, and it is logged at error
+  level for manual reconciliation (restock or refund). Next: reserve stock when the PENDING
+  transaction is created and release it when the payment fails or expires.
+- **`GET /customers/:id` is reachable only with an id no public response exposes.** The brief
+  asks for a customers resource, so the endpoint exists, but no response returns a `customerId`,
+  on purpose, so one buyer can't look up another buyer's data (see the comment on
+  `DeliveryResponseDto` in `backend/src/deliveries/infrastructure/dto/delivery.dto.ts`). Next: an
+  authenticated back-office role would be its real consumer.
 - **Product images are hotlinked from Unsplash**, not served from our CDN. Next: copy them to
   our own CloudFront distribution.
 - **Google Fonts is render-blocking.** Next: self-host the two font families.
