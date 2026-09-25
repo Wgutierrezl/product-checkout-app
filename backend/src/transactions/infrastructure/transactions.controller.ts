@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ApiBadGatewayResponse, ApiBadRequestResponse, ApiConflictResponse, ApiCreatedResponse, ApiNotFoundResponse, ApiOkResponse, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
-import { SkipThrottle } from '@nestjs/throttler';
+import { SkipThrottle, Throttle } from '@nestjs/throttler';
 
 import { CreateTransactionUseCase } from '../application/create-transaction.use-case';
 import { GetTransactionUseCase } from '../application/get-transaction.use-case';
@@ -56,6 +56,21 @@ export class TransactionsController {
     );
   }
 
+  /**
+   * Dedicated, higher throttle limit for this route's own counter (see
+   * `AppModule`'s `ThrottlerModule.forRootAsync`; @nestjs/throttler keys
+   * each counter by controller+handler+client, so this override does NOT
+   * affect any other route's limit): the SPA polls GET /transactions/:id on
+   * a 1s→5s linear backoff for up to 60s (~16 requests) while a payment
+   * settles, which alone exceeded the old global default of 10 per 60s. Not
+   * `@SkipThrottle()` — still bounded, just wide enough that a real buyer
+   * waiting for their payment never gets 429'd.
+   *
+   * `ttl` here is in MILLISECONDS (the decorator's raw unit, unlike
+   * `THROTTLE_TTL`'s seconds in env/configuration.ts, which App Module
+   * converts to ms before registering the module-level throttler).
+   */
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
   @Get(':id')
   @ApiOperation({
     summary: 'Get a transaction by id, self-healing a stale PENDING status via a lazy poll of the gateway.',

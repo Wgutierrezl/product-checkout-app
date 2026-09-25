@@ -55,7 +55,29 @@ function buildController(overrides: {
   );
 }
 
+// @nestjs/throttler's internal metadata keys for the unnamed ('default')
+// throttler; not publicly exported as named constants, so we assert against
+// their known literal values (same pattern as health.controller.spec.ts).
+const THROTTLER_LIMIT_METADATA_KEY = 'THROTTLER:LIMITdefault';
+const THROTTLER_TTL_METADATA_KEY = 'THROTTLER:TTLdefault';
+
 describe('TransactionsController', () => {
+  describe('rate limiting', () => {
+    it('carries a dedicated, higher throttle limit on getById for SPA polling', () => {
+      const limit = Reflect.getMetadata(THROTTLER_LIMIT_METADATA_KEY, TransactionsController.prototype.getById);
+      const ttl = Reflect.getMetadata(THROTTLER_TTL_METADATA_KEY, TransactionsController.prototype.getById);
+
+      expect(limit).toBe(60);
+      expect(ttl).toBe(60_000);
+    });
+
+    it('does not apply the getById throttle override to create', () => {
+      const limit = Reflect.getMetadata(THROTTLER_LIMIT_METADATA_KEY, TransactionsController.prototype.create);
+
+      expect(limit).toBeUndefined();
+    });
+  });
+
   describe('create', () => {
     it('returns the mapped transaction DTO with an amounts breakdown', async () => {
       const transaction = buildTransaction({ status: 'APPROVED', gatewayTransactionId: 'gw-1' });

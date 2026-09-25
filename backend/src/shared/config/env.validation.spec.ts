@@ -88,4 +88,16 @@ describe('validateEnv', () => {
   it('rejects a non-positive PAYMENT_GATEWAY_TIMEOUT_MS', () => {
     expect(() => validateEnv({ ...requiredEnv, PAYMENT_GATEWAY_TIMEOUT_MS: '0' })).toThrow();
   });
+
+  it('defaults THROTTLE_LIMIT to 30 requests per window', () => {
+    const result = validateEnv(requiredEnv);
+
+    expect(result.THROTTLE_LIMIT).toBe(30);
+  });
+
+  it('applies an explicit THROTTLE_LIMIT override', () => {
+    const result = validateEnv({ ...requiredEnv, THROTTLE_LIMIT: '5' });
+
+    expect(result.THROTTLE_LIMIT).toBe(5);
+  });
 });
