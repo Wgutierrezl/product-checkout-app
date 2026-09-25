@@ -77,6 +77,10 @@ export function AuthModalContainer({ view, onClose }: AuthModalContainerProps) {
           userId: result.userId,
           email: result.email,
           fullName: result.fullName,
+          // expiresIn is in seconds (per the confirmed /auth/login contract); the
+          // stored session tracks an absolute epoch-ms deadline instead, so
+          // expiry checks never need to know when the token was issued.
+          expiresAt: Date.now() + result.expiresIn * 1000,
         }),
       );
       onClose();

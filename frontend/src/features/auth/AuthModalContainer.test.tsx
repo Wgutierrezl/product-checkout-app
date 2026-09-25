@@ -56,6 +56,7 @@ describe('AuthModalContainer', () => {
     const user = userEvent.setup();
     mockedLoginUser.mockResolvedValue({
       accessToken: 'jwt.token.value',
+      tokenType: 'Bearer',
       expiresIn: 3600,
       userId: 'u1',
       email: 'jane@example.com',
@@ -65,10 +66,14 @@ describe('AuthModalContainer', () => {
 
     await user.type(screen.getByLabelText(/^email/i), 'jane@example.com');
     await user.type(screen.getByLabelText(/^password/i), 'hunter22');
+    const before = Date.now();
     await user.click(screen.getByRole('button', { name: /^log in$/i }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(store.getState().auth).toMatchObject({ status: 'authenticated', token: 'jwt.token.value', email: 'jane@example.com' });
+    // expiresAt must be computed from the login response's expiresIn (seconds), not hardcoded.
+    expect(store.getState().auth.expiresAt).toBeGreaterThanOrEqual(before + 3600_000);
+    expect(store.getState().auth.expiresAt).toBeLessThanOrEqual(Date.now() + 3600_000);
   });
 
   it('on failed login (401), shows a generic error and does not dispatch loggedIn', async () => {
@@ -87,7 +92,7 @@ describe('AuthModalContainer', () => {
 
   it('on successful registration, switches to login with an info message and prefilled email', async () => {
     const user = userEvent.setup();
-    mockedRegisterUser.mockResolvedValue({ userId: 'u1' });
+    mockedRegisterUser.mockResolvedValue({ userId: 'u1', fullName: 'Jane Doe', email: 'jane@example.com' });
     const { onClose } = renderModal('register');
 
     await user.type(screen.getByLabelText(/full name/i), 'Jane Doe');

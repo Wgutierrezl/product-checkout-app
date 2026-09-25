@@ -120,14 +120,11 @@ export interface RegisterInput {
   password: string;
 }
 
-/**
- * ASSUMPTION (spec only guarantees "201 with userId, no password/hash in
- * response"): the backend returns just the new user's id. If the backend
- * agent's actual response shape differs, adjust here — this is the single
- * point of contact for the register response shape.
- */
+/** CONFIRMED live contract: `POST /auth/register` → 201 `{ userId, fullName, email }`. */
 export interface RegisterResult {
   userId: string;
+  fullName: string;
+  email: string;
 }
 
 export interface LoginInput {
@@ -136,16 +133,14 @@ export interface LoginInput {
 }
 
 /**
- * ASSUMPTION (spec only guarantees "200 with a JWT access token and its
- * declared expiry (~1h)"): `accessToken`/`expiresIn` (seconds) cover the
- * spec's explicit contract. `userId`/`email`/`fullName` are ALSO assumed
- * to be included so the header account menu can render a name/email
- * without the frontend decoding the JWT payload itself — flagged for
- * reconciliation with the backend agent's actual `auth.controller.ts`
- * response DTO.
+ * CONFIRMED live contract: `POST /auth/login` → 200
+ * `{ accessToken, tokenType: "Bearer", expiresIn, userId, email, fullName }`.
+ * `expiresIn` is in SECONDS — callers (see `AuthModalContainer`) convert it
+ * to an absolute `expiresAt` epoch-ms deadline before storing the session.
  */
 export interface LoginResult {
   accessToken: string;
+  tokenType: string;
   expiresIn: number;
   userId: string;
   email: string;

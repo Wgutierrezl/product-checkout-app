@@ -261,8 +261,9 @@ describe('backendClient', () => {
   describe('registerUser', () => {
     const input: RegisterInput = { fullName: 'Jane Doe', email: 'jane@example.com', password: 'hunter22' };
 
-    it('POSTs to /auth/register and returns the created userId', async () => {
-      fetchMock.mockResolvedValueOnce(jsonResponse({ userId: 'u1' }, { ok: true, status: 201 }));
+    it('POSTs to /auth/register and returns the created user', async () => {
+      const registerResult = { userId: 'u1', fullName: 'Jane Doe', email: 'jane@example.com' };
+      fetchMock.mockResolvedValueOnce(jsonResponse(registerResult, { ok: true, status: 201 }));
 
       const result = await registerUser(input);
 
@@ -270,7 +271,7 @@ describe('backendClient', () => {
         `${API_URL}/auth/register`,
         expect.objectContaining({ method: 'POST', body: JSON.stringify(input) }),
       );
-      expect(result).toEqual({ userId: 'u1' });
+      expect(result).toEqual(registerResult);
     });
 
     it('throws BackendApiError with status 409 on a duplicate email', async () => {
@@ -296,6 +297,7 @@ describe('backendClient', () => {
     it('POSTs to /auth/login and returns the access token payload', async () => {
       const loginResult = {
         accessToken: 'jwt.token.value',
+        tokenType: 'Bearer',
         expiresIn: 3600,
         userId: 'u1',
         email: 'jane@example.com',

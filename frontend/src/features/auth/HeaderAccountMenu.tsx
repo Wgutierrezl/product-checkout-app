@@ -1,4 +1,4 @@
-import { useRef, useState, type FocusEvent, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from 'react';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import { loggedOut } from './authSlice';
 import styles from './HeaderAccountMenu.module.css';
@@ -24,6 +24,26 @@ export function HeaderAccountMenu({ onOpenAuth }: HeaderAccountMenuProps) {
   const auth = useAppSelector((state) => state.auth);
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // Enforces the session's ~1h TTL client-side: scheduled fresh whenever
+  // `expiresAt` changes (a login, or the very first render after an
+  // already-authenticated boot rehydration both count), and cancelled by
+  // the effect cleanup on logout/expiry/unmount — so a tab left open past
+  // the token's expiry never keeps showing the buyer as logged in with a
+  // dead token. `HeaderAccountMenu` is always mounted (part of the app
+  // header), so this effect's lifetime matches the whole session's.
+  useEffect(() => {
+    if (auth.status !== 'authenticated' || !auth.expiresAt) {
+      return;
+    }
+
+    const delay = Math.max(0, auth.expiresAt - Date.now());
+    const timer = setTimeout(() => {
+      dispatch(loggedOut());
+    }, delay);
+
+    return () => clearTimeout(timer);
+  }, [auth.status, auth.expiresAt, dispatch]);
 
   function closeMenu() {
     setOpen(false);
