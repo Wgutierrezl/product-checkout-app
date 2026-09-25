@@ -12,9 +12,9 @@ import { GatewayTokenizeError } from '../../api/types';
 
 jest.mock('../../api/paymentGatewayClient');
 
-// Several tests type a whole payment form through user-event, which can
-// exceed Jest's 5 s default when the full suite runs on a busy machine.
-jest.setTimeout(15_000);
+// `delay: null` types without yielding to the event loop between keys:
+// several tests fill a whole payment form, which otherwise crawls past
+// Jest's 5 s default on a busy machine.
 
 const mockedTokenizeCard = paymentGatewayClient.tokenizeCard as jest.MockedFunction<
   typeof paymentGatewayClient.tokenizeCard
@@ -66,7 +66,7 @@ describe('PaymentModalContainer', () => {
   });
 
   it('moves the step back to PRODUCT when Cancel is clicked, without dispatching card data', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const { store } = renderWithStore();
 
     await user.click(screen.getByRole('button', { name: /cancel/i }));
@@ -78,7 +78,7 @@ describe('PaymentModalContainer', () => {
   });
 
   it('moves the step back to PRODUCT when Escape is pressed, keeping already-saved customer/delivery', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const savedCustomer = { fullName: 'Jane Doe', email: 'jane@example.com', phone: '+573001234567' };
     const savedDelivery = { address: 'Cra 1 # 2-3', city: 'Bogota', region: 'Cundinamarca' };
     const { store } = renderWithStore(buildStore({ customer: savedCustomer, delivery: savedDelivery }));
@@ -93,7 +93,7 @@ describe('PaymentModalContainer', () => {
 
   it('tokenizes, stores cardSummary/cardToken/customer/delivery, and moves to SUMMARY on success', async () => {
     mockedTokenizeCard.mockResolvedValue({ cardToken: 'tok_test_card' });
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const { store } = renderWithStore();
 
     await fillValidForm(user);
@@ -119,7 +119,7 @@ describe('PaymentModalContainer', () => {
 
   it('sends exp_month and exp_year as 2-digit strings to the gateway, regardless of the entered expiry', async () => {
     mockedTokenizeCard.mockResolvedValue({ cardToken: 'tok_test_card' });
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     renderWithStore();
 
     await user.type(screen.getByLabelText(/card number/i), '4111111111111111');
@@ -141,7 +141,7 @@ describe('PaymentModalContainer', () => {
 
   it('shows the tokenize failure inline and keeps the buyer on DETAILS without saving customer/delivery', async () => {
     mockedTokenizeCard.mockRejectedValue(new GatewayTokenizeError('Payment gateway rejected the card'));
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const { store } = renderWithStore();
 
     await fillValidForm(user);
@@ -157,7 +157,7 @@ describe('PaymentModalContainer', () => {
 
   it('falls back to a generic tokenize-failure message when the rejection is not an Error', async () => {
     mockedTokenizeCard.mockRejectedValue('boom');
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     renderWithStore();
 
     await fillValidForm(user);
@@ -168,7 +168,7 @@ describe('PaymentModalContainer', () => {
 
   it('disables Continue and shows a processing state while tokenizing', async () => {
     mockedTokenizeCard.mockReturnValue(new Promise(() => {}));
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     renderWithStore();
 
     await fillValidForm(user);
@@ -180,7 +180,7 @@ describe('PaymentModalContainer', () => {
   describe('closing during an in-flight tokenize request (BLOCKER)', () => {
     it('disables Cancel while tokenizing', async () => {
       mockedTokenizeCard.mockReturnValue(new Promise(() => {}));
-      const user = userEvent.setup();
+      const user = userEvent.setup({ delay: null });
       renderWithStore();
 
       await fillValidForm(user);
@@ -191,7 +191,7 @@ describe('PaymentModalContainer', () => {
 
     it('ignores Escape while tokenizing, leaving the step unchanged', async () => {
       mockedTokenizeCard.mockReturnValue(new Promise(() => {}));
-      const user = userEvent.setup();
+      const user = userEvent.setup({ delay: null });
       const { store } = renderWithStore();
 
       await fillValidForm(user);
@@ -203,7 +203,7 @@ describe('PaymentModalContainer', () => {
 
     it('ignores a backdrop click while tokenizing, leaving the step unchanged', async () => {
       mockedTokenizeCard.mockReturnValue(new Promise(() => {}));
-      const user = userEvent.setup();
+      const user = userEvent.setup({ delay: null });
       const { store } = renderWithStore();
 
       await fillValidForm(user);
@@ -221,7 +221,7 @@ describe('PaymentModalContainer', () => {
             resolveTokenize = resolve;
           }),
       );
-      const user = userEvent.setup();
+      const user = userEvent.setup({ delay: null });
       const { store, unmount } = renderWithStore();
 
       await fillValidForm(user);
@@ -246,7 +246,7 @@ describe('PaymentModalContainer', () => {
             rejectTokenize = reject;
           }),
       );
-      const user = userEvent.setup();
+      const user = userEvent.setup({ delay: null });
       const { store, unmount } = renderWithStore();
 
       await fillValidForm(user);
@@ -263,7 +263,7 @@ describe('PaymentModalContainer', () => {
 
   it('does not stall tokenization under React StrictMode double-invocation (dev mode)', async () => {
     mockedTokenizeCard.mockResolvedValue({ cardToken: 'tok_test_card' });
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const store = buildStore();
 
     render(
@@ -303,7 +303,7 @@ describe('PaymentModalContainer', () => {
     };
 
     it('saves what the buyer types into the store as a draft, without any card data', async () => {
-      const user = userEvent.setup();
+      const user = userEvent.setup({ delay: null });
       const { store } = renderWithStore();
 
       await fillValidForm(user);
@@ -327,7 +327,7 @@ describe('PaymentModalContainer', () => {
     });
 
     it('forgets the draft when the buyer cancels', async () => {
-      const user = userEvent.setup();
+      const user = userEvent.setup({ delay: null });
       const { store } = renderWithStore(buildStore({ formDraft: DRAFT, draftRestored: true }));
 
       await user.click(screen.getByRole('button', { name: /cancel/i }));

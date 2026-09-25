@@ -11,9 +11,9 @@ import * as paymentGatewayClient from '../api/paymentGatewayClient';
 jest.mock('../api/backendClient');
 jest.mock('../api/paymentGatewayClient');
 
-// Several tests type a whole payment form through user-event, which can
-// exceed Jest's 5 s default when the full suite runs on a busy machine.
-jest.setTimeout(15_000);
+// `delay: null` types without yielding to the event loop between keys:
+// several tests fill a whole payment form, which otherwise crawls past
+// Jest's 5 s default on a busy machine.
 
 const mockedTokenizeCard = paymentGatewayClient.tokenizeCard as jest.MockedFunction<
   typeof paymentGatewayClient.tokenizeCard
@@ -223,7 +223,7 @@ describe('App refresh resilience (integration)', () => {
           <App />
         </Provider>,
       );
-      const user = userEvent.setup();
+      const user = userEvent.setup({ delay: null });
 
       await typeFullForm(user);
       await waitFor(() => expect(store.getState().checkout.formDraft).toMatchObject({ postalCode: '110111' }));
@@ -241,7 +241,7 @@ describe('App refresh resilience (integration)', () => {
           <App />
         </Provider>,
       );
-      const user = userEvent.setup();
+      const user = userEvent.setup({ delay: null });
 
       await typeFullForm(user);
       await user.click(screen.getByRole('button', { name: /continue/i }));
@@ -260,7 +260,7 @@ describe('App refresh resilience (integration)', () => {
           <App />
         </Provider>,
       );
-      const user = userEvent.setup();
+      const user = userEvent.setup({ delay: null });
       await typeFullForm(user);
       await waitFor(() => expect(firstStore.getState().checkout.formDraft).toMatchObject({ postalCode: '110111' }));
       unmount();
@@ -398,7 +398,7 @@ describe('App refresh resilience (integration)', () => {
           <App />
         </Provider>,
       );
-      const user = userEvent.setup();
+      const user = userEvent.setup({ delay: null });
       const [terms, personalData] = await screen.findAllByRole('checkbox');
       await waitFor(() => expect(terms).toBeEnabled());
       const acceptanceCallsBeforePay = mockedFetchPaymentAcceptance.mock.calls.length;
@@ -579,7 +579,7 @@ describe('App refresh resilience (integration)', () => {
           <App />
         </Provider>,
       );
-      const user = userEvent.setup();
+      const user = userEvent.setup({ delay: null });
       await screen.findByRole('heading', { name: /approved/i });
 
       await user.click(screen.getByRole('button', { name: /back to store/i }));
