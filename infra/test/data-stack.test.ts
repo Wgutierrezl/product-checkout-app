@@ -12,10 +12,10 @@ function synthDataStack(): Template {
 }
 
 describe('DataStack', () => {
-  it('provisions exactly 4 DynamoDB tables with PAY_PER_REQUEST billing', () => {
+  it('provisions exactly 5 DynamoDB tables with PAY_PER_REQUEST billing', () => {
     const template = synthDataStack();
 
-    template.resourceCountIs('AWS::DynamoDB::Table', 4);
+    template.resourceCountIs('AWS::DynamoDB::Table', 5);
     template.allResourcesProperties('AWS::DynamoDB::Table', {
       BillingMode: 'PAY_PER_REQUEST',
     });
@@ -62,7 +62,7 @@ describe('DataStack', () => {
     });
   });
 
-  it('creates the Transactions table with ReferenceIndex and GatewayTxIndex GSIs projecting ALL', () => {
+  it('creates the Transactions table with ReferenceIndex, GatewayTxIndex, and UserIdIndex GSIs projecting ALL', () => {
     const template = synthDataStack();
 
     template.hasResourceProperties('AWS::DynamoDB::Table', {
@@ -79,7 +79,56 @@ describe('DataStack', () => {
           KeySchema: [{ AttributeName: 'gatewayTransactionId', KeyType: 'HASH' }],
           Projection: { ProjectionType: 'ALL' },
         }),
+        Match.objectLike({
+          IndexName: 'UserIdIndex',
+          KeySchema: [{ AttributeName: 'userId', KeyType: 'HASH' }],
+          Projection: { ProjectionType: 'ALL' },
+        }),
       ]),
+    });
+  });
+
+  it('creates the Users table with an EmailIndex GSI projecting ALL', () => {
+    const template = synthDataStack();
+
+    template.hasResourceProperties('AWS::DynamoDB::Table', {
+      TableName: 'Users',
+      KeySchema: [{ AttributeName: 'userId', KeyType: 'HASH' }],
+      GlobalSecondaryIndexes: Match.arrayWith([
+        Match.objectLike({
+          IndexName: 'EmailIndex',
+          KeySchema: [{ AttributeName: 'email', KeyType: 'HASH' }],
+          Projection: { ProjectionType: 'ALL' },
+        }),
+      ]),
+    });
+  });
+
+  it('keeps the Transactions table additive: unchanged partition key and no removal of existing GSIs when UserIdIndex is added', () => {
+    const template = synthDataStack();
+    const resources = template.findResources('AWS::DynamoDB::Table', {
+      Properties: { TableName: 'Transactions' },
+    });
+    const [, transactionsTable] = Object.entries(resources)[0];
+    const gsiNames = (
+      transactionsTable.Properties.GlobalSecondaryIndexes as Array<{ IndexName: string }>
+    ).map((gsi) => gsi.IndexName);
+
+    // Additive-only assertion: partition key is still solely transactionId (no
+    // composite/replacement key change), and all 3 GSIs (the 2 pre-existing
+    // ones plus the new UserIdIndex) coexist — none were dropped to make room.
+    expect(transactionsTable.Properties.KeySchema).toEqual([
+      { AttributeName: 'transactionId', KeyType: 'HASH' },
+    ]);
+    expect(gsiNames.sort()).toEqual(['GatewayTxIndex', 'ReferenceIndex', 'UserIdIndex'].sort());
+    // DeletionPolicy/UpdateReplacePolicy 'Delete' here reflects RemovalPolicy.DESTROY
+    // (a demo-stack choice, see class doc), not a resource replacement signal —
+    // real replacement risk is CloudFormation replacing the table because a
+    // key-schema attribute changed, which the KeySchema assertion above rules out.
+    template.hasResource('AWS::DynamoDB::Table', {
+      Properties: Match.objectLike({ TableName: 'Transactions' }),
+      DeletionPolicy: 'Delete',
+      UpdateReplacePolicy: 'Delete',
     });
   });
 

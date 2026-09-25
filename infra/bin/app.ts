@@ -52,6 +52,7 @@ const apiStack = new ApiStack(app, 'ApiStack', {
   customersTable: dataStack.customersTable,
   deliveriesTable: dataStack.deliveriesTable,
   transactionsTable: dataStack.transactionsTable,
+  usersTable: dataStack.usersTable,
   webStackDomain: webStack.distribution.distributionDomainName,
   lambdaAssetPath: LAMBDA_ASSET_PATH,
 });

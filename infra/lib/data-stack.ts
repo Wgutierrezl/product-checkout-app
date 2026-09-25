@@ -6,14 +6,17 @@ export const PRODUCTS_TABLE_NAME = 'Products';
 export const CUSTOMERS_TABLE_NAME = 'Customers';
 export const DELIVERIES_TABLE_NAME = 'Deliveries';
 export const TRANSACTIONS_TABLE_NAME = 'Transactions';
+export const USERS_TABLE_NAME = 'Users';
 
 export const CUSTOMERS_EMAIL_INDEX_NAME = 'EmailIndex';
 export const DELIVERIES_TRANSACTION_ID_INDEX_NAME = 'TransactionIdIndex';
 export const TRANSACTIONS_REFERENCE_INDEX_NAME = 'ReferenceIndex';
 export const TRANSACTIONS_GATEWAY_TX_INDEX_NAME = 'GatewayTxIndex';
+export const TRANSACTIONS_USER_ID_INDEX_NAME = 'UserIdIndex';
+export const USERS_EMAIL_INDEX_NAME = 'EmailIndex';
 
 /**
- * Provisions the 4 DynamoDB tables backing the checkout app, matching the
+ * Provisions the 5 DynamoDB tables backing the checkout app, matching the
  * key schemas and GSIs used by `backend/scripts/seed-products.ts` and the
  * backend's Dynamo repositories exactly. PAY_PER_REQUEST billing (no
  * capacity planning needed for a demo workload) and RemovalPolicy.DESTROY
@@ -24,6 +27,7 @@ export class DataStack extends Stack {
   public readonly customersTable: Table;
   public readonly deliveriesTable: Table;
   public readonly transactionsTable: Table;
+  public readonly usersTable: Table;
 
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
@@ -73,6 +77,27 @@ export class DataStack extends Stack {
     this.transactionsTable.addGlobalSecondaryIndex({
       indexName: TRANSACTIONS_GATEWAY_TX_INDEX_NAME,
       partitionKey: { name: 'gatewayTransactionId', type: AttributeType.STRING },
+      projectionType: ProjectionType.ALL,
+    });
+    // Additive-only (user-accounts): a plain new GSI on the existing table —
+    // does not touch `partitionKey` (still `transactionId`) or either
+    // existing GSI's key schema/type, so CloudFormation applies this as a
+    // GSI create, never a table replacement.
+    this.transactionsTable.addGlobalSecondaryIndex({
+      indexName: TRANSACTIONS_USER_ID_INDEX_NAME,
+      partitionKey: { name: 'userId', type: AttributeType.STRING },
+      projectionType: ProjectionType.ALL,
+    });
+
+    this.usersTable = new Table(this, 'UsersTable', {
+      tableName: USERS_TABLE_NAME,
+      partitionKey: { name: 'userId', type: AttributeType.STRING },
+      billingMode: BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+    this.usersTable.addGlobalSecondaryIndex({
+      indexName: USERS_EMAIL_INDEX_NAME,
+      partitionKey: { name: 'email', type: AttributeType.STRING },
       projectionType: ProjectionType.ALL,
     });
   }

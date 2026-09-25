@@ -44,6 +44,7 @@ function synthApiStack(): Template {
     customersTable: dataStack.customersTable,
     deliveriesTable: dataStack.deliveriesTable,
     transactionsTable: dataStack.transactionsTable,
+    usersTable: dataStack.usersTable,
     webStackDomain: 'd123456abcdef.cloudfront.net',
     lambdaAssetPath: FIXTURE_LAMBDA_ASSET_PATH,
   });
@@ -78,6 +79,16 @@ describe('ApiStack', () => {
     expect(envVars).toHaveProperty('SSM_PARAM_PREFIX', '/checkout/gateway');
   });
 
+  it('sets USERS_TABLE_NAME so the accounts module can resolve the Users table', () => {
+    const template = synthApiStack();
+
+    const resources = template.findResources('AWS::Lambda::Function');
+    const [, fn] = Object.entries(resources)[0];
+    const envVars: Record<string, unknown> = fn.Properties.Environment.Variables;
+
+    expect(envVars).toHaveProperty('USERS_TABLE_NAME');
+  });
+
   it('sets PAYMENT_GATEWAY_URL and PAYMENT_GATEWAY_PUBLIC_KEY — non-secret backend config', () => {
     const template = synthApiStack();
 
@@ -97,14 +108,17 @@ describe('ApiStack', () => {
     expect((envVars.PAYMENT_GATEWAY_PUBLIC_KEY as string).length).toBeGreaterThan(0);
   });
 
-  it('scopes ssm:GetParameters (the batch action the backend calls) to exactly the 3 gateway SecureString param ARNs — no wildcard resource', () => {
+  it('scopes ssm:GetParameters (the batch action the backend calls) to exactly the 3 gateway secrets plus the accounts JWT secret — no wildcard resource', () => {
     const template = synthApiStack();
 
     const statement = findStatementByAction(template, 'ssm:GetParameters');
     expect(statement.Effect).toBe('Allow');
     expect(statement.Resource).not.toBe('*');
     expect(Array.isArray(statement.Resource)).toBe(true);
-    expect(statement.Resource).toHaveLength(3);
+    expect(statement.Resource).toHaveLength(4);
+    expect(statement.Resource).toEqual(
+      expect.arrayContaining([expect.stringContaining('/checkout/gateway/jwt-secret')]),
+    );
   });
 
   it('scopes kms:Decrypt via a kms:ViaService=ssm condition, not a bare resource ARN', () => {
@@ -122,7 +136,7 @@ describe('ApiStack', () => {
     });
   });
 
-  it('grants dynamodb:TransactWriteItems on all 4 tables (settlement + customer email guard)', () => {
+  it('grants dynamodb:TransactWriteItems on all 5 tables (settlement + customer/user email guards)', () => {
     const template = synthApiStack();
 
     const policies = template.findResources('AWS::IAM::Policy');
@@ -146,7 +160,7 @@ describe('ApiStack', () => {
     const [statement] = transactWriteStatements;
     expect(statement.Effect).toBe('Allow');
     expect(Array.isArray(statement.Resource)).toBe(true);
-    expect(statement.Resource).toHaveLength(4);
+    expect(statement.Resource).toHaveLength(5);
   });
 
   it('exposes a throttled $default route', () => {

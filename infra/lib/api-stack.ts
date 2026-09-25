@@ -9,13 +9,17 @@ import { Construct } from 'constructs';
 
 /** Generic path prefix — never the payment gateway company's name. */
 export const SSM_PARAM_PREFIX = '/checkout/gateway';
-const SSM_SECRET_SUFFIXES = ['private-key', 'integrity-secret', 'events-secret'];
+// 'jwt-secret' (user-accounts): the accounts module's JWT signing secret,
+// appended to the SAME batch/prefix as the payment-gateway secrets — one
+// GetParametersCommand, one IAM resource list, no new IAM action.
+const SSM_SECRET_SUFFIXES = ['private-key', 'integrity-secret', 'events-secret', 'jwt-secret'];
 
 export interface ApiStackProps extends StackProps {
   readonly productsTable: ITable;
   readonly customersTable: ITable;
   readonly deliveriesTable: ITable;
   readonly transactionsTable: ITable;
+  readonly usersTable: ITable;
   /** CloudFront distribution domain from `WebStack`, used for CORS. */
   readonly webStackDomain: string;
   /**
@@ -63,6 +67,7 @@ export class ApiStack extends Stack {
         CUSTOMERS_TABLE_NAME: props.customersTable.tableName,
         DELIVERIES_TABLE_NAME: props.deliveriesTable.tableName,
         TRANSACTIONS_TABLE_NAME: props.transactionsTable.tableName,
+        USERS_TABLE_NAME: props.usersTable.tableName,
         // Non-secret backend config (backend's env.validation.ts requires
         // both at boot). Real values come from GitHub Actions vars in
         // deploy.yml (see design's Manual Prerequisites); these generic
@@ -78,6 +83,7 @@ export class ApiStack extends Stack {
       props.customersTable,
       props.deliveriesTable,
       props.transactionsTable,
+      props.usersTable,
     ];
     for (const table of tables) {
       table.grantReadWriteData(fn);
@@ -85,7 +91,8 @@ export class ApiStack extends Stack {
 
     // grantReadWriteData() does not include TransactWriteItems.
     // Required by: customers' at-most-one-per-email create() guard
-    // (2-item Put transaction) and transactions' settleApproved()
+    // (2-item Put transaction), users' at-most-one-per-email create() guard
+    // (same pattern, user-accounts), and transactions' settleApproved()
     // (3-item Update/Update/Put transaction across Transactions, Products,
     // and Deliveries). ConditionCheckItem is already covered by
     // grantReadWriteData()'s RESOURCE_READ_DATA_ACTIONS — no separate
