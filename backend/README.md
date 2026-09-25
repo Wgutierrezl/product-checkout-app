@@ -80,19 +80,27 @@ mocked `fetch`. The CI gate is 80% (`jest.config.ts`); current numbers:
 | Functions | 269 / 269 | 100% |
 | Lines | 1007 / 1007 | 100% |
 
-391 tests across 47 suites, developed strict-TDD (RED → GREEN → REFACTOR) throughout.
+409 tests across 49 suites, developed strict-TDD (RED → GREEN → REFACTOR) throughout.
 
 ### End-to-end tests
 
+The suite drops and recreates every table, so it runs against its **own** DynamoDB Local,
+never the dev one from `docker compose up` (port 8000):
+
 ```bash
-docker compose up -d          # DynamoDB Local must be running
+docker run -d --rm -p 8001:8000 --name checkout-dynamodb-e2e amazon/dynamodb-local
 npm run test:e2e
+docker stop checkout-dynamodb-e2e   # --rm removes it; in-memory data goes with it
 ```
+
+It connects to `E2E_DYNAMO_ENDPOINT` (default `http://localhost:8001`) and ignores the app's
+`DYNAMO_ENDPOINT`. It refuses to start, before touching any table, if that endpoint uses port
+8000 (`test/e2e/support/e2e-dynamo-endpoint.ts`).
 
 Uses a **separate Jest config** (`test/jest-e2e.json`, its own `npm run test:e2e` script — never
 part of the unit coverage gate) and `supertest` against the real `AppModule`, with:
 
-- **Real DynamoDB Local**: all 4 tables are dropped and recreated at the start of every run
+- **Real DynamoDB Local** (a dedicated instance, see above): all 4 tables are dropped and recreated at the start of every run
   (`test/e2e/support/dynamo-e2e.support.ts`), then seeded with 2 fixed test products — no shared
   state with `npm run seed`'s catalog, no cross-run pollution.
 - **A deterministic, no-network fake gateway** (`test/e2e/support/fake-payment-gateway.adapter.ts`)
@@ -101,11 +109,12 @@ part of the unit coverage gate) and `supertest` against the real `AppModule`, wi
   (mirroring the real sandbox's observed behavior) and resolves APPROVED on the first poll, so the
   suite exercises the actual lazy-poll code path, not just a shortcut.
 
-18 tests cover: catalog listing/detail (400 malformed id, 404 unknown id), the payment-acceptance
+24 tests cover: catalog listing/detail (400 malformed id, 404 unknown id), the payment-acceptance
 proxy, the full happy path (create → PENDING → lazy-polled to APPROVED → stock decremented →
 delivery embedded → idempotent replay → masked customer/delivery reads), the declined path,
-insufficient stock (409), whitelist validation (400 on an unknown extra field), an invalid webhook
-checksum (400), and a hardening block: helmet headers, CORS allowlist behavior, per-route rate
+insufficient stock (409), whitelist validation (400 on an unknown extra field, and 400, not 500,
+for a missing or `null` customer/delivery object), an invalid or missing webhook signature (400),
+and a hardening block: helmet headers, CORS allowlist behavior and preflight caching, per-route rate
 limiting (429, with `/health` and the webhook explicitly exempt), and "no stack trace in any error
 body".
 

@@ -3,7 +3,9 @@
  * and RECREATED at the start of every run (`cleanAndSeedTables`) so the
  * suite never depends on leftover state from a previous run or from
  * `npm run seed`'s own fixed catalog. Table/index names are imported from
- * the production repositories so schema drift is impossible.
+ * the production repositories so schema drift is impossible. Because of
+ * that drop, the endpoint comes from `resolveE2eDynamoEndpoint`, which never
+ * targets the dev DynamoDB Local on port 8000.
  */
 import {
   CreateTableCommand,
@@ -28,9 +30,12 @@ import {
   TRANSACTIONS_REFERENCE_INDEX_NAME,
   TRANSACTIONS_TABLE_NAME,
 } from '../../../src/transactions/infrastructure/dynamo-transaction.repository';
+import { resolveE2eDynamoEndpoint } from './e2e-dynamo-endpoint';
 
 export const E2E_AWS_REGION = process.env.AWS_REGION ?? 'us-east-1';
-export const E2E_DYNAMO_ENDPOINT = process.env.DYNAMO_ENDPOINT ?? 'http://localhost:8000';
+// Throws on import when E2E_DYNAMO_ENDPOINT points at the dev database
+// (port 8000), before any table is dropped.
+export const E2E_DYNAMO_ENDPOINT = resolveE2eDynamoEndpoint(process.env);
 
 export const PRODUCT_A_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 export const PRODUCT_A_STOCK = 5;

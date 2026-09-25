@@ -268,9 +268,9 @@ directly against this repository:
 
 | Package | Statements | Branches | Functions | Lines | Suites / Tests |
 |---|---|---|---|---|---|
-| `backend` (unit) | 100% | 100% | 100% | 100% | 47 suites / 391 tests |
-| `backend` (e2e) | — | — | — | — | 1 suite / 18 tests (DynamoDB Local) |
-| `frontend` | 99.49% | 98.17% | 100% | 99.46% | 52 suites / 556 tests |
+| `backend` (unit) | 100% | 100% | 100% | 100% | 49 suites / 409 tests |
+| `backend` (e2e) | — | — | — | — | 1 suite / 24 tests (DynamoDB Local) |
+| `frontend` | 99.5% | 98.2% | 100% | 99.46% | 53 suites / 578 tests |
 | `infra` | 100% | 100% | 100% | 100% | 6 suites / 38 tests |
 
 - **Backend e2e** runs against a real `AppModule` and DynamoDB Local, with a deterministic
@@ -289,6 +289,9 @@ Run any package's suite yourself: `npm test -- --coverage` in `backend/`, `front
 1. **Backend** — `docker compose up -d` (DynamoDB Local), copy `.env.example` to `.env`,
    `npm install && npm run seed && npm run start:dev`. Full details:
    [backend/README.md § Running locally](./backend/README.md#running-locally).
+   The e2e suite (`npm run test:e2e`) drops its tables, so it needs a separate DynamoDB Local on
+   port 8001: `docker run -d --rm -p 8001:8000 --name checkout-dynamodb-e2e amazon/dynamodb-local`
+   (see [backend/README.md § End-to-end tests](./backend/README.md#end-to-end-tests)).
 2. **Frontend** — copy `.env.example` to `.env.local`, fill in the three `VITE_*` variables,
    `npm install && npm run dev` (`http://localhost:5173`). Full details:
    [frontend/README.md § Running locally](./frontend/README.md#running-locally).

@@ -8,12 +8,14 @@ import styles from './ProductCard.module.css';
 export interface ProductCardProps {
   product: Product;
   onBuy: (productId: string, quantity: number) => void;
-  /** Marks this card's image as the Largest Contentful Paint candidate (first card in the grid). */
+  /** Marks this card's image as the Largest Contentful Paint candidate (first card in the grid). Implies `eager`. */
   priority?: boolean;
+  /** Loads the image eagerly without raising its fetch priority (above-the-fold cards). */
+  eager?: boolean;
 }
 
 /** A single product: image, copy, stock badge, quantity stepper, and a buy action. */
-export function ProductCard({ product, onBuy, priority = false }: ProductCardProps) {
+export function ProductCard({ product, onBuy, priority = false, eager = false }: ProductCardProps) {
   const inStock = product.stock > 0;
   const [quantity, setQuantity] = useState(() => clampQuantity(1, product.stock));
   const max = maxSelectableQuantity(product.stock);
@@ -37,7 +39,7 @@ export function ProductCard({ product, onBuy, priority = false }: ProductCardPro
           alt={product.name}
           width={320}
           height={320}
-          loading={priority ? 'eager' : 'lazy'}
+          loading={priority || eager ? 'eager' : 'lazy'}
           {...(priority ? { fetchpriority: 'high' } : {})}
         />
       </div>

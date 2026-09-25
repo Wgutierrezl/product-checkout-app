@@ -34,7 +34,7 @@ describe('applyGlobalConfig', () => {
     expect(app.get).toHaveBeenCalledWith(ConfigService);
     expect(configService.getOrThrow).toHaveBeenCalledWith('cors');
     expect(app.use).toHaveBeenCalledWith(expect.any(Function));
-    expect(app.enableCors).toHaveBeenCalledWith({ origin: ['http://localhost:5173'] });
+    expect(app.enableCors).toHaveBeenCalledWith({ origin: ['http://localhost:5173'], maxAge: 600 });
     expect(app.useGlobalPipes).toHaveBeenCalledWith(expect.any(ValidationPipe));
     expect(app.useGlobalFilters).toHaveBeenCalledWith(expect.any(DomainErrorFilter));
     expect(setupSwagger).toHaveBeenCalledWith(app);
@@ -45,6 +45,6 @@ describe('applyGlobalConfig', () => {
 
     applyGlobalConfig(app);
 
-    expect(app.enableCors).toHaveBeenCalledWith({ origin: ['https://checkout.example.com'] });
+    expect(app.enableCors).toHaveBeenCalledWith({ origin: ['https://checkout.example.com'], maxAge: 600 });
   });
 });

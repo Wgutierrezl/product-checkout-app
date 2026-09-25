@@ -62,8 +62,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     response = await fetch(`${apiUrl}${path}`, {
       ...init,
       signal: controller.signal,
+      // Content-Type: application/json makes a request non-simple, so the
+      // browser sends a CORS preflight first. Only requests with a JSON body
+      // need it; body-less GETs (catalog, status polling) stay simple.
       headers: {
-        'Content-Type': 'application/json',
+        ...(init?.body !== undefined && { 'Content-Type': 'application/json' }),
         ...init?.headers,
       },
     });
