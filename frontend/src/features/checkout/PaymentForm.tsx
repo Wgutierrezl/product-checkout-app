@@ -21,7 +21,14 @@ import {
   validateRegion,
 } from '../../domain/checkout/customerDeliveryValidation';
 import type { CustomerInput, DeliveryInput } from '../../api/types';
+import type { PaymentFormDraft } from './checkoutSlice';
 import styles from './PaymentForm.module.css';
+
+/** How long the buyer must pause typing before the draft is reported. */
+export const DRAFT_SAVE_DEBOUNCE_MS = 400;
+
+const RESTORED_CARD_NOTICE =
+  'For your security, card details are never stored on this device. Please re-enter them.';
 
 const INSTALLMENT_OPTIONS = Array.from({ length: 36 }, (_, index) => index + 1);
 
@@ -129,6 +136,25 @@ const VALIDATORS: Record<FieldName, (values: FormValues) => string | null> = {
   region: (values) => validateRegion(values.region),
 };
 
+/**
+ * Picks ONLY the fields that may be kept across a refresh. Card number,
+ * expiry and CVC are never part of it.
+ */
+function toDraft(values: FormValues): PaymentFormDraft {
+  return {
+    cardHolder: values.cardHolder,
+    installments: values.installments,
+    fullName: values.fullName,
+    email: values.email,
+    phoneCountry: values.phoneCountry,
+    phoneNational: values.phoneNational,
+    address: values.address,
+    city: values.city,
+    region: values.region,
+    postalCode: values.postalCode,
+  };
+}
+
 export interface PaymentFormSubmitValues {
   cardNumber: string;
   cardHolder: string;
@@ -144,6 +170,12 @@ export interface PaymentFormProps {
   initialCustomer: CustomerInput | null;
   initialDelivery: DeliveryInput | null;
   initialInstallments: number;
+  /** Non-card fields typed before a refresh; wins over the committed customer/delivery. */
+  initialDraft?: PaymentFormDraft | null;
+  /** Called (debounced) with the non-card fields whenever the buyer changes them. */
+  onDraftChange?: (draft: PaymentFormDraft) => void;
+  /** True when this form was prefilled from data restored after a refresh. */
+  showRestoredNotice?: boolean;
   isSubmitting: boolean;
   submitError: string | null;
   onCancel: () => void;
@@ -151,22 +183,29 @@ export interface PaymentFormProps {
 }
 
 /**
- * Card + customer + delivery form for the DETAILS step. Card fields
- * (`cardNumber`/`cvc`/etc.) NEVER prefill from anything persisted — only
- * customer/delivery do, sourced from the checkout slice for refresh
- * resilience. Validation runs on blur (inline) and again on submit (which
- * also focuses the first invalid field).
+ * Card + customer + delivery form for the DETAILS step. Card number, expiry
+ * and CVC NEVER prefill from anything persisted and are never reported in
+ * the draft. Everything else prefills from the restored draft (or, without
+ * one, the committed customer/delivery) for refresh resilience. Validation
+ * runs on blur (inline) and again on submit (which also focuses the first
+ * invalid field).
  */
 export function PaymentForm({
   initialCustomer,
   initialDelivery,
   initialInstallments,
+  initialDraft = null,
+  onDraftChange,
+  showRestoredNotice = false,
   isSubmitting,
   submitError,
   onCancel,
   onSubmit,
 }: PaymentFormProps) {
   const [values, setValues] = useState<FormValues>(() => {
+    if (initialDraft) {
+      return { ...initialDraft, cardNumber: '', expiry: '', cvc: '' };
+    }
     // Gracefully migrates an existing plain/bare phone (persisted before
     // this country selector existed) by treating it as a Colombian
     // national number — see `parsePhone`.
@@ -195,7 +234,28 @@ export function PaymentForm({
     };
   });
   const [errors, setErrors] = useState<Partial<Record<FieldName, string>>>({});
+  const [restoredNoticeDismissed, setRestoredNoticeDismissed] = useState(false);
   const fieldRefs = useRef<Partial<Record<FieldName, HTMLInputElement>>>({});
+
+  // Debounced draft reporting. Compared by serialized value so neither the
+  // first render nor a card-field keystroke (not part of the draft) ever
+  // triggers a write. The pending timer is dropped on unmount: a cancelled
+  // form must not re-save what the buyer just discarded.
+  const draft = toDraft(values);
+  const serializedDraft = JSON.stringify(draft);
+  const lastReportedDraftRef = useRef(serializedDraft);
+  const onDraftChangeRef = useRef(onDraftChange);
+  onDraftChangeRef.current = onDraftChange;
+  useEffect(() => {
+    if (serializedDraft === lastReportedDraftRef.current) {
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      lastReportedDraftRef.current = serializedDraft;
+      onDraftChangeRef.current?.(JSON.parse(serializedDraft) as PaymentFormDraft);
+    }, DRAFT_SAVE_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [serializedDraft]);
 
   // A failed tokenize attempt means the card was rejected (or the request
   // failed) — the buyer must re-enter card details from scratch rather
@@ -211,6 +271,15 @@ export function PaymentForm({
   const brand = detectCardBrand(cardDigits);
   const showUnsupportedBrandMessage = cardDigits.length >= 6 && brand === 'unknown';
   const { isSandbox } = getEnv();
+  const cardFieldsEmpty = values.cardNumber === '' && values.expiry === '' && values.cvc === '';
+  const showCardReentryNotice = showRestoredNotice && !restoredNoticeDismissed && !submitError && cardFieldsEmpty;
+
+  function handleCardNumberChange(formatted: string) {
+    setField('cardNumber', formatted);
+    if (formatted !== '') {
+      setRestoredNoticeDismissed(true);
+    }
+  }
 
   function setField<K extends keyof FormValues>(field: K, value: FormValues[K]) {
     setValues((current) => ({ ...current, [field]: value }));
@@ -223,7 +292,7 @@ export function PaymentForm({
    * so the buyer can keep going without reaching for the mouse.
    */
   function handleUseTestCard(cardNumber: string) {
-    setField('cardNumber', formatCardNumberInput(cardNumber));
+    handleCardNumberChange(formatCardNumberInput(cardNumber));
     setErrors((current) => ({ ...current, cardNumber: undefined }));
     fieldRefs.current.cardHolder?.focus();
   }
@@ -277,6 +346,10 @@ export function PaymentForm({
       return;
     }
 
+    // Report the final draft now: the debounce may not have fired yet.
+    lastReportedDraftRef.current = serializedDraft;
+    onDraftChange?.(draft);
+
     const delivery: DeliveryInput = {
       address: values.address.trim(),
       city: values.city.trim(),
@@ -316,6 +389,11 @@ export function PaymentForm({
       <fieldset className={styles.fieldset} disabled={isSubmitting}>
       <section>
         <h3 className={styles.sectionTitle}>Card</h3>
+        {showCardReentryNotice && (
+          <p className={styles.notice} role="status" aria-live="polite">
+            {RESTORED_CARD_NOTICE}
+          </p>
+        )}
         <div className={styles.grid}>
           <Field id="cardNumber" label="Card number" error={errors.cardNumber}>
             {(aria) => (
@@ -329,7 +407,7 @@ export function PaymentForm({
                   inputMode="numeric"
                   autoComplete="cc-number"
                   value={values.cardNumber}
-                  onChange={(event) => setField('cardNumber', formatCardNumberInput(event.target.value))}
+                  onChange={(event) => handleCardNumberChange(formatCardNumberInput(event.target.value))}
                   onBlur={handleBlur('cardNumber')}
                 />
                 <CardBrandIcon brand={brand} />

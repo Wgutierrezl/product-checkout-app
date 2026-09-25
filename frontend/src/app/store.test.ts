@@ -31,6 +31,7 @@ describe('createAppStore', () => {
           installments: 1,
           idempotencyKey: 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f',
           submitAttempted: false,
+          formDraft: null,
         },
         transaction: { id: null, status: null, pollStartedAt: null },
       }),
@@ -46,6 +47,48 @@ describe('createAppStore', () => {
     expect(state.checkout.cardToken).toBeNull();
     expect(state.checkout.submitStatus).toBe('idle');
     expect(state.checkout.submitError).toBeNull();
+  });
+
+  it('flags a rehydrated form draft as restored, so the form can say card details must be re-entered', () => {
+    const formDraft = {
+      cardHolder: 'Jane Doe',
+      installments: 1,
+      fullName: 'Jane Doe',
+      email: 'jane@example.com',
+      phoneCountry: 'CO',
+      phoneNational: '3001234567',
+      address: '',
+      city: '',
+      region: '',
+      postalCode: '',
+    };
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        version: PERSISTED_VERSION,
+        checkout: {
+          step: 'DETAILS',
+          productId: 'p1',
+          quantity: 1,
+          customer: null,
+          delivery: null,
+          installments: 1,
+          idempotencyKey: null,
+          submitAttempted: false,
+          formDraft,
+        },
+        transaction: { id: null, status: null, pollStartedAt: null },
+      }),
+    );
+
+    const state = createAppStore().getState();
+
+    expect(state.checkout.formDraft).toEqual(formDraft);
+    expect(state.checkout.draftRestored).toBe(true);
+  });
+
+  it('does not flag anything as restored when no draft was persisted', () => {
+    expect(createAppStore().getState().checkout.draftRestored).toBe(false);
   });
 
   it('discards a version-mismatched persisted payload and starts fresh', () => {

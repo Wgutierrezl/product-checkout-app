@@ -283,4 +283,53 @@ describe('PaymentModalContainer', () => {
 
     expect(screen.getByLabelText(/full name/i)).toHaveValue('Jane Doe');
   });
+
+  describe('form draft (refresh resilience)', () => {
+    const DRAFT = {
+      cardHolder: 'Jane Doe',
+      installments: 2,
+      fullName: 'Jane Doe',
+      email: 'jane@example.com',
+      phoneCountry: 'CO',
+      phoneNational: '3001234567',
+      address: 'Cra 1 # 2-3',
+      city: 'Bogota',
+      region: 'Cundinamarca',
+      postalCode: '',
+    };
+
+    it('saves what the buyer types into the store as a draft, without any card data', async () => {
+      const user = userEvent.setup();
+      const { store } = renderWithStore();
+
+      await fillValidForm(user);
+
+      await waitFor(() => expect(store.getState().checkout.formDraft).toMatchObject({ region: 'Cundinamarca' }));
+      expect(JSON.stringify(store.getState().checkout.formDraft)).not.toContain('4111');
+    });
+
+    it('prefills the form from the stored draft', () => {
+      renderWithStore(buildStore({ formDraft: DRAFT }));
+
+      expect(screen.getByLabelText(/full name/i)).toHaveValue('Jane Doe');
+      expect(screen.getByLabelText(/cardholder name/i)).toHaveValue('Jane Doe');
+      expect(screen.getByLabelText(/installments/i)).toHaveValue('2');
+    });
+
+    it('asks for the card again when the draft was restored after a refresh', () => {
+      renderWithStore(buildStore({ formDraft: DRAFT, draftRestored: true }));
+
+      expect(screen.getByRole('status')).toHaveTextContent(/card details are never stored on this device/i);
+    });
+
+    it('forgets the draft when the buyer cancels', async () => {
+      const user = userEvent.setup();
+      const { store } = renderWithStore(buildStore({ formDraft: DRAFT, draftRestored: true }));
+
+      await user.click(screen.getByRole('button', { name: /cancel/i }));
+
+      expect(store.getState().checkout.formDraft).toBeNull();
+      expect(store.getState().checkout.draftRestored).toBe(false);
+    });
+  });
 });

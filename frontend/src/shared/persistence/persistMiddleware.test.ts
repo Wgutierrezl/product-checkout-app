@@ -6,6 +6,7 @@ import {
   checkoutReducer,
   checkoutReset,
   customerAndDeliverySet,
+  formDraftSaved,
   paymentAttemptStarted,
   productSelected,
   stepChangeRequested,
@@ -24,6 +25,18 @@ import {
 const CUSTOMER = { fullName: 'Jane Doe', email: 'jane@example.com', phone: '+573001234567' };
 const DELIVERY = { address: 'Cra 1 # 2-3', city: 'Bogota', region: 'Cundinamarca' };
 const CARD_SUMMARY = { brand: 'visa' as const, last4: '1111', holder: 'Jane Doe' };
+const DRAFT = {
+  cardHolder: 'Jane Doe',
+  installments: 3,
+  fullName: 'Jane Doe',
+  email: 'jane@example.com',
+  phoneCountry: 'CO',
+  phoneNational: '3001234567',
+  address: 'Cra 1 # 2-3',
+  city: 'Bogota',
+  region: 'Cundinamarca',
+  postalCode: '110111',
+};
 const AMOUNTS = { productAmount: 300_000, baseFee: 250_000, deliveryFee: 800_000, total: 1_350_000, currency: 'COP' as const };
 
 function buildStore() {
@@ -77,6 +90,14 @@ describe('persistMiddleware', () => {
         delivery: DELIVERY,
       }),
     });
+  });
+
+  it('persists the payment form draft (non-card fields only)', () => {
+    const store = buildStore();
+
+    store.dispatch(formDraftSaved(DRAFT));
+
+    expect(readPersisted().checkout).toMatchObject({ formDraft: DRAFT });
   });
 
   it('persists submitAttempted (needed to resume an in-flight payment after a refresh)', () => {
@@ -277,6 +298,36 @@ describe('persistMiddleware', () => {
 
       expect(loadPersistedState()).toBeUndefined();
       expect(sessionStorage.getItem(CARD_SESSION_KEY)).toBeNull();
+    });
+
+    it('rehydrates the form draft', () => {
+      const store = buildStore();
+      store.dispatch(productSelected({ productId: 'p1', quantity: 1 }));
+      store.dispatch(stepChangeRequested('DETAILS'));
+      store.dispatch(formDraftSaved(DRAFT));
+
+      expect(loadPersistedState()?.checkout.formDraft).toEqual(DRAFT);
+    });
+
+    it('never rehydrates card fields planted inside the form draft', () => {
+      const store = buildStore();
+      store.dispatch(productSelected({ productId: 'p1', quantity: 1 }));
+      store.dispatch(stepChangeRequested('DETAILS'));
+      store.dispatch(formDraftSaved(DRAFT));
+      const persisted = readPersisted();
+      const checkout = persisted.checkout as Record<string, unknown>;
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          ...persisted,
+          checkout: {
+            ...checkout,
+            formDraft: { ...DRAFT, cardNumber: '4242424242424242', expiry: '12/30', cvc: '123' },
+          },
+        }),
+      );
+
+      expect(loadPersistedState()?.checkout.formDraft).toEqual(DRAFT);
     });
 
     it('only rehydrates whitelisted fields, ignoring anything else planted in localStorage', () => {
@@ -486,6 +537,7 @@ describe('persistMiddleware', () => {
           installments: 3,
           idempotencyKey: 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f',
           submitAttempted: false,
+          formDraft: DRAFT as typeof DRAFT | null,
         },
         transaction: { id: 't1', status: 'PENDING', pollStartedAt: 123 },
       };
@@ -498,6 +550,7 @@ describe('persistMiddleware', () => {
         customer: null as unknown as typeof CUSTOMER,
         delivery: null as unknown as typeof DELIVERY,
         idempotencyKey: null as unknown as string,
+        formDraft: null,
       };
       payload.transaction = {
         id: null as unknown as string,
@@ -552,6 +605,56 @@ describe('persistMiddleware', () => {
         (p) => ({ ...p, checkout: { ...p.checkout, submitAttempted: 'oops' } }),
       ],
       ['transaction is a non-object, non-null value', (p) => ({ ...p, transaction: 'oops' })],
+      ['formDraft is missing', (p) => ({ ...p, checkout: { ...p.checkout, formDraft: undefined } })],
+      ['formDraft is a non-object, non-null value', (p) => ({ ...p, checkout: { ...p.checkout, formDraft: 'oops' } })],
+      [
+        'formDraft.fullName is not a string',
+        (p) => ({ ...p, checkout: { ...p.checkout, formDraft: { ...DRAFT, fullName: 7 } } }),
+      ],
+      [
+        'formDraft.cardHolder is not a string',
+        (p) => ({ ...p, checkout: { ...p.checkout, formDraft: { ...DRAFT, cardHolder: null } } }),
+      ],
+      [
+        'formDraft.email is not a string',
+        (p) => ({ ...p, checkout: { ...p.checkout, formDraft: { ...DRAFT, email: [] } } }),
+      ],
+      [
+        'formDraft.address is missing',
+        (p) => ({ ...p, checkout: { ...p.checkout, formDraft: { ...DRAFT, address: undefined } } }),
+      ],
+      [
+        'formDraft.city is not a string',
+        (p) => ({ ...p, checkout: { ...p.checkout, formDraft: { ...DRAFT, city: 1 } } }),
+      ],
+      [
+        'formDraft.region is not a string',
+        (p) => ({ ...p, checkout: { ...p.checkout, formDraft: { ...DRAFT, region: {} } } }),
+      ],
+      [
+        'formDraft.postalCode is not a string',
+        (p) => ({ ...p, checkout: { ...p.checkout, formDraft: { ...DRAFT, postalCode: 110111 } } }),
+      ],
+      [
+        'formDraft.installments is out of range',
+        (p) => ({ ...p, checkout: { ...p.checkout, formDraft: { ...DRAFT, installments: 37 } } }),
+      ],
+      [
+        'formDraft.phoneCountry is not a known country',
+        (p) => ({ ...p, checkout: { ...p.checkout, formDraft: { ...DRAFT, phoneCountry: 'XX' } } }),
+      ],
+      [
+        'formDraft.phoneNational has non-digits',
+        (p) => ({ ...p, checkout: { ...p.checkout, formDraft: { ...DRAFT, phoneNational: '300-123' } } }),
+      ],
+      [
+        'formDraft.phoneNational is longer than any E.164 number',
+        (p) => ({ ...p, checkout: { ...p.checkout, formDraft: { ...DRAFT, phoneNational: '1'.repeat(16) } } }),
+      ],
+      [
+        'a formDraft text field is absurdly long',
+        (p) => ({ ...p, checkout: { ...p.checkout, formDraft: { ...DRAFT, address: 'a'.repeat(501) } } }),
+      ],
     ])('discards the persisted state and clears storage when %s', (_name, corrupt) => {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(corrupt(validPayload())));
 

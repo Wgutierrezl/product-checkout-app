@@ -6,8 +6,14 @@ import { createAppStore } from './store';
 import { CARD_SESSION_KEY, PERSISTED_VERSION, STORAGE_KEY } from '../shared/persistence/persistMiddleware';
 import { BackendApiError } from '../api/types';
 import * as backendClient from '../api/backendClient';
+import * as paymentGatewayClient from '../api/paymentGatewayClient';
 
 jest.mock('../api/backendClient');
+jest.mock('../api/paymentGatewayClient');
+
+const mockedTokenizeCard = paymentGatewayClient.tokenizeCard as jest.MockedFunction<
+  typeof paymentGatewayClient.tokenizeCard
+>;
 
 const mockedFetchProducts = backendClient.fetchProducts as jest.MockedFunction<typeof backendClient.fetchProducts>;
 const mockedFetchPaymentAcceptance = backendClient.fetchPaymentAcceptance as jest.MockedFunction<
@@ -36,6 +42,65 @@ const ACCEPTANCE = {
   acceptPersonalAuthPermalink: 'https://example.test/data.pdf',
 };
 
+/** Every key and value in both Web Storage areas, as one string. */
+function dumpAllStorage(): string {
+  const entries: string[] = [];
+  for (const storage of [localStorage, sessionStorage]) {
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index) as string;
+      entries.push(`${key}=${storage.getItem(key)}`);
+    }
+  }
+  return entries.join('\n');
+}
+
+function expectNoCardDataInStorage() {
+  const dump = dumpAllStorage();
+  expect(dump).not.toContain('4242424242424242');
+  expect(dump).not.toContain('4242 4242');
+  expect(dump).not.toMatch(/\d{13,19}/);
+  expect(dump).not.toContain('11/29');
+  expect(dump).not.toContain('1129');
+  expect(dump).not.toContain('987');
+  expect(dump).not.toMatch(/cardNumber|expiry|cvc/i);
+}
+
+function persistDetailsStep() {
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({
+      version: PERSISTED_VERSION,
+      checkout: {
+        step: 'DETAILS',
+        productId: 'p1',
+        quantity: 1,
+        customer: null,
+        delivery: null,
+        installments: 1,
+        idempotencyKey: null,
+        submitAttempted: false,
+        formDraft: null,
+      },
+      transaction: { id: null, status: null, pollStartedAt: null },
+    }),
+  );
+}
+
+async function typeFullForm(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(screen.getByLabelText(/card number/i), '4242424242424242');
+  await user.type(screen.getByLabelText(/cardholder name/i), 'Jane Doe');
+  await user.type(screen.getByLabelText(/expiry/i), '1129');
+  await user.type(screen.getByLabelText(/cvc/i), '987');
+  await user.selectOptions(screen.getByLabelText(/installments/i), '3');
+  await user.type(screen.getByLabelText(/full name/i), 'Jane Doe');
+  await user.type(screen.getByLabelText(/email/i), 'jane@example.com');
+  await user.type(screen.getByLabelText(/^phone$/i), '3001234567');
+  await user.type(screen.getByLabelText(/^address/i), 'Cra 1 # 2-3');
+  await user.type(screen.getByLabelText(/city/i), 'Bogota');
+  await user.type(screen.getByLabelText(/region/i), 'Cundinamarca');
+  await user.type(screen.getByLabelText(/postal code/i), '110111');
+}
+
 /** What localStorage + sessionStorage hold right after reaching SUMMARY in a tab. */
 function persistSummaryInThisTab() {
   localStorage.setItem(
@@ -51,6 +116,7 @@ function persistSummaryInThisTab() {
         installments: 1,
         idempotencyKey: 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f',
         submitAttempted: false,
+        formDraft: null,
       },
       transaction: { id: null, status: null, pollStartedAt: null },
     }),
@@ -81,6 +147,7 @@ function persistInFlightAttempt() {
         installments: 1,
         idempotencyKey: IN_FLIGHT_KEY,
         submitAttempted: true,
+        formDraft: null,
       },
       transaction: { id: null, status: null, pollStartedAt: null },
     }),
@@ -100,6 +167,7 @@ describe('App refresh resilience (integration)', () => {
     localStorage.clear();
     sessionStorage.clear();
     mockedCreateTransaction.mockReset();
+    mockedTokenizeCard.mockReset();
     mockedFetchProducts.mockReset();
     mockedFetchProducts.mockReturnValue(new Promise(() => {}));
     mockedFetchPaymentAcceptance.mockReset();
@@ -121,6 +189,7 @@ describe('App refresh resilience (integration)', () => {
           installments: 1,
           idempotencyKey: 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f',
           submitAttempted: false,
+          formDraft: null,
         },
         transaction: { id: null, status: null, pollStartedAt: null },
       }),
@@ -138,6 +207,83 @@ describe('App refresh resilience (integration)', () => {
     expect(store.getState().checkout.step).toBe('DETAILS');
     expect(screen.getByRole('dialog', { name: 'Payment details' })).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Order summary' })).not.toBeInTheDocument();
+  });
+
+  describe('a refresh while filling in the DETAILS form', () => {
+    it('never writes the card number, expiry or CVC to localStorage or sessionStorage', async () => {
+      persistDetailsStep();
+      const store = createAppStore();
+      render(
+        <Provider store={store}>
+          <App />
+        </Provider>,
+      );
+      const user = userEvent.setup();
+
+      await typeFullForm(user);
+      await waitFor(() => expect(store.getState().checkout.formDraft).toMatchObject({ postalCode: '110111' }));
+
+      expect(localStorage.getItem(STORAGE_KEY)).toContain('Cundinamarca');
+      expectNoCardDataInStorage();
+    });
+
+    it('never writes the card number, expiry or CVC anywhere after Continue either (only the token, in sessionStorage)', async () => {
+      persistDetailsStep();
+      mockedTokenizeCard.mockResolvedValue({ cardToken: 'tok_fresh_card' });
+      const store = createAppStore();
+      render(
+        <Provider store={store}>
+          <App />
+        </Provider>,
+      );
+      const user = userEvent.setup();
+
+      await typeFullForm(user);
+      await user.click(screen.getByRole('button', { name: /continue/i }));
+
+      await waitFor(() => expect(store.getState().checkout.step).toBe('SUMMARY'));
+      expect(sessionStorage.getItem(CARD_SESSION_KEY)).toContain('tok_fresh_card');
+      expect(localStorage.getItem(STORAGE_KEY)).not.toContain('tok_fresh_card');
+      expectNoCardDataInStorage();
+    });
+
+    it('restores the non-card fields after the refresh, with the card fields empty and a notice to re-enter them', async () => {
+      persistDetailsStep();
+      const firstStore = createAppStore();
+      const { unmount } = render(
+        <Provider store={firstStore}>
+          <App />
+        </Provider>,
+      );
+      const user = userEvent.setup();
+      await typeFullForm(user);
+      await waitFor(() => expect(firstStore.getState().checkout.formDraft).toMatchObject({ postalCode: '110111' }));
+      unmount();
+
+      // The refresh: a brand new store built from whatever storage holds.
+      const store = createAppStore();
+      render(
+        <Provider store={store}>
+          <App />
+        </Provider>,
+      );
+
+      expect(screen.getByLabelText(/full name/i)).toHaveValue('Jane Doe');
+      expect(screen.getByLabelText(/email/i)).toHaveValue('jane@example.com');
+      expect(screen.getByLabelText(/^phone$/i)).toHaveValue('3001234567');
+      expect(screen.getByLabelText(/^address/i)).toHaveValue('Cra 1 # 2-3');
+      expect(screen.getByLabelText(/city/i)).toHaveValue('Bogota');
+      expect(screen.getByLabelText(/region/i)).toHaveValue('Cundinamarca');
+      expect(screen.getByLabelText(/postal code/i)).toHaveValue('110111');
+      expect(screen.getByLabelText(/installments/i)).toHaveValue('3');
+      expect(screen.getByLabelText(/cardholder name/i)).toHaveValue('Jane Doe');
+      expect(screen.getByLabelText(/card number/i)).toHaveValue('');
+      expect(screen.getByLabelText(/expiry/i)).toHaveValue('');
+      expect(screen.getByLabelText(/cvc/i)).toHaveValue('');
+      expect(
+        screen.getByText('For your security, card details are never stored on this device. Please re-enter them.'),
+      ).toBeInTheDocument();
+    });
   });
 
   describe('a refresh on SUMMARY in the same tab (card session still in sessionStorage)', () => {
@@ -218,6 +364,7 @@ describe('App refresh resilience (integration)', () => {
           installments: 1,
           idempotencyKey: 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f',
           submitAttempted: false,
+          formDraft: null,
         },
         transaction: { id: null, status: null, pollStartedAt: null },
       }),
@@ -302,6 +449,7 @@ describe('App refresh resilience (integration)', () => {
             installments: 1,
             idempotencyKey: 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f',
             submitAttempted: false,
+            formDraft: null,
           },
           transaction: { id: 't1', status: 'APPROVED', pollStartedAt: 123 },
         }),

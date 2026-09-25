@@ -5,6 +5,8 @@ import {
   checkoutReducer,
   checkoutReset,
   customerAndDeliverySet,
+  formDraftCleared,
+  formDraftSaved,
   idempotencyKeyEnsured,
   idempotencyKeyRotated,
   installmentsSet,
@@ -43,6 +45,8 @@ describe('checkoutSlice', () => {
       submitStatus: 'idle',
       submitError: null,
       submitAttempted: false,
+      formDraft: null,
+      draftRestored: false,
     });
   });
 
@@ -234,6 +238,8 @@ describe('checkoutSlice', () => {
       submitStatus: 'idle',
       submitError: null,
       submitAttempted: false,
+      formDraft: null,
+      draftRestored: false,
     });
   });
 
@@ -273,6 +279,91 @@ describe('checkoutSlice', () => {
       store.dispatch(stepForced('DETAILS'));
 
       expect(store.getState().checkout.step).toBe('DETAILS');
+    });
+  });
+
+  describe('payment form draft (non-card fields only)', () => {
+    const DRAFT = {
+      cardHolder: 'Jane Doe',
+      installments: 3,
+      fullName: 'Jane Doe',
+      email: 'jane@example.com',
+      phoneCountry: 'CO',
+      phoneNational: '3001234567',
+      address: 'Cra 1 # 2-3',
+      city: 'Bogota',
+      region: 'Cundinamarca',
+      postalCode: '110111',
+    };
+    const EMPTY_DRAFT = {
+      cardHolder: '',
+      installments: 1,
+      fullName: '',
+      email: '',
+      phoneCountry: 'CO',
+      phoneNational: '',
+      address: '',
+      city: '',
+      region: '',
+      postalCode: '',
+    };
+
+    it('stores the draft on formDraftSaved', () => {
+      const store = buildStore();
+
+      store.dispatch(formDraftSaved(DRAFT));
+
+      expect(store.getState().checkout.formDraft).toEqual(DRAFT);
+    });
+
+    it('stores nothing for a draft the buyer has not filled in at all', () => {
+      const store = buildStore();
+      store.dispatch(formDraftSaved(DRAFT));
+
+      store.dispatch(formDraftSaved(EMPTY_DRAFT));
+
+      expect(store.getState().checkout.formDraft).toBeNull();
+    });
+
+    it('treats a draft with only a non-default installments choice as filled in', () => {
+      const store = buildStore();
+
+      store.dispatch(formDraftSaved({ ...EMPTY_DRAFT, installments: 6 }));
+
+      expect(store.getState().checkout.formDraft).toEqual({ ...EMPTY_DRAFT, installments: 6 });
+    });
+
+    it('drops the draft and the restored flag on formDraftCleared (cancel)', () => {
+      const store = configureStore({
+        reducer: { checkout: checkoutReducer },
+        preloadedState: { checkout: { ...buildStore().getState().checkout, formDraft: DRAFT, draftRestored: true } },
+      });
+
+      store.dispatch(formDraftCleared());
+
+      expect(store.getState().checkout.formDraft).toBeNull();
+      expect(store.getState().checkout.draftRestored).toBe(false);
+    });
+
+    it('drops the draft on checkoutReset (completed checkout)', () => {
+      const store = buildStore();
+      store.dispatch(formDraftSaved(DRAFT));
+
+      store.dispatch(checkoutReset());
+
+      expect(store.getState().checkout.formDraft).toBeNull();
+    });
+
+    it('turns off the restored flag once a card is tokenized again this session', () => {
+      const store = configureStore({
+        reducer: { checkout: checkoutReducer },
+        preloadedState: { checkout: { ...buildStore().getState().checkout, formDraft: DRAFT, draftRestored: true } },
+      });
+
+      store.dispatch(cardTokenized({ cardToken: 'tok_test_card', cardSummary: CARD_SUMMARY }));
+
+      expect(store.getState().checkout.draftRestored).toBe(false);
+      expect(store.getState().checkout.formDraft).toEqual(DRAFT);
     });
   });
 });

@@ -1,11 +1,12 @@
 import type { Middleware } from '@reduxjs/toolkit';
 import type { CustomerInput, DeliveryInput, TransactionStatus } from '../../api/types';
-import type { CardSummary, CheckoutState } from '../../features/checkout/checkoutSlice';
+import type { CardSummary, CheckoutState, PaymentFormDraft } from '../../features/checkout/checkoutSlice';
 import type { TransactionState } from '../../features/transaction/transactionSlice';
 import type { CheckoutStep } from '../../domain/checkout/stepMachine';
+import { findCountryByIso2 } from '../../domain/phone/countries';
 
 /** Bumped whenever the persisted shape changes; a mismatch discards it. */
-export const PERSISTED_VERSION = 3;
+export const PERSISTED_VERSION = 4;
 export const STORAGE_KEY = 'checkout-spa:v1';
 /**
  * sessionStorage key for the single-use card token + its display summary.
@@ -32,6 +33,11 @@ const UUID_LIKE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 const CARD_TOKEN_SHAPE = /^[A-Za-z0-9_-]{1,256}$/;
 const ALL_DIGITS = /^\d+$/;
 const LAST4_SHAPE = /^\d{4}$/;
+/** E.164 caps a full number at 15 digits, so a national part never exceeds it. */
+const PHONE_NATIONAL_SHAPE = /^\d{0,15}$/;
+/** Generous cap for any free-text draft field; real input is far shorter. */
+const MAX_DRAFT_TEXT_LENGTH = 500;
+const DRAFT_TEXT_FIELDS = ['cardHolder', 'fullName', 'email', 'address', 'city', 'region', 'postalCode'] as const;
 
 type PersistedCheckout = Pick<
   CheckoutState,
@@ -43,6 +49,7 @@ type PersistedCheckout = Pick<
   | 'installments'
   | 'idempotencyKey'
   | 'submitAttempted'
+  | 'formDraft'
 >;
 type PersistedTransaction = Pick<TransactionState, 'id' | 'status' | 'pollStartedAt'>;
 type RehydratedCheckout = PersistedCheckout & Pick<CheckoutState, 'cardToken' | 'cardSummary'>;
@@ -179,6 +186,47 @@ function isValidCardSummary(value: unknown): value is CardSummary {
   );
 }
 
+function isDraftText(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= MAX_DRAFT_TEXT_LENGTH;
+}
+
+function isValidFormDraft(value: unknown): value is PaymentFormDraft | null {
+  if (value === null) {
+    return true;
+  }
+  if (typeof value !== 'object') {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    DRAFT_TEXT_FIELDS.every((field) => isDraftText(candidate[field])) &&
+    isIntegerInRange(candidate.installments, 1, 36) &&
+    typeof candidate.phoneCountry === 'string' &&
+    findCountryByIso2(candidate.phoneCountry) !== undefined &&
+    typeof candidate.phoneNational === 'string' &&
+    PHONE_NATIONAL_SHAPE.test(candidate.phoneNational)
+  );
+}
+
+/** Rebuilds a draft from its known fields only, so nothing else stored alongside it survives. */
+function pickFormDraft(draft: PaymentFormDraft | null): PaymentFormDraft | null {
+  if (draft === null) {
+    return null;
+  }
+  return {
+    cardHolder: draft.cardHolder,
+    installments: draft.installments,
+    fullName: draft.fullName,
+    email: draft.email,
+    phoneCountry: draft.phoneCountry,
+    phoneNational: draft.phoneNational,
+    address: draft.address,
+    city: draft.city,
+    region: draft.region,
+    postalCode: draft.postalCode,
+  };
+}
+
 function isValidCardToken(value: unknown): value is string {
   return typeof value === 'string' && CARD_TOKEN_SHAPE.test(value) && !ALL_DIGITS.test(value);
 }
@@ -211,7 +259,8 @@ function isValidPersistedCheckout(value: unknown): value is PersistedCheckout {
     isIntegerInRange(candidate.installments, 1, 36) &&
     isNullableString(candidate.idempotencyKey) &&
     (candidate.idempotencyKey === null || UUID_LIKE.test(candidate.idempotencyKey as string)) &&
-    typeof candidate.submitAttempted === 'boolean'
+    typeof candidate.submitAttempted === 'boolean' &&
+    isValidFormDraft(candidate.formDraft)
   );
 }
 
@@ -294,6 +343,7 @@ export function loadPersistedState():
     installments: persisted.installments,
     idempotencyKey: persisted.idempotencyKey,
     submitAttempted: persisted.submitAttempted,
+    formDraft: pickFormDraft(persisted.formDraft),
     cardToken: canResumeSummary ? cardSession.cardToken : null,
     cardSummary: canResumeSummary ? cardSession.cardSummary : null,
   };
@@ -352,6 +402,7 @@ export const persistMiddleware: Middleware<Record<string, never>, PersistableSta
         installments: state.checkout.installments,
         idempotencyKey: state.checkout.idempotencyKey,
         submitAttempted: state.checkout.submitAttempted,
+        formDraft: pickFormDraft(state.checkout.formDraft),
       },
       transaction: {
         id: state.transaction.id,

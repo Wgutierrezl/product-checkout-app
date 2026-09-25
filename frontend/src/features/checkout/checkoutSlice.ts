@@ -12,6 +12,42 @@ export interface CardSummary {
   holder: string;
 }
 
+/**
+ * What the DETAILS form keeps while the buyer types, so a refresh does not
+ * lose it. Deliberately has NO card number, expiry or CVC field: those are
+ * never stored anywhere. The cardholder name is not card data on its own.
+ */
+export interface PaymentFormDraft {
+  cardHolder: string;
+  installments: number;
+  fullName: string;
+  email: string;
+  /** ISO2 of the selected phone country (the dial code is derived from it). */
+  phoneCountry: string;
+  /** Digits-only national number, without the dial code. */
+  phoneNational: string;
+  address: string;
+  city: string;
+  region: string;
+  postalCode: string;
+}
+
+const DRAFT_TEXT_FIELDS = [
+  'cardHolder',
+  'fullName',
+  'email',
+  'phoneNational',
+  'address',
+  'city',
+  'region',
+  'postalCode',
+] as const satisfies readonly (keyof PaymentFormDraft)[];
+
+/** True when the buyer has not typed or chosen anything worth keeping yet. */
+function isBlankDraft(draft: PaymentFormDraft): boolean {
+  return draft.installments === 1 && DRAFT_TEXT_FIELDS.every((field) => draft[field].trim() === '');
+}
+
 export interface CheckoutState {
   step: CheckoutStep;
   productId: string | null;
@@ -41,6 +77,13 @@ export interface CheckoutState {
    * See `features/checkout/resumeInFlightPayment.ts`.
    */
   submitAttempted: boolean;
+  /** Debounced snapshot of the DETAILS form (persisted). `null` when blank. */
+  formDraft: PaymentFormDraft | null;
+  /**
+   * True when this page load rehydrated a draft from storage (never
+   * persisted itself). Drives the "re-enter your card" notice.
+   */
+  draftRestored: boolean;
 }
 
 export const initialCheckoutState: CheckoutState = {
@@ -56,6 +99,8 @@ export const initialCheckoutState: CheckoutState = {
   submitStatus: 'idle',
   submitError: null,
   submitAttempted: false,
+  formDraft: null,
+  draftRestored: false,
 };
 
 /**
@@ -119,6 +164,7 @@ const checkoutSlice = createSlice({
     cardTokenized: (state, action: PayloadAction<{ cardToken: string; cardSummary: CardSummary }>) => {
       state.cardToken = action.payload.cardToken;
       state.cardSummary = action.payload.cardSummary;
+      state.draftRestored = false;
       state.submitStatus = 'idle';
       state.submitError = null;
     },
@@ -152,6 +198,14 @@ const checkoutSlice = createSlice({
     paymentAttemptResolved: (state) => {
       state.submitAttempted = false;
     },
+    formDraftSaved: (state, action: PayloadAction<PaymentFormDraft>) => {
+      state.formDraft = isBlankDraft(action.payload) ? null : action.payload;
+    },
+    /** The buyer cancelled the form: forget what they had typed. */
+    formDraftCleared: (state) => {
+      state.formDraft = null;
+      state.draftRestored = false;
+    },
     checkoutReset: () => initialCheckoutState,
   },
 });
@@ -171,6 +225,8 @@ export const {
   submitErrorSet,
   paymentAttemptStarted,
   paymentAttemptResolved,
+  formDraftSaved,
+  formDraftCleared,
   checkoutReset,
 } = checkoutSlice.actions;
 

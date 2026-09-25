@@ -108,6 +108,17 @@
   color: var(--color-text-muted);
 }
 
+/* Informational (not an error): shown after a refresh restored the form. */
+.notice {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-3);
+  font-size: var(--font-size-sm);
+}
+
 .alert {
   background: var(--color-error-bg);
   color: var(--color-error);
