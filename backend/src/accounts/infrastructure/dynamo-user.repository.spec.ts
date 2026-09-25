@@ -340,5 +340,23 @@ describe('DynamoUserRepository', () => {
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr().type).toBe('Unexpected');
     });
+
+    it('returns ValidationError when the updated item comes back with corrupt data', async () => {
+      ddbMock.on(UpdateCommand).resolves({
+        Attributes: {
+          userId: 'user-1',
+          fullName: 'Jane Doe',
+          email: 'not-an-email',
+          passwordHash: '$2a$10$abcdefghijklmnopqrstuv',
+          preferences,
+        },
+      });
+      const repository = new DynamoUserRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.updatePreferences('user-1', preferences);
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('Validation');
+    });
   });
 });
