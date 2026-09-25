@@ -1,7 +1,7 @@
 import { Logger } from '@nestjs/common';
 
 import { buildDelivery, FakeDeliveryRepository } from '../../deliveries/test/delivery.fixtures';
-import { DomainError, PaymentGatewayError, UnexpectedError } from '../../shared/errors/domain-error';
+import { DomainError, NotFoundError, PaymentGatewayError, UnexpectedError } from '../../shared/errors/domain-error';
 import { ClockPort } from '../../shared/ports/clock.port';
 import { IdGeneratorPort } from '../../shared/ports/id-generator.port';
 import { buildIntegritySignature } from '../../shared/payment-gateway/domain/integrity-signature';
@@ -13,7 +13,7 @@ import { buildProduct, FakeProductRepository } from '../../products/test/product
 import { Stock } from '../../products/domain/value-objects/stock.vo';
 import { Transaction } from '../domain/transaction.entity';
 import { FinalizeNonApprovedInput, SettleApprovedInput, UpdateGatewayResultInput } from '../domain/transaction.repository.port';
-import { FakeTransactionRepository } from '../test/transaction.fixtures';
+import { buildTransaction, FakeTransactionRepository } from '../test/transaction.fixtures';
 import { CreateTransactionCommand, CreateTransactionUseCase } from './create-transaction.use-case';
 import { SettleTransactionUseCase } from './settle-transaction.use-case';
 
@@ -394,6 +394,56 @@ describe('CreateTransactionUseCase', () => {
       expect(second._unsafeUnwrap()).toEqual(first._unsafeUnwrap());
       expect(second._unsafeUnwrap().transaction.gatewayTransactionId).toBe('gw-1');
       expect(replayGateway.lastCreateCardTransactionInput).toBeUndefined();
+    });
+
+    it('replays the stored transaction even when the product is now out of stock, before any product lookup or gateway call', async () => {
+      // The first attempt bought the last unit and was APPROVED; the client
+      // timed out and retried with the same key. The retry must get the
+      // original APPROVED transaction back, never a 409 insufficient stock.
+      const stored = buildTransaction({ id: IDEMPOTENCY_KEY, status: 'APPROVED', gatewayTransactionId: 'gw-1' });
+      const transactions = new FakeTransactionRepository([stored]);
+      const delivery = buildDelivery({ transactionId: IDEMPOTENCY_KEY });
+      const products = new FakeProductRepository([buildProduct({ id: 'prod-1', stock: Stock.create(0)._unsafeUnwrap() })]);
+      const findProductSpy = jest.spyOn(products, 'findById');
+      const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-2', status: 'APPROVED' } });
+      const useCase = buildUseCase({ products, transactions, gateway, deliveries: new FakeDeliveryRepository([delivery]) });
+
+      const result = await useCase.execute(buildCommand());
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toEqual({ transaction: stored, delivery });
+      expect(findProductSpy).not.toHaveBeenCalled();
+      expect(gateway.lastCreateCardTransactionInput).toBeUndefined();
+    });
+
+    it('propagates an unexpected failure of the idempotency lookup without creating or charging anything', async () => {
+      const lookupError = new UnexpectedError('DynamoDB unavailable');
+      const transactions = new FakeTransactionRepository();
+      jest.spyOn(transactions, 'findById').mockReturnValue(errAsync(lookupError));
+      const createPendingSpy = jest.spyOn(transactions, 'createPending');
+      const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-1', status: 'APPROVED' } });
+      const useCase = buildUseCase({ transactions, gateway });
+
+      const result = await useCase.execute(buildCommand());
+
+      expect(result._unsafeUnwrapErr()).toBe(lookupError);
+      expect(createPendingSpy).not.toHaveBeenCalled();
+      expect(gateway.lastCreateCardTransactionInput).toBeUndefined();
+    });
+
+    it('still charges only once when a concurrent first request wins the conditional write after the lookup missed', async () => {
+      // Both requests miss the early lookup; the atomic createPending is what
+      // resolves the race — the loser gets wasCreated=false and never charges.
+      const winner = buildTransaction({ id: IDEMPOTENCY_KEY, status: 'APPROVED', gatewayTransactionId: 'gw-1' });
+      const transactions = new FakeTransactionRepository([winner]);
+      jest.spyOn(transactions, 'findById').mockReturnValueOnce(errAsync(new NotFoundError('Transaction not found')));
+      const gateway = new RecordingGatewayPort({ ok: true, value: { gatewayTransactionId: 'gw-2', status: 'APPROVED' } });
+      const useCase = buildUseCase({ transactions, gateway });
+
+      const result = await useCase.execute(buildCommand());
+
+      expect(result._unsafeUnwrap().transaction).toEqual(winner);
+      expect(gateway.lastCreateCardTransactionInput).toBeUndefined();
     });
   });
 

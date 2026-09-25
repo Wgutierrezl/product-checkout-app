@@ -1,7 +1,10 @@
 // Env vars MUST be set before `AppModule` (and its `ConfigModule.forRoot`)
 // is ever imported/instantiated — `configuration()` reads `process.env` at
 // each Nest module build, so this only works because these assignments run
-// before the imports below are evaluated.
+// before the imports below are evaluated. `resolveE2eDynamoEndpoint` is the
+// one exception: it has no imports of its own, so it is safe to load first.
+import { resolveE2eDynamoEndpoint } from './support/e2e-dynamo-endpoint';
+
 process.env.NODE_ENV = 'test';
 process.env.PAYMENT_GATEWAY_URL = 'https://gateway.e2e.test';
 process.env.PAYMENT_GATEWAY_PUBLIC_KEY = 'pub_test_e2e';
@@ -10,7 +13,9 @@ process.env.PAYMENT_GATEWAY_INTEGRITY_SECRET = 'integrity_secret_e2e';
 process.env.PAYMENT_GATEWAY_EVENTS_SECRET = 'events_secret_e2e';
 process.env.CORS_ALLOWED_ORIGINS = 'https://allowed.e2e.test';
 process.env.AWS_REGION = 'us-east-1';
-process.env.DYNAMO_ENDPOINT = 'http://localhost:8000';
+// A dedicated DynamoDB Local (E2E_DYNAMO_ENDPOINT, default :8001), never the
+// dev one on :8000 — the suite drops and recreates every table.
+process.env.DYNAMO_ENDPOINT = resolveE2eDynamoEndpoint(process.env);
 // DynamoDB Local never checks these against a real account, but it DOES
 // reject an Access Key ID that isn't shaped like a real AWS key (20
 // uppercase alphanumeric chars) with `UnrecognizedClientException` — these
@@ -203,6 +208,24 @@ describe('Checkout E2E', () => {
       expect(response.body).not.toHaveProperty('stack');
     });
 
+    it.each([
+      ['customer', 'missing', undefined],
+      ['customer', 'null', null],
+      ['delivery', 'missing', undefined],
+      ['delivery', 'null', null],
+    ])('rejects a body whose %s object is %s with 400, not 500', async (field, _case, value) => {
+      const body: Record<string, unknown> = { ...buildCreateTransactionBody(PRODUCT_A_ID, 1, APPROVED_CARD_TOKEN) };
+      if (value === undefined) {
+        delete body[field];
+      } else {
+        body[field] = value;
+      }
+      const callsBefore = fakeGateway.createCardTransactionCalls;
+      const response = await request(server).post('/transactions').send(body).expect(400);
+      expect(response.body).not.toHaveProperty('stack');
+      expect(fakeGateway.createCardTransactionCalls).toBe(callsBefore);
+    });
+
     it('rejects insufficient stock with 409 and makes no gateway call', async () => {
       const callsBefore = fakeGateway.createCardTransactionCalls;
       await request(server)
@@ -250,6 +273,23 @@ describe('Checkout E2E', () => {
       expect(customerResponse.body.phone).not.toBe(body.customer.phone);
       expect(customerResponse.body.phone.endsWith(body.customer.phone.slice(-4))).toBe(true);
     });
+
+    it('replays the original APPROVED transaction (201, not 409) after it bought the last unit', async () => {
+      const body = buildCreateTransactionBody(PRODUCT_B_ID, PRODUCT_B_STOCK, APPROVED_CARD_TOKEN);
+
+      const createResponse = await request(server).post('/transactions').send(body).expect(201);
+      const transactionId = createResponse.body.id as string;
+      const approved = await pollUntilApproved(server, transactionId);
+      const productAfter = await request(server).get(`/products/${PRODUCT_B_ID}`).expect(200);
+      expect(productAfter.body.stock).toBe(0);
+
+      // The client timed out on the first attempt and retries with the same key.
+      const callsBefore = fakeGateway.createCardTransactionCalls;
+      const replay = await request(server).post('/transactions').send(body).expect(201);
+
+      expect(replay.body).toEqual(approved);
+      expect(fakeGateway.createCardTransactionCalls).toBe(callsBefore);
+    });
   });
 
   describe('POST /transactions — declined path', () => {
@@ -274,6 +314,15 @@ describe('Checkout E2E', () => {
       const response = await request(server).post('/transactions/webhook').send(payload).expect(400);
       expect(response.body).not.toHaveProperty('stack');
     });
+    it('rejects a payload without a signature object with 400, not 500', async () => {
+      const { signature: _signature, ...payload } = buildWebhookPayload({
+        gatewayTransactionId: 'gw-unknown-no-signature',
+        status: 'APPROVED',
+      });
+
+      const response = await request(server).post('/transactions/webhook').send(payload).expect(400);
+      expect(response.body).not.toHaveProperty('stack');
+    });
   });
 
   describe('Security hardening', () => {
@@ -290,6 +339,17 @@ describe('Checkout E2E', () => {
 
       const disallowed = await request(server).get('/health').set('Origin', 'https://evil.example.test').expect(200);
       expect(disallowed.headers['access-control-allow-origin']).toBeUndefined();
+    });
+
+    it('lets browsers cache an allowed CORS preflight for 10 minutes', async () => {
+      const response = await request(server)
+        .options('/transactions')
+        .set('Origin', 'https://allowed.e2e.test')
+        .set('Access-Control-Request-Method', 'POST')
+        .set('Access-Control-Request-Headers', 'content-type')
+        .expect(204);
+      expect(response.headers['access-control-allow-origin']).toBe('https://allowed.e2e.test');
+      expect(response.headers['access-control-max-age']).toBe('600');
     });
 
     it('never leaks a stack trace in an error response body', async () => {

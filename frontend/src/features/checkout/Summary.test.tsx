@@ -180,6 +180,15 @@ describe('Summary', () => {
     expect(screen.getByRole('status')).toHaveTextContent(/processing your payment/i);
   });
 
+  it('keeps the status line in the same (sticky on mobile) footer as the action buttons', () => {
+    renderSummary({ termsAccepted: true, personalDataAccepted: true, isSubmitting: true });
+
+    const footer = screen.getByRole('status').parentElement;
+    expect(footer).toHaveClass('footer');
+    expect(footer).toContainElement(screen.getByRole('button', { name: /edit details/i }));
+    expect(footer).toContainElement(screen.getByRole('button', { name: /processing payment/i }));
+  });
+
   it('visually disables the consent checkboxes (fieldset disabled) while paying', () => {
     renderSummary({ termsAccepted: true, personalDataAccepted: true, isSubmitting: true });
 

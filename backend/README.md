@@ -75,24 +75,32 @@ mocked `fetch`. The CI gate is 80% (`jest.config.ts`); current numbers:
 
 | Metric | Covered / Total | % |
 |---|---|---|
-| Statements | 1080 / 1080 | 100% |
-| Branches | 296 / 296 | 100% |
-| Functions | 269 / 269 | 100% |
-| Lines | 1007 / 1007 | 100% |
+| Statements | 1085 / 1085 | 100% |
+| Branches | 300 / 300 | 100% |
+| Functions | 274 / 274 | 100% |
+| Lines | 1012 / 1012 | 100% |
 
-391 tests across 47 suites, developed strict-TDD (RED → GREEN → REFACTOR) throughout.
+412 tests across 49 suites, developed strict-TDD (RED → GREEN → REFACTOR) throughout.
 
 ### End-to-end tests
 
+The suite drops and recreates every table, so it runs against its **own** DynamoDB Local,
+never the dev one from `docker compose up` (port 8000):
+
 ```bash
-docker compose up -d          # DynamoDB Local must be running
+docker run -d --rm -p 8001:8000 --name checkout-dynamodb-e2e amazon/dynamodb-local
 npm run test:e2e
+docker stop checkout-dynamodb-e2e   # --rm removes it; in-memory data goes with it
 ```
+
+It connects to `E2E_DYNAMO_ENDPOINT` (default `http://localhost:8001`) and ignores the app's
+`DYNAMO_ENDPOINT`. It refuses to start, before touching any table, if that endpoint uses port
+8000 (`test/e2e/support/e2e-dynamo-endpoint.ts`).
 
 Uses a **separate Jest config** (`test/jest-e2e.json`, its own `npm run test:e2e` script — never
 part of the unit coverage gate) and `supertest` against the real `AppModule`, with:
 
-- **Real DynamoDB Local**: all 4 tables are dropped and recreated at the start of every run
+- **Real DynamoDB Local** (a dedicated instance, see above): all 4 tables are dropped and recreated at the start of every run
   (`test/e2e/support/dynamo-e2e.support.ts`), then seeded with 2 fixed test products — no shared
   state with `npm run seed`'s catalog, no cross-run pollution.
 - **A deterministic, no-network fake gateway** (`test/e2e/support/fake-payment-gateway.adapter.ts`)
@@ -101,11 +109,13 @@ part of the unit coverage gate) and `supertest` against the real `AppModule`, wi
   (mirroring the real sandbox's observed behavior) and resolves APPROVED on the first poll, so the
   suite exercises the actual lazy-poll code path, not just a shortcut.
 
-18 tests cover: catalog listing/detail (400 malformed id, 404 unknown id), the payment-acceptance
+25 tests cover: catalog listing/detail (400 malformed id, 404 unknown id), the payment-acceptance
 proxy, the full happy path (create → PENDING → lazy-polled to APPROVED → stock decremented →
-delivery embedded → idempotent replay → masked customer/delivery reads), the declined path,
-insufficient stock (409), whitelist validation (400 on an unknown extra field), an invalid webhook
-checksum (400), and a hardening block: helmet headers, CORS allowlist behavior, per-route rate
+delivery embedded → idempotent replay → masked customer/delivery reads), a replay of a purchase
+that took the last unit (the original APPROVED transaction, not a 409), the declined path,
+insufficient stock (409), whitelist validation (400 on an unknown extra field, and 400, not 500,
+for a missing or `null` customer/delivery object), an invalid or missing webhook signature (400),
+and a hardening block: helmet headers, CORS allowlist behavior and preflight caching, per-route rate
 limiting (429, with `/health` and the webhook explicitly exempt), and "no stack trace in any error
 body".
 
@@ -141,9 +151,10 @@ DomainError>`. A single mapper at the controller boundary (`DomainErrorFilter` +
 themselves only ever call `.match(onOk, onErr)` and stay free of any `try/catch` or status-code
 logic.
 
-**Settlement is the one place true DynamoDB transactions are used**: `TransactWriteItems`
-atomically transitions a transaction to `APPROVED`, decrements the product's stock, and creates the
-delivery — all three or none.
+**Settlement uses a DynamoDB transaction**: one `TransactWriteItems` atomically transitions a
+transaction to `APPROVED`, decrements the product's stock, and creates the delivery — all three or
+none. The only other `TransactWriteItems` is the customer create, which writes an `EMAIL#` guard
+item next to the customer so two concurrent checkouts can't create two customers for one email.
 
 ## Data model
 
@@ -191,8 +202,8 @@ erDiagram
 | Table | Partition key | GSIs | Purpose |
 |---|---|---|---|
 | `Products` | `productId` | — | Direct get; catalog listing via `Scan` (a handful of items) |
-| `Customers` | `customerId` | `EmailIndex` (`email`) | Upsert-by-email dedupe on checkout |
-| `Transactions` | `transactionId` | `ReferenceIndex` (`reference`), `GatewayTxIndex` (`gatewayTransactionId`) | Idempotency on create; webhook lookup by gateway id |
+| `Customers` | `customerId` | `EmailIndex` (`email`) | Upsert-by-email dedupe on checkout (an `EMAIL#` guard item enforces one customer per email) |
+| `Transactions` | `transactionId` (= the idempotency key) | `ReferenceIndex` (`reference`), `GatewayTxIndex` (`gatewayTransactionId`) | Idempotency through the partition key; webhook lookup by gateway id, falling back to reference |
 | `Deliveries` | `deliveryId` | `TransactionIdIndex` (`transactionId`) | Embed a delivery on `GET /transactions/:id` |
 
 ## API endpoints
@@ -217,9 +228,12 @@ Full interactive documentation (with request/response schemas and examples) is a
 
 - **Idempotent checkout**: `POST /transactions` takes a client-generated `idempotencyKey` (UUID
   v4), used directly as the transaction's row id. A retried request (e.g. after a network timeout)
-  with the same key lands on the same row and **never charges the gateway a second time** — the
-  create pipeline only calls the gateway when the row was actually just inserted
-  (`wasCreated: true`).
+  with the same key **never charges the gateway a second time**. The existing row is looked up
+  **first**, before any product, stock or amount validation, and returned as-is — so a retry of
+  the purchase that took the last unit gets its original transaction back, not a 409. The replay
+  body is not compared with the stored one. For two concurrent first requests (both miss the
+  lookup), a conditional put lets only one create the row, and the gateway is only called when
+  the row was actually just inserted (`wasCreated: true`).
 - **Hybrid settlement** (sync call + webhook + lazy poll), not webhook-only: no public webhook URL
   exists for this deployment yet, so `GET /transactions/:id` self-heals a stale `PENDING` status by
   polling the gateway directly. All three paths (the synchronous `POST /transactions` result, the

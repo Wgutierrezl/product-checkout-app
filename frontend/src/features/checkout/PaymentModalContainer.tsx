@@ -5,7 +5,10 @@ import { PaymentForm, type PaymentFormSubmitValues } from './PaymentForm';
 import {
   cardTokenized,
   customerAndDeliverySet,
+  formDraftCleared,
+  formDraftSaved,
   installmentsSet,
+  type PaymentFormDraft,
   stepChangeRequested,
   submitErrorSet,
   submitStatusSet,
@@ -23,13 +26,17 @@ const MODAL_TITLE_ID = 'payment-modal-title';
  * + customer/delivery, and moves the step to SUMMARY. On failure, records
  * the error and keeps the buyer on DETAILS — customer/delivery are only
  * ever committed to the store on a SUCCESSFUL Continue (see design
- * Amendment: tokenize at Continue).
+ * Amendment: tokenize at Continue). Meanwhile a debounced draft of the
+ * non-card fields is kept in the store (and persisted) so a refresh does
+ * not lose what the buyer typed; Cancel forgets it.
  */
 export function PaymentModalContainer() {
   const dispatch = useAppDispatch();
   const customer = useAppSelector((state) => state.checkout.customer);
   const delivery = useAppSelector((state) => state.checkout.delivery);
   const installments = useAppSelector((state) => state.checkout.installments);
+  const formDraft = useAppSelector((state) => state.checkout.formDraft);
+  const draftRestored = useAppSelector((state) => state.checkout.draftRestored);
   const submitStatus = useAppSelector((state) => state.checkout.submitStatus);
   const submitError = useAppSelector((state) => state.checkout.submitError);
   const isTokenizing = submitStatus === 'tokenizing';
@@ -61,7 +68,12 @@ export function PaymentModalContainer() {
     if (isTokenizing) {
       return;
     }
+    dispatch(formDraftCleared());
     dispatch(stepChangeRequested('PRODUCT'));
+  }
+
+  function handleDraftChange(draft: PaymentFormDraft) {
+    dispatch(formDraftSaved(draft));
   }
 
   async function handleSubmit(values: PaymentFormSubmitValues) {
@@ -110,6 +122,9 @@ export function PaymentModalContainer() {
         initialCustomer={customer}
         initialDelivery={delivery}
         initialInstallments={installments}
+        initialDraft={formDraft}
+        onDraftChange={handleDraftChange}
+        showRestoredNotice={draftRestored}
         isSubmitting={submitStatus === 'tokenizing'}
         submitError={submitError}
         onCancel={handleCancel}

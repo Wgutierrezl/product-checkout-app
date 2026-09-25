@@ -192,19 +192,24 @@ export function Summary({
           </label>
         </fieldset>
 
-        <div className={styles.actions}>
-          <Button type="button" variant="secondary" onClick={onEditDetails} disabled={isSubmitting}>
-            Edit details
-          </Button>
-          <Button type="button" disabled={!canPay} loading={isSubmitting} loadingLabel="Processing payment…" onClick={onPay}>
-            Pay
-          </Button>
+        {/* One wrapper for the buttons AND the status line so, on small
+            screens, the "don't close this window" notice sticks with the
+            buttons instead of scrolling away beneath them. */}
+        <div className={styles.footer}>
+          <div className={styles.actions}>
+            <Button type="button" variant="secondary" onClick={onEditDetails} disabled={isSubmitting}>
+              Edit details
+            </Button>
+            <Button type="button" disabled={!canPay} loading={isSubmitting} loadingLabel="Processing payment…" onClick={onPay}>
+              Pay
+            </Button>
+          </div>
+          {isSubmitting && (
+            <p className={styles.statusLine} role="status">
+              Processing your payment — please don&rsquo;t close this window.
+            </p>
+          )}
         </div>
-        {isSubmitting && (
-          <p className={styles.statusLine} role="status">
-            Processing your payment — please don&rsquo;t close this window.
-          </p>
-        )}
       </section>
     </div>,
     document.body,

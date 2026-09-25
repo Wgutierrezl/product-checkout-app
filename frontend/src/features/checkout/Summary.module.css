@@ -190,3 +190,40 @@
   color: var(--color-text-muted);
   text-align: right;
 }
+
+.footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/* Keeps "Edit details" / "Pay" on screen on small phones (iPhone SE: 375
+   wide, as little as ~548 tall in Safari with its toolbars), where .sheet
+   is the scrolling ancestor. Same pattern as PaymentForm.module.css's
+   .actions: a sticky offset resolves against the scroll container's padding
+   box, so `bottom: 0` would stop short by .sheet's bottom padding. The
+   negative margins bleed the bar over .sheet's padding (--space-5 on every
+   side) so it sits flush with the sheet's edges, and `bottom` matches that
+   padding. Being the sheet's last child, at the end of the scroll the bar
+   rests in normal flow below the consent checkboxes, never over them. */
+@media (max-width: 767.98px) {
+  .footer {
+    position: sticky;
+    bottom: calc(var(--space-5) * -1);
+    gap: var(--space-2);
+    margin: 0 calc(var(--space-5) * -1) calc(var(--space-5) * -1);
+    padding: var(--space-4) var(--space-5);
+    background: var(--color-surface);
+    border-top: 1px solid var(--color-border);
+  }
+
+  /* At 375px the default button padding/size wraps "Edit details" and the
+     width Pay reserves for "Processing payment…" onto 2 lines. A tighter
+     horizontal padding and the small font size keep both on one line while
+     the height stays a comfortable tap target. */
+  .actions button {
+    min-height: 44px;
+    padding-inline: var(--space-3);
+    font-size: var(--font-size-sm);
+  }
+}

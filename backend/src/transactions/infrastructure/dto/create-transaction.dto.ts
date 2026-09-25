@@ -1,8 +1,10 @@
 import { Type } from 'class-transformer';
 import {
+  IsDefined,
   IsEmail,
   IsInt,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -74,11 +76,19 @@ export class CreateTransactionDto {
   quantity!: number;
 
   @ApiProperty({ type: CreateTransactionCustomerDto })
+  // `@ValidateNested()` alone skips `undefined`, so a body without this
+  // object would reach the use case and fail there with a 500.
+  @IsDefined()
+  @IsObject()
   @ValidateNested()
   @Type(() => CreateTransactionCustomerDto)
   customer!: CreateTransactionCustomerDto;
 
   @ApiProperty({ type: CreateTransactionDeliveryDto })
+  // `@ValidateNested()` alone skips `undefined`, so a body without this
+  // object would reach the use case and fail there with a 500.
+  @IsDefined()
+  @IsObject()
   @ValidateNested()
   @Type(() => CreateTransactionDeliveryDto)
   delivery!: CreateTransactionDeliveryDto;

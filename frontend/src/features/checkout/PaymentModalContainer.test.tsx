@@ -12,6 +12,11 @@ import { GatewayTokenizeError } from '../../api/types';
 
 jest.mock('../../api/paymentGatewayClient');
 
+// `delay: null` types without yielding to the event loop between keys.
+// Tests that fill a whole payment form also get their own, longer timeout:
+// even without delays they can pass Jest's 5 s default on a loaded machine.
+const FULL_FORM_TEST_TIMEOUT_MS = 15_000;
+
 const mockedTokenizeCard = paymentGatewayClient.tokenizeCard as jest.MockedFunction<
   typeof paymentGatewayClient.tokenizeCard
 >;
@@ -62,7 +67,7 @@ describe('PaymentModalContainer', () => {
   });
 
   it('moves the step back to PRODUCT when Cancel is clicked, without dispatching card data', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const { store } = renderWithStore();
 
     await user.click(screen.getByRole('button', { name: /cancel/i }));
@@ -74,7 +79,7 @@ describe('PaymentModalContainer', () => {
   });
 
   it('moves the step back to PRODUCT when Escape is pressed, keeping already-saved customer/delivery', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const savedCustomer = { fullName: 'Jane Doe', email: 'jane@example.com', phone: '+573001234567' };
     const savedDelivery = { address: 'Cra 1 # 2-3', city: 'Bogota', region: 'Cundinamarca' };
     const { store } = renderWithStore(buildStore({ customer: savedCustomer, delivery: savedDelivery }));
@@ -89,7 +94,7 @@ describe('PaymentModalContainer', () => {
 
   it('tokenizes, stores cardSummary/cardToken/customer/delivery, and moves to SUMMARY on success', async () => {
     mockedTokenizeCard.mockResolvedValue({ cardToken: 'tok_test_card' });
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const { store } = renderWithStore();
 
     await fillValidForm(user);
@@ -111,11 +116,11 @@ describe('PaymentModalContainer', () => {
     expect(checkout.customer).toEqual({ fullName: 'Jane Doe', email: 'jane@example.com', phone: '+573001234567' });
     expect(checkout.delivery).toEqual({ address: 'Cra 1 # 2-3', city: 'Bogota', region: 'Cundinamarca' });
     expect(checkout.submitStatus).toBe('idle');
-  });
+  }, FULL_FORM_TEST_TIMEOUT_MS);
 
   it('sends exp_month and exp_year as 2-digit strings to the gateway, regardless of the entered expiry', async () => {
     mockedTokenizeCard.mockResolvedValue({ cardToken: 'tok_test_card' });
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     renderWithStore();
 
     await user.type(screen.getByLabelText(/card number/i), '4111111111111111');
@@ -137,7 +142,7 @@ describe('PaymentModalContainer', () => {
 
   it('shows the tokenize failure inline and keeps the buyer on DETAILS without saving customer/delivery', async () => {
     mockedTokenizeCard.mockRejectedValue(new GatewayTokenizeError('Payment gateway rejected the card'));
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const { store } = renderWithStore();
 
     await fillValidForm(user);
@@ -149,45 +154,45 @@ describe('PaymentModalContainer', () => {
     expect(checkout.cardToken).toBeNull();
     expect(checkout.customer).toBeNull();
     expect(checkout.submitStatus).toBe('failed');
-  });
+  }, FULL_FORM_TEST_TIMEOUT_MS);
 
   it('falls back to a generic tokenize-failure message when the rejection is not an Error', async () => {
     mockedTokenizeCard.mockRejectedValue('boom');
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     renderWithStore();
 
     await fillValidForm(user);
     await user.click(screen.getByRole('button', { name: /continue/i }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Card tokenization failed');
-  });
+  }, FULL_FORM_TEST_TIMEOUT_MS);
 
   it('disables Continue and shows a processing state while tokenizing', async () => {
     mockedTokenizeCard.mockReturnValue(new Promise(() => {}));
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     renderWithStore();
 
     await fillValidForm(user);
     await user.click(screen.getByRole('button', { name: /continue/i }));
 
     expect(await screen.findByRole('button', { name: /securing your card/i })).toBeDisabled();
-  });
+  }, FULL_FORM_TEST_TIMEOUT_MS);
 
   describe('closing during an in-flight tokenize request (BLOCKER)', () => {
     it('disables Cancel while tokenizing', async () => {
       mockedTokenizeCard.mockReturnValue(new Promise(() => {}));
-      const user = userEvent.setup();
+      const user = userEvent.setup({ delay: null });
       renderWithStore();
 
       await fillValidForm(user);
       await user.click(screen.getByRole('button', { name: /continue/i }));
 
       expect(screen.getByRole('button', { name: /cancel/i })).toBeDisabled();
-    });
+    }, FULL_FORM_TEST_TIMEOUT_MS);
 
     it('ignores Escape while tokenizing, leaving the step unchanged', async () => {
       mockedTokenizeCard.mockReturnValue(new Promise(() => {}));
-      const user = userEvent.setup();
+      const user = userEvent.setup({ delay: null });
       const { store } = renderWithStore();
 
       await fillValidForm(user);
@@ -195,11 +200,11 @@ describe('PaymentModalContainer', () => {
       await user.keyboard('{Escape}');
 
       expect(store.getState().checkout.step).toBe('DETAILS');
-    });
+    }, FULL_FORM_TEST_TIMEOUT_MS);
 
     it('ignores a backdrop click while tokenizing, leaving the step unchanged', async () => {
       mockedTokenizeCard.mockReturnValue(new Promise(() => {}));
-      const user = userEvent.setup();
+      const user = userEvent.setup({ delay: null });
       const { store } = renderWithStore();
 
       await fillValidForm(user);
@@ -207,7 +212,7 @@ describe('PaymentModalContainer', () => {
       await user.click(screen.getByTestId('backdrop'));
 
       expect(store.getState().checkout.step).toBe('DETAILS');
-    });
+    }, FULL_FORM_TEST_TIMEOUT_MS);
 
     it('ignores a tokenize result that resolves after the container has unmounted', async () => {
       let resolveTokenize: ((value: { cardToken: string }) => void) | undefined;
@@ -217,7 +222,7 @@ describe('PaymentModalContainer', () => {
             resolveTokenize = resolve;
           }),
       );
-      const user = userEvent.setup();
+      const user = userEvent.setup({ delay: null });
       const { store, unmount } = renderWithStore();
 
       await fillValidForm(user);
@@ -232,7 +237,7 @@ describe('PaymentModalContainer', () => {
       expect(checkout.cardToken).toBeNull();
       expect(checkout.step).toBe('DETAILS');
       expect(checkout.customer).toBeNull();
-    });
+    }, FULL_FORM_TEST_TIMEOUT_MS);
 
     it('ignores a tokenize REJECTION that resolves after the container has unmounted', async () => {
       let rejectTokenize: ((error: Error) => void) | undefined;
@@ -242,7 +247,7 @@ describe('PaymentModalContainer', () => {
             rejectTokenize = reject;
           }),
       );
-      const user = userEvent.setup();
+      const user = userEvent.setup({ delay: null });
       const { store, unmount } = renderWithStore();
 
       await fillValidForm(user);
@@ -254,12 +259,12 @@ describe('PaymentModalContainer', () => {
       await Promise.resolve();
 
       expect(store.getState().checkout.submitStatus).toBe('tokenizing');
-    });
+    }, FULL_FORM_TEST_TIMEOUT_MS);
   });
 
   it('does not stall tokenization under React StrictMode double-invocation (dev mode)', async () => {
     mockedTokenizeCard.mockResolvedValue({ cardToken: 'tok_test_card' });
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const store = buildStore();
 
     render(
@@ -275,12 +280,61 @@ describe('PaymentModalContainer', () => {
 
     await waitFor(() => expect(store.getState().checkout.step).toBe('SUMMARY'));
     expect(store.getState().checkout.cardToken).toBe('tok_test_card');
-  });
+  }, FULL_FORM_TEST_TIMEOUT_MS);
 
   it('prefills customer/delivery from the store for refresh resilience', () => {
     const savedCustomer = { fullName: 'Jane Doe', email: 'jane@example.com', phone: '+573001234567' };
     renderWithStore(buildStore({ customer: savedCustomer }));
 
     expect(screen.getByLabelText(/full name/i)).toHaveValue('Jane Doe');
+  });
+
+  describe('form draft (refresh resilience)', () => {
+    const DRAFT = {
+      cardHolder: 'Jane Doe',
+      installments: 2,
+      fullName: 'Jane Doe',
+      email: 'jane@example.com',
+      phoneCountry: 'CO',
+      phoneNational: '3001234567',
+      address: 'Cra 1 # 2-3',
+      city: 'Bogota',
+      region: 'Cundinamarca',
+      postalCode: '',
+    };
+
+    it('saves what the buyer types into the store as a draft, without any card data', async () => {
+      const user = userEvent.setup({ delay: null });
+      const { store } = renderWithStore();
+
+      await fillValidForm(user);
+
+      await waitFor(() => expect(store.getState().checkout.formDraft).toMatchObject({ region: 'Cundinamarca' }));
+      expect(JSON.stringify(store.getState().checkout.formDraft)).not.toContain('4111');
+    }, FULL_FORM_TEST_TIMEOUT_MS);
+
+    it('prefills the form from the stored draft', () => {
+      renderWithStore(buildStore({ formDraft: DRAFT }));
+
+      expect(screen.getByLabelText(/full name/i)).toHaveValue('Jane Doe');
+      expect(screen.getByLabelText(/cardholder name/i)).toHaveValue('Jane Doe');
+      expect(screen.getByLabelText(/installments/i)).toHaveValue('2');
+    });
+
+    it('asks for the card again when the draft was restored after a refresh', () => {
+      renderWithStore(buildStore({ formDraft: DRAFT, draftRestored: true }));
+
+      expect(screen.getByRole('status')).toHaveTextContent(/card details are never stored on this device/i);
+    });
+
+    it('forgets the draft when the buyer cancels', async () => {
+      const user = userEvent.setup({ delay: null });
+      const { store } = renderWithStore(buildStore({ formDraft: DRAFT, draftRestored: true }));
+
+      await user.click(screen.getByRole('button', { name: /cancel/i }));
+
+      expect(store.getState().checkout.formDraft).toBeNull();
+      expect(store.getState().checkout.draftRestored).toBe(false);
+    });
   });
 });

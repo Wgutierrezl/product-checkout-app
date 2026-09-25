@@ -10,6 +10,9 @@
     <meta name="theme-color" content="#bd4c2a" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Lumila — Checkout</title>
+    <!-- No crossorigin: product images are plain <img> (no-cors) requests,
+         which use the credentialed connection pool. -->
+    <link rel="preconnect" href="https://images.unsplash.com" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
