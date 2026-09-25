@@ -5,7 +5,11 @@ import { ResultIcon } from '../../shared/ui/ResultIcon';
 import { Spinner } from '../../shared/ui/Spinner';
 import { useOverlayA11y } from '../../shared/ui/useOverlayA11y';
 import { formatCOP } from '../../domain/money/formatCOP';
-import { PROCESSING_STEPS, resolveProcessingStepIndex } from '../../domain/checkout/processingProgress';
+import {
+  msUntilNextProcessingStep,
+  PROCESSING_STEPS,
+  resolveProcessingStepIndex,
+} from '../../domain/checkout/processingProgress';
 import type { DeliveryInput, TransactionStatus } from '../../api/types';
 import type { TransactionAmounts } from './transactionSlice';
 import styles from './ResultScreen.module.css';
@@ -24,8 +28,6 @@ export interface ResultScreenProps {
   onTryAgain: () => void;
   onBackToStore: () => void;
 }
-
-const PROCESSING_TICK_MS = 1_000;
 
 /** The Nth breakdown row shown on both the PENDING and final states, sourced from either `TransactionAmounts`. */
 function AmountsBreakdown({ amounts }: { amounts: TransactionAmounts }) {
@@ -105,21 +107,30 @@ export function ResultScreen({
     }
   }, [isFinal, status]);
 
-  // A 1s tick just forces a re-render so the elapsed-time-derived progress
-  // step below stays current; it carries no state of its own, and stops
-  // entirely once there's nothing left to advance towards (exhausted, or no
-  // pollStartedAt yet).
+  const processingStepIndex =
+    pollStartedAt === null ? 0 : resolveProcessingStepIndex(Date.now() - pollStartedAt);
+
+  // Forces a re-render (carrying no state of its own) so the elapsed-time-
+  // derived `processingStepIndex` above stays current. Schedules a SINGLE
+  // timer for exactly when that index would next change (via
+  // `msUntilNextProcessingStep`) rather than a 1s interval — over the whole
+  // poll budget the step only actually changes twice, so this fires ~2
+  // renders instead of ~60. Re-runs (and reschedules for the boundary after
+  // that) each time `processingStepIndex` itself changes; stops for good
+  // once there's nothing left to advance towards (exhausted, no
+  // `pollStartedAt` yet, or already at the last step).
   const [, forceTick] = useState(0);
   useEffect(() => {
     if (!isPending || pollExhausted || pollStartedAt === null) {
       return;
     }
-    const intervalId = window.setInterval(() => forceTick((tick) => tick + 1), PROCESSING_TICK_MS);
-    return () => window.clearInterval(intervalId);
-  }, [isPending, pollExhausted, pollStartedAt]);
-
-  const processingStepIndex =
-    pollStartedAt === null ? 0 : resolveProcessingStepIndex(Date.now() - pollStartedAt);
+    const delayMs = msUntilNextProcessingStep(Date.now() - pollStartedAt);
+    if (delayMs === null) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => forceTick((tick) => tick + 1), delayMs);
+    return () => window.clearTimeout(timeoutId);
+  }, [isPending, pollExhausted, pollStartedAt, processingStepIndex]);
 
   return createPortal(
     <div

@@ -9,7 +9,7 @@ import { isExpiryValid, parseExpiry } from '../../domain/card/expiry';
 import { isValidCvc } from '../../domain/card/cvc';
 import { digitsOnly, formatCardNumberInput, formatExpiryInput } from '../../domain/card/format';
 import { DEFAULT_COUNTRY_ISO2, findCountryByDialCode, findCountryByIso2 } from '../../domain/phone/countries';
-import { isValidE164Phone, parsePhone, toE164 } from '../../domain/phone/phone';
+import { DEFAULT_DIAL_CODE, isValidE164Phone, parsePhone, toE164 } from '../../domain/phone/phone';
 import {
   requireNonEmpty,
   validateAddress,
@@ -90,7 +90,7 @@ function validateCvc(value: string): string | null {
 
 /** The dial code (no leading "+") for a country selector's ISO2 value, falling back to the default country. */
 function dialCodeForCountry(iso2: string): string {
-  return findCountryByIso2(iso2)?.dialCode ?? findCountryByIso2(DEFAULT_COUNTRY_ISO2)!.dialCode;
+  return findCountryByIso2(iso2)?.dialCode ?? DEFAULT_DIAL_CODE;
 }
 
 /**
@@ -177,6 +177,13 @@ export function PaymentForm({
       installments: initialInstallments,
       fullName: initialCustomer?.fullName ?? '',
       email: initialCustomer?.email ?? '',
+      // NOTE: dial codes shared by several countries (e.g. "1" for the US,
+      // Canada, and a few Caribbean nations — see `findCountryByDialCode`)
+      // always resolve back to the same one; a persisted Canadian number,
+      // for example, would reopen showing "United States". The phone VALUE
+      // sent to the backend is unaffected — only which flag/name the
+      // selector shows can be wrong. Full disambiguation would need
+      // NANP-area-code-level data, out of scope for this hand-written list.
       phoneCountry: findCountryByDialCode(initialPhone.dialCode)?.iso2 ?? DEFAULT_COUNTRY_ISO2,
       phoneNational: initialPhone.nationalNumber,
       address: initialDelivery?.address ?? '',
@@ -204,6 +211,23 @@ export function PaymentForm({
 
   function setField<K extends keyof FormValues>(field: K, value: FormValues[K]) {
     setValues((current) => ({ ...current, [field]: value }));
+  }
+
+  /**
+   * The phone field's validity depends on BOTH `phoneNational` and
+   * `phoneCountry` (a national number can be too short for one country and
+   * fine for another) — if the phone was already touched (has a visible
+   * error from a previous blur), switching countries must re-check it
+   * immediately rather than leaving a now-stale error/pass on screen until
+   * the national field is blurred again.
+   */
+  function handlePhoneCountryChange(iso2: string) {
+    setValues((current) => ({ ...current, phoneCountry: iso2 }));
+    setErrors((current) =>
+      current.phone === undefined
+        ? current
+        : { ...current, phone: validatePhoneField(values.phoneNational, iso2) ?? undefined },
+    );
   }
 
   function handleBlur(field: FieldName) {
@@ -418,7 +442,7 @@ export function PaymentForm({
                   <CountrySelect
                     id="phoneCountry"
                     value={values.phoneCountry}
-                    onChange={(iso2) => setField('phoneCountry', iso2)}
+                    onChange={handlePhoneCountryChange}
                   />
                 </div>
                 <input

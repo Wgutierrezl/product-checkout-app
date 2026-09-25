@@ -57,6 +57,15 @@ describe('parsePhone', () => {
     expect(parsePhone('3001234567')).toEqual({ dialCode: '57', nationalNumber: '3001234567' });
   });
 
+  it('strips an unprefixed value that already embeds the Colombian dial code, instead of doubling it up', () => {
+    // Some legacy data may have been saved as "573001234567" (dial code
+    // typed in, but no leading "+") rather than a bare national number —
+    // at 12 digits it's too long to be a plain 10-digit CO national number,
+    // so the leading "57" is recognized as the dial code, not more digits
+    // of the number itself.
+    expect(parsePhone('573001234567')).toEqual({ dialCode: '57', nationalNumber: '3001234567' });
+  });
+
   it('defaults to Colombia with an empty national number for an empty value', () => {
     expect(parsePhone('')).toEqual({ dialCode: '57', nationalNumber: '' });
   });

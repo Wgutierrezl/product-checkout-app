@@ -39,26 +39,39 @@ const DIAL_CODES_LONGEST_FIRST = [...new Set(COUNTRIES.map((country) => country.
   (a, b) => b.length - a.length,
 );
 
-const DEFAULT_DIAL_CODE = findCountryByIso2(DEFAULT_COUNTRY_ISO2)!.dialCode;
+export const DEFAULT_DIAL_CODE = findCountryByIso2(DEFAULT_COUNTRY_ISO2)!.dialCode;
+
+/** A Colombian national (mobile) number is always exactly this many digits. */
+const CO_NATIONAL_NUMBER_LENGTH = 10;
 
 /**
  * Splits a persisted or freshly-entered phone value into a country dial
  * code + national number, for pre-filling the country selector and
- * national-number field. Handles 3 shapes:
+ * national-number field. Handles 4 shapes:
  *
  * - Already E.164 ("+573001234567"): matched against the known dial codes.
  * - A "+" prefix that matches no known dial code (corrupted/foreign data):
  *   falls back to the default country, keeping every digit as the national
  *   number so nothing is silently dropped.
- * - No "+" prefix at all (older persisted customers, saved before this
- *   country selector existed): treated as a national number under the
- *   default country (Colombia) — this checkout's original, only market.
+ * - No "+" prefix, but too long to be a bare CO national number
+ *   ("573001234567", 12 digits): some legacy data may have had the dial
+ *   code typed in without a leading "+" — treated as CO with that leading
+ *   "57" recognized as the dial code, rather than doubling it up when
+ *   `toE164` re-adds it.
+ * - No "+" prefix at all, exactly a CO national number's length ("3001234567"):
+ *   older persisted customers, saved before this country selector existed —
+ *   treated as a national number under the default country (Colombia),
+ *   this checkout's original, only market.
  */
 export function parsePhone(value: string): ParsedPhone {
   const trimmed = value.trim();
 
   if (!trimmed.startsWith('+')) {
-    return { dialCode: DEFAULT_DIAL_CODE, nationalNumber: digitsOnly(trimmed) };
+    const digits = digitsOnly(trimmed);
+    if (digits.length > CO_NATIONAL_NUMBER_LENGTH && digits.startsWith(DEFAULT_DIAL_CODE)) {
+      return { dialCode: DEFAULT_DIAL_CODE, nationalNumber: digits.slice(DEFAULT_DIAL_CODE.length) };
+    }
+    return { dialCode: DEFAULT_DIAL_CODE, nationalNumber: digits };
   }
 
   const digits = digitsOnly(trimmed);

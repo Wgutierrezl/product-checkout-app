@@ -81,15 +81,13 @@ export function ProductCard({ product, onBuy, priority = false }: ProductCardPro
           </button>
         </div>
 
-        <div className={styles.actions}>
-          <Button
-            className={styles.payButton}
-            disabled={!inStock}
-            onClick={() => onBuy(product.id, quantity)}
-          >
-            Pay with credit card
-          </Button>
-        </div>
+        <Button
+          className={styles.payButton}
+          disabled={!inStock}
+          onClick={() => onBuy(product.id, quantity)}
+        >
+          Pay with credit card
+        </Button>
       </div>
     </article>
   );

@@ -286,6 +286,27 @@ describe('PaymentForm', () => {
       expect(input).toHaveAttribute('inputMode', 'numeric');
       expect(input).toHaveAttribute('autoComplete', 'tel-national');
     });
+
+    it('re-validates an already-shown phone error immediately when the country changes', async () => {
+      const user = userEvent.setup();
+      renderForm();
+
+      // 5 national digits + Colombia's 2-digit dial code = 7 total, below
+      // the 8-digit minimum -> invalid, and blurring surfaces that error.
+      await user.type(screen.getByLabelText(/phone/i), '12345');
+      await user.tab();
+      expect(screen.getByText(/enter a valid phone number/i)).toBeInTheDocument();
+
+      // Switching to Ecuador (dial code 593, 3 digits) makes the SAME 5
+      // national digits add up to 8 total -> now valid. The error must
+      // clear right away, not stay stuck until the field is blurred again.
+      const combobox = screen.getByRole('combobox', { name: /country code/i });
+      await user.click(combobox);
+      await user.type(combobox, 'Ecuador');
+      await user.keyboard('{ArrowDown}{Enter}');
+
+      expect(screen.queryByText(/enter a valid phone number/i)).not.toBeInTheDocument();
+    });
   });
 
   describe('submission', () => {
