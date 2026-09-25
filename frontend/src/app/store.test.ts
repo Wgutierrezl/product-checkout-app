@@ -30,7 +30,6 @@ describe('createAppStore', () => {
           delivery: null,
           installments: 1,
           idempotencyKey: 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f',
-          cardSummary: null,
           submitAttempted: false,
         },
         transaction: { id: null, status: null, pollStartedAt: null },

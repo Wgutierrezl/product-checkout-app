@@ -5,8 +5,15 @@ import type { TransactionState } from '../../features/transaction/transactionSli
 import type { CheckoutStep } from '../../domain/checkout/stepMachine';
 
 /** Bumped whenever the persisted shape changes; a mismatch discards it. */
-export const PERSISTED_VERSION = 2;
+export const PERSISTED_VERSION = 3;
 export const STORAGE_KEY = 'checkout-spa:v1';
+/**
+ * sessionStorage key for the single-use card token + its display summary.
+ * sessionStorage (never localStorage) so a refresh on SUMMARY survives, but
+ * closing the tab drops it for good. Card number, expiry and CVC are never
+ * stored anywhere.
+ */
+export const CARD_SESSION_KEY = 'checkout-spa:card-session';
 
 const CHECKOUT_STEPS: readonly CheckoutStep[] = ['PRODUCT', 'DETAILS', 'SUMMARY', 'RESULT'];
 const TRANSACTION_STATUSES: readonly TransactionStatus[] = ['PENDING', 'APPROVED', 'DECLINED', 'VOIDED', 'ERROR'];
@@ -17,6 +24,14 @@ const CARD_BRANDS = ['visa', 'mastercard', 'unknown'] as const;
  * forward-compatible if the UUID generation strategy ever changes.
  */
 const UUID_LIKE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/**
+ * An opaque gateway token: URL-safe characters with a sane length cap. It
+ * must contain at least one non-digit, so a PAN-shaped value can never be
+ * taken for (or smuggled in as) a token.
+ */
+const CARD_TOKEN_SHAPE = /^[A-Za-z0-9_-]{1,256}$/;
+const ALL_DIGITS = /^\d+$/;
+const LAST4_SHAPE = /^\d{4}$/;
 
 type PersistedCheckout = Pick<
   CheckoutState,
@@ -27,10 +42,16 @@ type PersistedCheckout = Pick<
   | 'delivery'
   | 'installments'
   | 'idempotencyKey'
-  | 'cardSummary'
   | 'submitAttempted'
 >;
 type PersistedTransaction = Pick<TransactionState, 'id' | 'status' | 'pollStartedAt'>;
+type RehydratedCheckout = PersistedCheckout & Pick<CheckoutState, 'cardToken' | 'cardSummary'>;
+
+interface PersistedCardSession {
+  version: number;
+  cardToken: string;
+  cardSummary: CardSummary;
+}
 
 interface PersistedState {
   version: number;
@@ -50,34 +71,51 @@ export interface PersistableState {
 }
 
 // ---------------------------------------------------------------------------
-// Safe storage access — `localStorage` can throw in the wild (quota exceeded
+// Safe storage access — Web Storage can throw in the wild (quota exceeded
 // in normal browsing, or any access at all denied in some private-browsing
-// modes). None of that is ever allowed to crash the app; a storage failure
-// just means "act as if nothing was persisted this time".
+// modes, even just reading `window.sessionStorage`). None of that is ever
+// allowed to crash the app; a storage failure just means "act as if nothing
+// was persisted this time". The storage object itself is resolved INSIDE
+// the try, since the property getter is what throws in some browsers.
 // ---------------------------------------------------------------------------
 
-function safeGetItem(key: string): string | null {
+type StorageArea = 'local' | 'session';
+
+function storageFor(area: StorageArea): Storage {
+  return area === 'local' ? window.localStorage : window.sessionStorage;
+}
+
+function safeGetItem(key: string, area: StorageArea = 'local'): string | null {
   try {
-    return localStorage.getItem(key);
+    return storageFor(area).getItem(key);
   } catch {
     return null;
   }
 }
 
-function safeSetItem(key: string, value: string): void {
+function safeSetItem(key: string, value: string, area: StorageArea = 'local'): void {
   try {
-    localStorage.setItem(key, value);
+    storageFor(area).setItem(key, value);
   } catch {
     // Quota exceeded, private-mode restrictions, etc. — persistence is a
     // best-effort convenience, never a hard requirement for the app to work.
   }
 }
 
-function safeRemoveItem(key: string): void {
+function safeRemoveItem(key: string, area: StorageArea = 'local'): void {
   try {
-    localStorage.removeItem(key);
+    storageFor(area).removeItem(key);
   } catch {
     // See safeSetItem — never let a storage failure escape.
+  }
+}
+
+/** Parses JSON without throwing; `undefined` means "not parseable". */
+function safeParse(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
   }
 }
 
@@ -127,11 +165,8 @@ function isValidDelivery(value: unknown): value is DeliveryInput | null {
   );
 }
 
-function isValidCardSummary(value: unknown): value is CardSummary | null {
-  if (value === null) {
-    return true;
-  }
-  if (typeof value !== 'object') {
+function isValidCardSummary(value: unknown): value is CardSummary {
+  if (typeof value !== 'object' || value === null) {
     return false;
   }
   const candidate = value as Record<string, unknown>;
@@ -139,7 +174,24 @@ function isValidCardSummary(value: unknown): value is CardSummary | null {
     typeof candidate.brand === 'string' &&
     (CARD_BRANDS as readonly string[]).includes(candidate.brand) &&
     typeof candidate.last4 === 'string' &&
+    LAST4_SHAPE.test(candidate.last4) &&
     typeof candidate.holder === 'string'
+  );
+}
+
+function isValidCardToken(value: unknown): value is string {
+  return typeof value === 'string' && CARD_TOKEN_SHAPE.test(value) && !ALL_DIGITS.test(value);
+}
+
+function isValidCardSession(value: unknown): value is PersistedCardSession {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    candidate.version === PERSISTED_VERSION &&
+    isValidCardToken(candidate.cardToken) &&
+    isValidCardSummary(candidate.cardSummary)
   );
 }
 
@@ -159,7 +211,6 @@ function isValidPersistedCheckout(value: unknown): value is PersistedCheckout {
     isIntegerInRange(candidate.installments, 1, 36) &&
     isNullableString(candidate.idempotencyKey) &&
     (candidate.idempotencyKey === null || UUID_LIKE.test(candidate.idempotencyKey as string)) &&
-    isValidCardSummary(candidate.cardSummary) &&
     typeof candidate.submitAttempted === 'boolean'
   );
 }
@@ -190,54 +241,100 @@ function isPersistedState(value: unknown): value is PersistedState {
   );
 }
 
+/** Reads and validates the tab-scoped card session; `null` when absent or invalid. */
+function readCardSession(): PersistedCardSession | null {
+  const raw = safeGetItem(CARD_SESSION_KEY, 'session');
+  if (!raw) {
+    return null;
+  }
+  const parsed = safeParse(raw);
+  return isValidCardSession(parsed) ? parsed : null;
+}
+
 /**
  * Reads and validates the persisted state on boot. Discards (and wipes) it
  * on any parse failure, shape/range mismatch on ANY field, or version
- * mismatch. A persisted `SUMMARY` step is downgraded to `DETAILS` with
- * `cardSummary` cleared — the in-memory `cardToken` never survives a
- * refresh, so the buyer must re-enter and re-tokenize the card before
- * returning to `SUMMARY` (see design Amendment: tokenize at Continue).
+ * mismatch. Only whitelisted fields are ever returned, so anything else
+ * planted in storage never reaches Redux.
+ *
+ * A persisted `SUMMARY` step stays on `SUMMARY` only when this tab still
+ * holds a valid card session (sessionStorage) and no payment attempt was in
+ * flight. Otherwise (new tab, closed tab, corrupted session, or a token that
+ * may already have been sent) it is downgraded to `DETAILS` with no card
+ * data, and the buyer re-enters the card (see design Amendment: tokenize at
+ * Continue). A card session is never kept for any other step.
  */
 export function loadPersistedState():
-  | { checkout: PersistedCheckout; transaction: PersistedTransaction }
+  | { checkout: RehydratedCheckout; transaction: PersistedTransaction }
   | undefined {
   const raw = safeGetItem(STORAGE_KEY);
-  if (!raw) {
-    return undefined;
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    safeRemoveItem(STORAGE_KEY);
-    return undefined;
-  }
-
+  const parsed = raw ? safeParse(raw) : undefined;
   if (!isPersistedState(parsed) || parsed.version !== PERSISTED_VERSION) {
-    safeRemoveItem(STORAGE_KEY);
+    if (raw) {
+      safeRemoveItem(STORAGE_KEY);
+    }
+    safeRemoveItem(CARD_SESSION_KEY, 'session');
     return undefined;
   }
 
-  let checkout = parsed.checkout;
-  if (checkout.step === 'SUMMARY') {
-    const downgradedCardSummary: CardSummary | null = null;
-    checkout = { ...checkout, step: 'DETAILS', cardSummary: downgradedCardSummary };
+  const persisted = parsed.checkout;
+  const cardSession = persisted.step === 'SUMMARY' && !persisted.submitAttempted ? readCardSession() : null;
+  const canResumeSummary = cardSession !== null;
+  if (!canResumeSummary) {
+    // Unused, invalid, or possibly already sent: never keep it around.
+    safeRemoveItem(CARD_SESSION_KEY, 'session');
   }
 
-  return { checkout, transaction: parsed.transaction };
+  const checkout: RehydratedCheckout = {
+    step: persisted.step === 'SUMMARY' && !canResumeSummary ? 'DETAILS' : persisted.step,
+    productId: persisted.productId,
+    quantity: persisted.quantity,
+    customer: persisted.customer,
+    delivery: persisted.delivery,
+    installments: persisted.installments,
+    idempotencyKey: persisted.idempotencyKey,
+    submitAttempted: persisted.submitAttempted,
+    cardToken: canResumeSummary ? cardSession.cardToken : null,
+    cardSummary: canResumeSummary ? cardSession.cardSummary : null,
+  };
+  const transaction: PersistedTransaction = {
+    id: parsed.transaction.id,
+    status: parsed.transaction.status,
+    pollStartedAt: parsed.transaction.pollStartedAt,
+  };
+
+  return { checkout, transaction };
 }
 
 /** Wipes all persisted checkout/transaction state (final status + "Back to store", or explicit reset). */
 export function clearPersistedState(): void {
   safeRemoveItem(STORAGE_KEY);
+  safeRemoveItem(CARD_SESSION_KEY, 'session');
+}
+
+/**
+ * The card session is written ONLY while the buyer sits on SUMMARY with an
+ * unspent token and no payment attempt in flight. Every other state removes
+ * it at once: the token was consumed or is on its way to the gateway
+ * (single-use), the buyer went back to edit details, or the checkout reset.
+ */
+function syncCardSession(checkout: CheckoutState): void {
+  const { step, cardToken, cardSummary, submitAttempted } = checkout;
+  if (step === 'SUMMARY' && cardToken && cardSummary && !submitAttempted) {
+    const session: PersistedCardSession = { version: PERSISTED_VERSION, cardToken, cardSummary };
+    safeSetItem(CARD_SESSION_KEY, JSON.stringify(session), 'session');
+    return;
+  }
+  safeRemoveItem(CARD_SESSION_KEY, 'session');
 }
 
 /**
  * Saves the whitelisted fields after every action. Anything not listed in
  * `PersistedCheckout`/`PersistedTransaction` above — `catalog` entirely,
- * `checkout.cardToken`/`submitStatus`/`submitError`, `transaction.amounts`/
- * `error` — is never written to `localStorage`.
+ * `checkout.cardToken`/`cardSummary`/`submitStatus`/`submitError`,
+ * `transaction.amounts`/`error` — is never written to `localStorage`. The
+ * card token and its display summary go to sessionStorage only, and only
+ * while on SUMMARY (see `syncCardSession`).
  */
 export const persistMiddleware: Middleware<Record<string, never>, PersistableState> =
   (store) => (next) => (action) => {
@@ -254,7 +351,6 @@ export const persistMiddleware: Middleware<Record<string, never>, PersistableSta
         delivery: state.checkout.delivery,
         installments: state.checkout.installments,
         idempotencyKey: state.checkout.idempotencyKey,
-        cardSummary: state.checkout.cardSummary,
         submitAttempted: state.checkout.submitAttempted,
       },
       transaction: {
@@ -265,6 +361,7 @@ export const persistMiddleware: Middleware<Record<string, never>, PersistableSta
     };
 
     safeSetItem(STORAGE_KEY, JSON.stringify(toPersist));
+    syncCardSession(state.checkout);
 
     return result;
   };

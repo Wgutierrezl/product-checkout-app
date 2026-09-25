@@ -23,9 +23,10 @@ export interface CheckoutState {
   /** Never number/CVC/token — only what's safe to display back to the buyer. */
   cardSummary: CardSummary | null;
   /**
-   * Single-use gateway token. Intentionally excluded from the persistence
-   * whitelist (see `shared/persistence/persistMiddleware.ts`) — it lives in
-   * Redux state for the current session only, never in localStorage.
+   * Single-use gateway token. Never written to localStorage. While the buyer
+   * is on SUMMARY it is mirrored (with `cardSummary`) to sessionStorage so a
+   * refresh in the same tab keeps SUMMARY, and removed the moment it is
+   * spent or no longer needed (see `shared/persistence/persistMiddleware.ts`).
    */
   cardToken: string | null;
   submitStatus: SubmitStatus;
