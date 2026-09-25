@@ -105,8 +105,14 @@ CDK_DEFAULT_ACCOUNT=<ACCOUNT_ID> CDK_DEFAULT_REGION=<REGION> \
 This creates:
 - The GitHub Actions OIDC identity provider (`token.actions.githubusercontent.com`).
 - A `checkout-deploy` IAM role trusted **only** for
-  `repo:Wgutierrezl/product-checkout-app:ref:refs/heads/main` — no other
-  repo, fork, or branch can assume it.
+  `repo:Wgutierrezl@167873254/product-checkout-app@1384356068:ref:refs/heads/main`
+  — no other repo, fork, or branch can assume it. This repository emits
+  GitHub's *immutable* OIDC subject, which embeds the owner and repository ids,
+  so even a deleted-and-recreated repo with the same name can't assume the role.
+  Check your repository's format with
+  `gh api repos/<owner>/<repo>/actions/oidc/customization/sub` and override the
+  value with `GITHUB_OIDC_REPO` if it differs — a mismatch fails the deploy with
+  `Not authorized to perform sts:AssumeRoleWithWebIdentity`.
 - A policy scoped to exactly what `deploy.yml` needs: assuming the CDK
   bootstrap roles, syncing the SPA bucket, invalidating the CloudFront
   distribution, and `PutItem` on the `Products` table.
