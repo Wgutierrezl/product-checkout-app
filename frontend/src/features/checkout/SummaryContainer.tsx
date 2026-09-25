@@ -20,7 +20,12 @@ import type { PaymentAcceptance } from '../../api/types';
 export const PAYMENT_UNCONFIRMED_MESSAGE =
   "We couldn't confirm your payment in time. Re-enter your card to check it again; you won't be charged twice.";
 
-export const CARD_SESSION_EXPIRED_MESSAGE = 'Your card session expired. Please re-enter your card details.';
+/**
+ * Deliberately neutral: the gateway rejects for many reasons (an expired
+ * token, but also e.g. a configuration problem), so the buyer is never told
+ * something specific that may be untrue and just retry forever.
+ */
+export const PAYMENT_REJECTED_MESSAGE = 'The payment was rejected. Please re-enter your card or try another one.';
 
 /**
  * The backend answers POST /transactions with 502 + `PaymentGatewayError`
@@ -222,10 +227,10 @@ export function SummaryContainer() {
           return;
         }
         if (isGatewayRejection(error)) {
-          // The stored card token is the most likely culprit (a restored
-          // one may have expired), so ask for the card again. The key IS
-          // rotated: replaying the old one would only return that ERROR.
-          dispatch(submitErrorSet(CARD_SESSION_EXPIRED_MESSAGE));
+          // A definite rejection: ask for the card again (or another one).
+          // The key IS rotated: replaying the old one would only return
+          // that ERROR.
+          dispatch(submitErrorSet(PAYMENT_REJECTED_MESSAGE));
           dispatch(cardTokenConsumed());
           dispatch(idempotencyKeyRotated());
           dispatch(stepChangeRequested('DETAILS'));

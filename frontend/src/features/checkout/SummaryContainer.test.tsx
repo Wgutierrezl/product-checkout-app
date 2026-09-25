@@ -362,7 +362,7 @@ describe('SummaryContainer', () => {
       expect(checkout.submitAttempted).toBe(false);
     });
 
-    it('502 from a gateway rejection (e.g. an expired or already used card token): back to DETAILS asking for the card again, with a NEW key', async () => {
+    it('502 from a gateway rejection (e.g. an expired token, or any other definite rejection): back to DETAILS with a neutral message, with a NEW key', async () => {
       mockedCreateTransaction.mockRejectedValue(
         new BackendApiError('Payment provider unavailable', 502, 'PaymentGatewayError'),
       );
@@ -375,7 +375,7 @@ describe('SummaryContainer', () => {
 
       await waitFor(() => expect(store.getState().checkout.step).toBe('DETAILS'));
       const { checkout } = store.getState();
-      expect(checkout.submitError).toBe('Your card session expired. Please re-enter your card details.');
+      expect(checkout.submitError).toBe('The payment was rejected. Please re-enter your card or try another one.');
       expect(checkout.cardToken).toBeNull();
       // The backend already recorded that attempt as ERROR under the old
       // key; replaying it would only return that ERROR again.
