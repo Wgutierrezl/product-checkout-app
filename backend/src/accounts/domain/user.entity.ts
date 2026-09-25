@@ -1,5 +1,6 @@
 import { ValidationError } from '../../shared/errors/domain-error';
 import { AppResult, err, ok } from '../../shared/result/result.types';
+import { normalizeEmail } from './normalize-email';
 
 export interface UserPreferences {
   readonly phone?: string;
@@ -51,14 +52,22 @@ export const User = {
       return err(new ValidationError(`User is missing required field: ${missing[0]}`));
     }
 
-    if (!EMAIL_REGEX.test(props.email)) {
+    // Normalized once, canonically, here — every construction path (DynamoDB
+    // reads, RegisterUseCase's create flow, tests) ends up with the same
+    // lowercased/trimmed email, so it always agrees with the EMAIL#-prefixed
+    // uniqueness guard key (see DynamoUserRepository.create) and with a
+    // case-different login lookup (see LoginUseCase/RegisterUseCase's own
+    // normalizeEmail call before findByEmail).
+    const email = normalizeEmail(props.email);
+
+    if (!EMAIL_REGEX.test(email)) {
       return err(new ValidationError(`Invalid user email: ${props.email}`));
     }
 
     return ok({
       id: props.id,
       fullName: props.fullName,
-      email: props.email,
+      email,
       passwordHash: props.passwordHash,
       preferences: props.preferences,
     });

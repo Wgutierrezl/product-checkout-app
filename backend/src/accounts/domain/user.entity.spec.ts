@@ -47,6 +47,13 @@ describe('User.create', () => {
     expect(result._unsafeUnwrap().preferences).toEqual(preferences);
   });
 
+  it('normalizes the email to lowercase and trims surrounding whitespace', () => {
+    const result = User.create({ ...validProps, email: '  Foo@Bar.com  ' });
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap().email).toBe('foo@bar.com');
+  });
+
   it('never exposes the plaintext password as a field', () => {
     const result = User.create(validProps);
 

@@ -49,6 +49,39 @@ describe('LoginUseCase', () => {
     expect(tokens.issue).not.toHaveBeenCalled();
   });
 
+  it('finds the user regardless of email case/whitespace on login (case-insensitive lookup)', async () => {
+    const user = buildUser({ id: 'user-1', email: 'foo@bar.com' });
+    const repository = new FakeUserRepository([user]);
+    const hasher = buildHasher(true);
+    const tokens = buildTokens('signed.jwt.token');
+    const useCase = new LoginUseCase(repository, hasher, tokens);
+
+    const result = await useCase.execute({
+      email: '  Foo@Bar.com  ',
+      password: 'correct-horse-battery-staple',
+    });
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap().user).toEqual(user);
+  });
+
+  it('runs a dummy bcrypt.compare against a static hash on the not-found path (timing-safe against enumeration)', async () => {
+    const repository = new FakeUserRepository([]);
+    const hasher = buildHasher(true);
+    const tokens = buildTokens();
+    const useCase = new LoginUseCase(repository, hasher, tokens);
+
+    const result = await useCase.execute({ email: 'unknown@example.com', password: 'whatever' });
+
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().type).toBe('Unauthorized');
+    // Same shape of work as the real credential-check path: one bcrypt
+    // compare call, against SOME hash string, regardless of whether the
+    // email exists — response time no longer betrays that distinction.
+    expect(hasher.compare).toHaveBeenCalledTimes(1);
+    expect(hasher.compare).toHaveBeenCalledWith('whatever', expect.any(String));
+  });
+
   it('returns UnauthorizedError when the password does not match', async () => {
     const user = buildUser({ email: 'jane.doe@example.com' });
     const repository = new FakeUserRepository([user]);

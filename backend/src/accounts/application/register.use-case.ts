@@ -5,6 +5,7 @@ import { ConflictError } from '../../shared/errors/domain-error';
 import { ID_GENERATOR_PORT, IdGeneratorPort } from '../../shared/ports/id-generator.port';
 import { AppResultAsync, errAsync } from '../../shared/result/result.types';
 import { User } from '../domain/user.entity';
+import { normalizeEmail } from '../domain/normalize-email';
 import { PASSWORD_HASHER_PORT, PasswordHasherPort } from '../domain/ports/password-hasher.port';
 import { USER_REPOSITORY_PORT, UserRepositoryPort } from '../domain/user.repository.port';
 
@@ -32,9 +33,17 @@ export class RegisterUseCase {
   ) {}
 
   execute(command: RegisterCommand): AppResultAsync<User> {
-    return this.users.findByEmail(command.email).andThen((existing) => {
+    // Normalized once here (mirrors LoginUseCase) so a lookup against
+    // findByEmail's exact-match GSI query catches a duplicate regardless of
+    // the caller's input casing/whitespace — the DB-level guard item in
+    // DynamoUserRepository.create is the ultimate source of truth for
+    // uniqueness, but this fast path avoids an unnecessary hash+write
+    // attempt for the common case.
+    const email = normalizeEmail(command.email);
+
+    return this.users.findByEmail(email).andThen((existing) => {
       if (existing) {
-        return errAsync(new ConflictError(`A user with email ${command.email} already exists`));
+        return errAsync(new ConflictError(`A user with email ${email} already exists`));
       }
 
       return ResultAsync.fromSafePromise(this.hasher.hash(command.password)).andThen(
@@ -42,7 +51,7 @@ export class RegisterUseCase {
           User.create({
             id: this.ids.newId(),
             fullName: command.fullName,
-            email: command.email,
+            email,
             passwordHash,
           }).asyncAndThen((user) => this.users.create(user)),
       );

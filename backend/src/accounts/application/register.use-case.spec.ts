@@ -38,6 +38,40 @@ describe('RegisterUseCase', () => {
     expect(hasher.hash).toHaveBeenCalledWith('correct-horse-battery-staple');
   });
 
+  it('normalizes the email (trim + lowercase) before checking for duplicates and before storing', async () => {
+    const repository = new FakeUserRepository();
+    const hasher = buildHasher('$2a$10$hashedvalue');
+    const useCase = new RegisterUseCase(repository, hasher, buildIds('user-new'));
+
+    const result = await useCase.execute({
+      fullName: 'Jane Doe',
+      email: '  Foo@Bar.com  ',
+      password: 'correct-horse-battery-staple',
+    });
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap().email).toBe('foo@bar.com');
+  });
+
+  it('treats an email differing only by case/whitespace as a duplicate (case-insensitive uniqueness)', async () => {
+    const existing = buildUser({ email: 'foo@bar.com' });
+    const repository = new FakeUserRepository([existing]);
+    const hasher = buildHasher();
+    const createSpy = jest.spyOn(repository, 'create');
+    const useCase = new RegisterUseCase(repository, hasher, buildIds());
+
+    const result = await useCase.execute({
+      fullName: 'Someone Else',
+      email: '  FOO@BAR.com  ',
+      password: 'correct-horse-battery-staple',
+    });
+
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().type).toBe('Conflict');
+    expect(hasher.hash).not.toHaveBeenCalled();
+    expect(createSpy).not.toHaveBeenCalled();
+  });
+
   it('returns ConflictError without hashing or creating when the email is already registered', async () => {
     const existing = buildUser({ email: 'jane.doe@example.com' });
     const repository = new FakeUserRepository([existing]);

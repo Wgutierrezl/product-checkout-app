@@ -8,6 +8,7 @@ import { AppResult, AppResultAsync, errAsync, okAsync } from '../../shared/resul
 import { resolveTableName } from '../../shared/config/resolve-table-name';
 import { DYNAMO_DOCUMENT_CLIENT } from '../../shared/infrastructure/dynamo/dynamo-client.provider';
 import { User } from '../domain/user.entity';
+import { normalizeEmail } from '../domain/normalize-email';
 import { UserRepositoryPort } from '../domain/user.repository.port';
 
 export const USERS_TABLE_NAME = resolveTableName(process.env.USERS_TABLE_NAME, 'Users');
@@ -112,7 +113,13 @@ export class DynamoUserRepository implements UserRepositoryPort {
   }
 
   private async putUserWithEmailGuard(user: User): Promise<User> {
-    const emailGuardKey = `EMAIL#${user.email.toLowerCase()}`;
+    // `user.email` is already normalized by `User.create` by the time it
+    // reaches here (every construction path goes through it) — using the
+    // shared `normalizeEmail` helper instead of an inline `.toLowerCase()`
+    // keeps this guard key byte-for-byte consistent with `findByEmail`'s
+    // lookups even if a future caller ever constructs a `User`-shaped value
+    // that bypassed `User.create`.
+    const emailGuardKey = `EMAIL#${normalizeEmail(user.email)}`;
 
     await this.client.send(
       new TransactWriteCommand({
