@@ -148,13 +148,17 @@ to the card number field, asking the buyer to re-enter the card, until they type
   token, so a duplicated tab (which copies sessionStorage) pays under the same key and the backend
   replays the first transaction instead of charging again. When the other tab starts paying or
   leaves SUMMARY, a `storage` listener makes the idle duplicate drop its token and follow that
-  tab's state ("This checkout continued in another tab.").
+  tab's state ("This checkout continued in another tab."). If that tab is paying, the duplicate
+  looks the attempt up with `GET /transactions/:key` and follows it to RESULT, never asking for a
+  card just to reach a replay.
 - **Gateway rejection.** On a definite rejection (the backend answers 502 with error type
   `PaymentGatewayError`) the buyer goes back to `DETAILS` with "The payment was rejected. Please
   re-enter your card or try another one." and a fresh idempotency key.
-- **Client timeout.** If the 15 s client timeout fires on Pay (status 408), the outcome is unknown:
-  the token is dropped, but the key and `submitAttempted` are kept, so a refresh resumes the attempt
-  and a retry is a backend replay.
+- **Client timeout.** If the 15 s client timeout fires on Pay (status 408), the outcome is unknown,
+  so the attempt is looked up with `GET /transactions/:key`, exactly as a refresh would: if it
+  landed, the buyer sees its real status with no second POST. Only on a 404 (or a failed lookup)
+  does the buyer go back to `DETAILS`; the token is dropped, but the key and `submitAttempted` are
+  kept, so a later refresh checks again and a retry is a backend replay.
 
 All persisted state is cleared once a final status is reached and the buyer returns to the catalog.
 
@@ -247,11 +251,11 @@ Strict TDD throughout (RED → GREEN → REFACTOR), enforced by a coverage gate:
 | Metric | % |
 |---|---|
 | Statements | 99.57% |
-| Branches | 98.39% |
+| Branches | 98.43% |
 | Functions | 100% |
 | Lines | 99.54% |
 
-54 suites / 691 tests. Remaining, documented gaps are defensive guard clauses unreachable via the
+54 suites / 703 tests. Remaining, documented gaps are defensive guard clauses unreachable via the
 UI (e.g. a disabled control's own handler) — never left silently uncovered.
 
 ```bash
