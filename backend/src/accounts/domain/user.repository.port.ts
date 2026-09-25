@@ -1,5 +1,5 @@
 import { AppResultAsync } from '../../shared/result/result.types';
-import { User } from './user.entity';
+import { User, UserPreferences } from './user.entity';
 
 export interface UserRepositoryPort {
   findById(id: string): AppResultAsync<User>;
@@ -27,6 +27,16 @@ export interface UserRepositoryPort {
    * they just created would be a correctness/security bug for auth.
    */
   create(user: User): AppResultAsync<User>;
+
+  /**
+   * Replaces the user's `preferences` map wholesale (PUT semantics, not a
+   * partial merge) — matches `UpdatePreferencesUseCase`'s "Shopify-style
+   * remember for next time" contract, where the frontend always sends the
+   * full checkout-shaped preferences object it just collected. Conditioned
+   * on the user existing: an unknown `userId` returns `NotFoundError`
+   * instead of silently creating a garbage row.
+   */
+  updatePreferences(userId: string, preferences: UserPreferences): AppResultAsync<User>;
 }
 
 export const USER_REPOSITORY_PORT = Symbol('USER_REPOSITORY_PORT');

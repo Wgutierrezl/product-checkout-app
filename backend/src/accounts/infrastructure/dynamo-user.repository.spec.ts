@@ -1,6 +1,12 @@
 import { Logger } from '@nestjs/common';
-import { TransactionCanceledException } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, GetCommand, QueryCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
+import { ConditionalCheckFailedException, TransactionCanceledException } from '@aws-sdk/client-dynamodb';
+import {
+  DynamoDBDocumentClient,
+  GetCommand,
+  QueryCommand,
+  TransactWriteCommand,
+  UpdateCommand,
+} from '@aws-sdk/lib-dynamodb';
 import { mockClient } from 'aws-sdk-client-mock';
 
 import {
@@ -252,6 +258,87 @@ describe('DynamoUserRepository', () => {
       // customer upsert flow, a registration race must fail outright rather
       // than silently return whichever account won the race.
       expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(0);
+    });
+  });
+
+  describe('updatePreferences', () => {
+    const preferences = {
+      phone: '+573001234567',
+      address: 'Cra 1 # 2-3',
+      city: 'Bogota',
+      region: 'Cundinamarca',
+      postalCode: '110111',
+    };
+
+    it('persists the preferences map and returns the updated user', async () => {
+      ddbMock.on(UpdateCommand).resolves({
+        Attributes: {
+          userId: 'user-1',
+          fullName: 'Jane Doe',
+          email: 'jane.doe@example.com',
+          passwordHash: '$2a$10$abcdefghijklmnopqrstuv',
+          preferences,
+        },
+      });
+      const repository = new DynamoUserRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.updatePreferences('user-1', preferences);
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toEqual({
+        id: 'user-1',
+        fullName: 'Jane Doe',
+        email: 'jane.doe@example.com',
+        passwordHash: '$2a$10$abcdefghijklmnopqrstuv',
+        preferences,
+      });
+      const call = ddbMock.commandCalls(UpdateCommand)[0].args[0].input;
+      expect(call.TableName).toBe(USERS_TABLE_NAME);
+      expect(call.Key).toEqual({ userId: 'user-1' });
+      expect(call.ConditionExpression).toBe('attribute_exists(userId)');
+      expect(call.ExpressionAttributeValues).toEqual({ ':preferences': preferences });
+    });
+
+    it('omits an undefined optional field (postalCode) from the persisted preferences map', async () => {
+      const withoutPostalCode = { phone: '+573001234567', address: 'Cra 1 # 2-3', city: 'Bogota', region: 'Cundinamarca' };
+      ddbMock.on(UpdateCommand).resolves({
+        Attributes: {
+          userId: 'user-1',
+          fullName: 'Jane Doe',
+          email: 'jane.doe@example.com',
+          passwordHash: '$2a$10$abcdefghijklmnopqrstuv',
+          preferences: withoutPostalCode,
+        },
+      });
+      const repository = new DynamoUserRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.updatePreferences('user-1', withoutPostalCode);
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap().preferences).toEqual(withoutPostalCode);
+      expect(result._unsafeUnwrap().preferences).not.toHaveProperty('postalCode');
+    });
+
+    it('returns NotFoundError when the user does not exist', async () => {
+      ddbMock.on(UpdateCommand).rejects(
+        new ConditionalCheckFailedException({ message: 'Condition failed', $metadata: {} }),
+      );
+      const repository = new DynamoUserRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.updatePreferences('missing-id', preferences);
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('NotFound');
+    });
+
+    it('returns UnexpectedError when the underlying client call fails', async () => {
+      ddbMock.on(UpdateCommand).rejects(new Error('network error'));
+      const repository = new DynamoUserRepository(ddbMock as unknown as DynamoDBDocumentClient);
+
+      const result = await repository.updatePreferences('user-1', preferences);
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().type).toBe('Unexpected');
     });
   });
 });

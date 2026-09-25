@@ -1,13 +1,19 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { TransactionCanceledException } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, GetCommand, QueryCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
+import { ConditionalCheckFailedException, TransactionCanceledException } from '@aws-sdk/client-dynamodb';
+import {
+  DynamoDBDocumentClient,
+  GetCommand,
+  QueryCommand,
+  TransactWriteCommand,
+  UpdateCommand,
+} from '@aws-sdk/lib-dynamodb';
 import { ResultAsync } from 'neverthrow';
 
 import { ConflictError, UnexpectedError, NotFoundError } from '../../shared/errors/domain-error';
 import { AppResult, AppResultAsync, errAsync, okAsync } from '../../shared/result/result.types';
 import { resolveTableName } from '../../shared/config/resolve-table-name';
 import { DYNAMO_DOCUMENT_CLIENT } from '../../shared/infrastructure/dynamo/dynamo-client.provider';
-import { User } from '../domain/user.entity';
+import { User, UserPreferences } from '../domain/user.entity';
 import { normalizeEmail } from '../domain/normalize-email';
 import { UserRepositoryPort } from '../domain/user.repository.port';
 
@@ -19,6 +25,7 @@ interface UserItem {
   fullName: string;
   email: string;
   passwordHash: string;
+  preferences?: UserPreferences;
 }
 
 function toUser(item: UserItem): AppResult<User> {
@@ -27,6 +34,7 @@ function toUser(item: UserItem): AppResult<User> {
     fullName: item.fullName,
     email: item.email,
     passwordHash: item.passwordHash,
+    preferences: item.preferences,
   });
 }
 
@@ -110,6 +118,37 @@ export class DynamoUserRepository implements UserRepositoryPort {
         return new UnexpectedError(`Failed to create user ${user.id}: ${(error as Error).message}`);
       },
     );
+  }
+
+  /**
+   * PUT semantics (replaces the whole `preferences` map), conditioned on the
+   * user existing — `ConditionalCheckFailedException` means an unknown
+   * `userId` (e.g. a deleted account, or a forged JWT `sub`), returned as
+   * `NotFoundError` rather than silently creating a garbage row.
+   * `ReturnValues: 'ALL_NEW'` avoids a separate re-read on the success path.
+   */
+  updatePreferences(userId: string, preferences: UserPreferences): AppResultAsync<User> {
+    return ResultAsync.fromPromise(
+      this.client.send(
+        new UpdateCommand({
+          TableName: USERS_TABLE_NAME,
+          Key: { userId },
+          ConditionExpression: 'attribute_exists(userId)',
+          UpdateExpression: 'SET preferences = :preferences',
+          ExpressionAttributeValues: { ':preferences': preferences },
+          ReturnValues: 'ALL_NEW',
+        }),
+      ),
+      (error) => {
+        if (error instanceof ConditionalCheckFailedException) {
+          return new NotFoundError(`User ${userId} not found`);
+        }
+        return new UnexpectedError(`Failed to update preferences for user ${userId}: ${(error as Error).message}`);
+      },
+    ).andThen((result) => {
+      const user = toUser(result.Attributes as UserItem);
+      return user.isOk() ? okAsync(user.value) : errAsync(user.error);
+    });
   }
 
   private async putUserWithEmailGuard(user: User): Promise<User> {

@@ -1,6 +1,6 @@
 import { NotFoundError } from '../../shared/errors/domain-error';
 import { errAsync, okAsync } from '../../shared/result/result.types';
-import { User } from '../domain/user.entity';
+import { User, UserPreferences } from '../domain/user.entity';
 import { UserRepositoryPort } from '../domain/user.repository.port';
 
 /**
@@ -34,5 +34,16 @@ export class FakeUserRepository implements UserRepositoryPort {
   create(user: User) {
     this.users.push(user);
     return okAsync(user);
+  }
+
+  updatePreferences(userId: string, preferences: UserPreferences) {
+    const index = this.users.findIndex((user) => user.id === userId);
+    if (index === -1) {
+      return errAsync(new NotFoundError(`User ${userId} not found`));
+    }
+
+    const updated: User = { ...this.users[index], preferences };
+    this.users[index] = updated;
+    return okAsync(updated);
   }
 }
