@@ -14,6 +14,8 @@ export interface PersistedAuthSession {
   userId: string;
   email: string;
   fullName: string;
+  /** Epoch ms at which the access token expires (`Date.now() + expiresIn * 1000` at login time). */
+  expiresAt: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -56,15 +58,18 @@ function isPersistedAuthSession(value: unknown): value is PersistedAuthSession {
     typeof candidate.token === 'string' &&
     typeof candidate.userId === 'string' &&
     typeof candidate.email === 'string' &&
-    typeof candidate.fullName === 'string'
+    typeof candidate.fullName === 'string' &&
+    typeof candidate.expiresAt === 'number'
   );
 }
 
 /**
  * Reads and validates the persisted auth session on boot. Discards (and
- * wipes) it on any parse failure or shape mismatch — a partially-corrupted
- * session is not safe to reason about piecemeal, same policy as
- * `persistMiddleware.ts`'s `loadPersistedState`.
+ * wipes) it on any parse failure, shape mismatch, or an `expiresAt` that
+ * has already passed (a tab left open past the token's ~1h TTL must NOT
+ * come back as authenticated with a dead token) — same "discard the whole
+ * thing, don't try to salvage it" policy as `persistMiddleware.ts`'s
+ * `loadPersistedState`.
  */
 export function loadAuthSession(): PersistedAuthSession | undefined {
   const raw = safeGetItem(AUTH_STORAGE_KEY);
@@ -80,7 +85,7 @@ export function loadAuthSession(): PersistedAuthSession | undefined {
     return undefined;
   }
 
-  if (!isPersistedAuthSession(parsed)) {
+  if (!isPersistedAuthSession(parsed) || parsed.expiresAt <= Date.now()) {
     safeRemoveItem(AUTH_STORAGE_KEY);
     return undefined;
   }

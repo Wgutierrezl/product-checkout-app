@@ -8,6 +8,8 @@ export interface AuthState {
   userId: string | null;
   email: string | null;
   fullName: string | null;
+  /** Epoch ms at which the access token expires, or `null` while anonymous. */
+  expiresAt: number | null;
 }
 
 export const initialAuthState: AuthState = {
@@ -16,6 +18,7 @@ export const initialAuthState: AuthState = {
   userId: null,
   email: null,
   fullName: null,
+  expiresAt: null,
 };
 
 export interface LoggedInPayload {
@@ -23,6 +26,8 @@ export interface LoggedInPayload {
   userId: string;
   email: string;
   fullName: string;
+  /** Epoch ms — computed by the caller as `Date.now() + expiresIn * 1000`. */
+  expiresAt: number;
 }
 
 /**
@@ -46,6 +51,7 @@ const authSlice = createSlice({
       state.userId = action.payload.userId;
       state.email = action.payload.email;
       state.fullName = action.payload.fullName;
+      state.expiresAt = action.payload.expiresAt;
     },
     loggedOut() {
       return initialAuthState;

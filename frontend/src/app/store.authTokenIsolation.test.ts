@@ -8,6 +8,7 @@ const SESSION = {
   userId: 'u1',
   email: 'jane@example.com',
   fullName: 'Jane Doe',
+  expiresAt: Date.now() + 3_600_000,
 };
 
 /**
@@ -65,5 +66,15 @@ describe('auth token isolation (regression)', () => {
 
     expect(sessionStorage.getItem(AUTH_STORAGE_KEY)).toBeNull();
     expect(localStorage.getItem(AUTH_STORAGE_KEY)).toBeNull();
+  });
+
+  it('does NOT rehydrate an expired session on boot — starts anonymous and wipes it from sessionStorage', () => {
+    sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ ...SESSION, expiresAt: Date.now() - 1 }));
+
+    const store = createAppStore();
+
+    expect(store.getState().auth.status).toBe('anonymous');
+    expect(sessionStorage.getItem(AUTH_STORAGE_KEY)).toBeNull();
+    expect(localStorage.length).toBe(0);
   });
 });

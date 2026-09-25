@@ -5,6 +5,7 @@ const SESSION = {
   userId: 'u1',
   email: 'jane@example.com',
   fullName: 'Jane Doe',
+  expiresAt: Date.now() + 3_600_000,
 };
 
 describe('authSlice', () => {
@@ -15,6 +16,7 @@ describe('authSlice', () => {
       userId: null,
       email: null,
       fullName: null,
+      expiresAt: null,
     });
   });
 

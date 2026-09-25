@@ -1,16 +1,26 @@
 import { AUTH_STORAGE_KEY, clearAuthSession, loadAuthSession, saveAuthSession } from './sessionAuthStorage';
 
+const NOW = new Date('2026-01-01T00:00:00.000Z').getTime();
+const ONE_HOUR_MS = 3_600_000;
+
 const SESSION = {
   token: 'jwt.token.value',
   userId: 'u1',
   email: 'jane@example.com',
   fullName: 'Jane Doe',
+  expiresAt: NOW + ONE_HOUR_MS,
 };
 
 describe('sessionAuthStorage', () => {
   beforeEach(() => {
     sessionStorage.clear();
     localStorage.clear();
+    jest.useFakeTimers();
+    jest.setSystemTime(NOW);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   describe('saveAuthSession / loadAuthSession', () => {
@@ -52,8 +62,40 @@ describe('sessionAuthStorage', () => {
       ['userId is not a string', (s) => ({ ...s, userId: 42 })],
       ['email is not a string', (s) => ({ ...s, email: 42 })],
       ['fullName is not a string', (s) => ({ ...s, fullName: 42 })],
+      ['expiresAt is missing', (s) => ({ ...s, expiresAt: undefined })],
+      ['expiresAt is not a number', (s) => ({ ...s, expiresAt: '2026-01-01' })],
     ])('discards the persisted session and clears storage when %s', (_name, corrupt) => {
       sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(corrupt(SESSION)));
+
+      expect(loadAuthSession()).toBeUndefined();
+      expect(sessionStorage.getItem(AUTH_STORAGE_KEY)).toBeNull();
+    });
+  });
+
+  describe('session expiry', () => {
+    it('discards a session whose expiresAt is already in the past, clearing storage', () => {
+      sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ ...SESSION, expiresAt: NOW - 1 }));
+
+      expect(loadAuthSession()).toBeUndefined();
+      expect(sessionStorage.getItem(AUTH_STORAGE_KEY)).toBeNull();
+    });
+
+    it('discards a session whose expiresAt is exactly now (treated as expired, not valid)', () => {
+      sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ ...SESSION, expiresAt: NOW }));
+
+      expect(loadAuthSession()).toBeUndefined();
+    });
+
+    it('keeps a session whose expiresAt is still in the future', () => {
+      saveAuthSession(SESSION);
+
+      expect(loadAuthSession()).toEqual(SESSION);
+    });
+
+    it('discards a session that has expired while sitting in storage since it was saved', () => {
+      saveAuthSession(SESSION);
+
+      jest.setSystemTime(SESSION.expiresAt + 1);
 
       expect(loadAuthSession()).toBeUndefined();
       expect(sessionStorage.getItem(AUTH_STORAGE_KEY)).toBeNull();

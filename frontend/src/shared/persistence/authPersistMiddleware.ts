@@ -19,12 +19,13 @@ export const authPersistMiddleware: Middleware<Record<string, never>, AuthPersis
     const result = next(action);
     const { auth } = store.getState();
 
-    if (auth.status === 'authenticated' && auth.token) {
+    if (auth.status === 'authenticated' && auth.token && auth.expiresAt) {
       saveAuthSession({
         token: auth.token,
         userId: auth.userId ?? '',
         email: auth.email ?? '',
         fullName: auth.fullName ?? '',
+        expiresAt: auth.expiresAt,
       });
     } else {
       clearAuthSession();

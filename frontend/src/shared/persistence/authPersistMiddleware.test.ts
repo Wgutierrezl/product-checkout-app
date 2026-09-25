@@ -8,6 +8,7 @@ const SESSION = {
   userId: 'u1',
   email: 'jane@example.com',
   fullName: 'Jane Doe',
+  expiresAt: Date.now() + 3_600_000,
 };
 
 function buildStore() {
@@ -56,5 +57,14 @@ describe('authPersistMiddleware', () => {
     store.dispatch({ type: 'noop' });
 
     expect(sessionStorage.getItem(AUTH_STORAGE_KEY)).toBeNull();
+  });
+
+  it('includes expiresAt in the persisted session', () => {
+    const store = buildStore();
+
+    store.dispatch(loggedIn(SESSION));
+
+    const persisted = JSON.parse(sessionStorage.getItem(AUTH_STORAGE_KEY) as string);
+    expect(persisted.expiresAt).toBe(SESSION.expiresAt);
   });
 });
