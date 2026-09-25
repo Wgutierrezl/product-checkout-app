@@ -215,13 +215,14 @@ sequenceDiagram
 
     U->>SPA: Fill card details, click "Continue"
     SPA->>GW: Tokenize card (public key only — PAN/CVC never sent to our backend)
-    GW-->>SPA: Card token (single-use, kept in memory only)
+    GW-->>SPA: Card token (single-use, sessionStorage on SUMMARY only)
     SPA->>API: GET /payment-acceptance
     API->>GW: Fetch acceptance tokens (server-side proxy)
     GW-->>API: Fresh acceptance tokens
     API-->>SPA: Acceptance tokens
     U->>SPA: Confirm order, click "Pay"
     SPA->>API: POST /transactions (idempotencyKey = transaction id)
+    API->>DB: Look up idempotencyKey (a replay returns the original here, before any validation)
     API->>API: Recompute price server-side, check stock
     API->>DB: Persist PENDING transaction (reference)
     API->>API: Build integrity signature (server-side secret)
@@ -248,8 +249,9 @@ The sandbox is a shared account where our webhook URL can't be registered, so in
 lazy poll is what settles transactions; the webhook endpoint is implemented and tested for a
 real merchant setup.
 
-A retried `POST /transactions` with the same `idempotencyKey` lands on the same row and never
-charges the gateway twice. All three settlement paths (synchronous result, webhook, lazy poll)
+A retried `POST /transactions` with the same `idempotencyKey` returns the original transaction
+before any product, stock or price validation, and never charges the gateway twice (so a retry of
+the purchase that took the last unit gets its transaction back, not a 409). All three settlement paths (synchronous result, webhook, lazy poll)
 funnel through one use case, so a race between any two of them can never double-apply the
 `APPROVED` side effects — enforced atomically by a single DynamoDB `TransactWriteItems` on the
 transaction, product stock, and delivery. Details:
@@ -299,8 +301,8 @@ erDiagram
 | Table | Partition key | GSIs | Purpose |
 |---|---|---|---|
 | `Products` | `productId` | — | Direct get; catalog listing via `Scan` |
-| `Customers` | `customerId` | `EmailIndex` (`email`) | Upsert-by-email dedupe on checkout |
-| `Transactions` | `transactionId` | `ReferenceIndex` (`reference`), `GatewayTxIndex` (`gatewayTransactionId`) | Idempotency on create; webhook/poll lookup |
+| `Customers` | `customerId` | `EmailIndex` (`email`) | Upsert-by-email dedupe on checkout (an `EMAIL#` guard item enforces one customer per email) |
+| `Transactions` | `transactionId` (= the idempotency key) | `ReferenceIndex` (`reference`), `GatewayTxIndex` (`gatewayTransactionId`) | Idempotency through the partition key; webhook lookup by gateway id, falling back to reference |
 | `Deliveries` | `deliveryId` | `TransactionIdIndex` (`transactionId`) | Embed a delivery on `GET /transactions/:id` |
 
 ## API endpoints
@@ -346,14 +348,14 @@ Full rationale, including how guest checkout stays safe without an auth layer, i
 
 All three packages are developed strict-TDD (RED → GREEN → REFACTOR); CI enforces an **80%
 coverage gate on every PR** (`jest.config.ts` in each package). Numbers below were measured
-directly against this repository:
+on `develop` (`npm test -- --coverage` in each package; `npm run test:e2e` for the e2e row):
 
 | Package | Statements | Branches | Functions | Lines | Suites / Tests |
 |---|---|---|---|---|---|
 | `backend` (unit) | 100% | 100% | 100% | 100% | 49 suites / 412 tests |
 | `backend` (e2e) | — | — | — | — | 1 suite / 25 tests (DynamoDB Local) |
 | `frontend` | 99.57% | 98.43% | 100% | 99.54% | 54 suites / 703 tests |
-| `infra` | 100% | 100% | 100% | 100% | 6 suites / 38 tests |
+| `infra` | 100% | 100% | 100% | 100% | 6 suites / 39 tests |
 
 - **Backend e2e** runs against a real `AppModule` and DynamoDB Local, with a deterministic
   fake gateway adapter (no network) — covers the full happy path, declined path, insufficient
@@ -372,8 +374,9 @@ Run any package's suite yourself: `npm test -- --coverage` in `backend/`, `front
    `npm install && npm run seed && npm run start:dev`. Full details:
    [backend/README.md § Running locally](./backend/README.md#running-locally).
    The e2e suite (`npm run test:e2e`) drops its tables, so it needs a separate DynamoDB Local on
-   port 8001: `docker run -d --rm -p 8001:8000 --name checkout-dynamodb-e2e amazon/dynamodb-local`
-   (see [backend/README.md § End-to-end tests](./backend/README.md#end-to-end-tests)).
+   port 8001: `docker run -d --rm -p 8001:8000 --name checkout-dynamodb-e2e amazon/dynamodb-local`.
+   It reads `E2E_DYNAMO_ENDPOINT` (default `http://localhost:8001`) and refuses to run against
+   port 8000, so the dev tables are never dropped (see [backend/README.md § End-to-end tests](./backend/README.md#end-to-end-tests)).
 2. **Frontend** — copy `.env.example` to `.env.local`, fill in the three `VITE_*` variables,
    `npm install && npm run dev` (`http://localhost:5173`). Full details:
    [frontend/README.md § Running locally](./frontend/README.md#running-locally).
@@ -383,8 +386,8 @@ Run any package's suite yourself: `npm test -- --coverage` in `backend/`, `front
 
 ## Deployment & CI/CD
 
-Branch flow: `feature/*` / `fix/*` → PR into `develop` (CI runs lint, typecheck, tests with
-coverage, and an offline `cdk synth`) → PR into `main` → push to `main` triggers
+Branch flow: `feature/*` / `fix/*` → PR into `develop` (CI runs typecheck, frontend lint, tests
+with coverage, and an offline `cdk synth`) → PR into `main` → push to `main` triggers
 `deploy.yml`, which deploys all 3 CDK stacks via GitHub Actions OIDC (no static AWS keys),
 seeds the product catalog, builds and uploads the SPA, and invalidates CloudFront.
 
@@ -405,8 +408,8 @@ and only needs to run once per AWS account/region.
   Secrets Manager's real advantage is automatic rotation, which can't apply to keys issued by a
   third-party gateway. `SecureString` parameters give the same protection at no cost.
 - **Idempotency key = transaction id** — a client-generated UUID v4 doubles as the DynamoDB
-  partition key, so a retried request naturally lands on the same row with no separate
-  idempotency table or lookup.
+  partition key: a replay is a `GetItem` on that id before any validation, and a conditional put
+  guards two concurrent first requests, with no separate idempotency table.
 - **Ambiguous gateway failures stay `PENDING`, never `ERROR`** — a timeout, network error, or
   5xx means the charge may have gone through; only an explicit 4xx rejection (the gateway never
   processed the request) is definite enough to mark a transaction `ERROR`.

@@ -46,7 +46,7 @@ flowchart TB
     CF -->|CSP connect-src| HttpApi
     HttpApi --> Lambda
     Lambda -->|IAM: read/write + TransactWriteItems| Products & Customers & Deliveries & Transactions
-    Lambda -->|IAM: GetParameter + kms:Decrypt| SSM
+    Lambda -->|IAM: GetParameters + kms:Decrypt| SSM
 
     Deploy -->|assumes, via OIDC| DeployRole
     DeployRole -.->|sts:AssumeRole| AWS
