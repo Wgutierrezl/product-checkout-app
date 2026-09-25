@@ -1,10 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { ResultAsync } from 'neverthrow';
+import { Result, ResultAsync } from 'neverthrow';
 
-import { DeliveryStatus } from '../../deliveries/domain/delivery.entity';
+import { Delivery, DeliveryStatus } from '../../deliveries/domain/delivery.entity';
 import { DELIVERY_REPOSITORY_PORT, DeliveryRepositoryPort } from '../../deliveries/domain/delivery.repository.port';
 import { PRODUCT_REPOSITORY_PORT, ProductRepositoryPort } from '../../products/domain/product.repository.port';
-import { AppResultAsync, okAsync } from '../../shared/result/result.types';
+import { withConcurrencyLimit } from '../../shared/concurrency/with-concurrency-limit';
+import { DomainError } from '../../shared/errors/domain-error';
+import { AppResultAsync, errAsync, okAsync } from '../../shared/result/result.types';
 import { Transaction } from '../../transactions/domain/transaction.entity';
 import { TransactionStatus } from '../../transactions/domain/transaction-status.vo';
 import {
@@ -34,10 +36,29 @@ export interface TransactionHistoryItem {
 }
 
 /**
+ * The real product catalog is tiny (a handful of SKUs) compared to the up-
+ * to-50 transactions in a history page, so most transactions share a
+ * product — deduplicating avoids up to 50 redundant, identical
+ * `findById` calls for the same handful of ids.
+ */
+function uniqueProductIds(transactions: readonly Transaction[]): string[] {
+  return [...new Set(transactions.map((transaction) => transaction.productId))];
+}
+
+/**
+ * Unlike products, deliveries have no natural dedup key (at most one per
+ * transaction) and no `BatchGetItem`-friendly lookup (they're found via the
+ * `TransactionIdIndex` GSI, not the table's primary key) — so this bounds
+ * the number of CONCURRENT lookups instead, rather than firing up to 50 at
+ * once.
+ */
+const DELIVERY_LOOKUP_CONCURRENCY = 10;
+
+/**
  * `GET /me/transactions`: joins the authenticated user's transactions
  * (via `TransactionRepositoryPort.findByUserId`, already newest-first and
- * capped) with each one's product name and delivery, both fetched
- * best-effort per transaction — see `toHistoryItem`.
+ * capped) with each one's product name (deduplicated per unique product id)
+ * and delivery (fetched with bounded concurrency).
  */
 @Injectable()
 export class ListMyTransactionsUseCase {
@@ -48,41 +69,75 @@ export class ListMyTransactionsUseCase {
   ) {}
 
   execute(userId: string): AppResultAsync<TransactionHistoryItem[]> {
-    return this.transactions
-      .findByUserId(userId)
-      .andThen((list) => ResultAsync.combine(list.map((transaction) => this.toHistoryItem(transaction))));
+    return this.transactions.findByUserId(userId).andThen((list) => this.buildHistoryItems(list));
   }
 
-  private toHistoryItem(transaction: Transaction): AppResultAsync<TransactionHistoryItem> {
-    return ResultAsync.combine([this.lookupProductName(transaction.productId), this.deliveries.findByTransactionId(transaction.id)]).map(
-      ([productName, delivery]) => ({
-        transactionId: transaction.id,
-        productId: transaction.productId,
-        productName,
-        amount: transaction.totalAmount.valueInCents,
-        status: transaction.status,
-        createdAt: transaction.createdAt,
-        delivery: delivery
-          ? {
-              address: delivery.address,
-              city: delivery.city,
-              region: delivery.region,
-              postalCode: delivery.postalCode,
-              status: delivery.status,
-            }
-          : undefined,
+  private buildHistoryItems(transactions: Transaction[]): AppResultAsync<TransactionHistoryItem[]> {
+    return ResultAsync.fromSafePromise(this.fetchProductNamesById(transactions)).andThen((productNamesById) =>
+      ResultAsync.fromSafePromise(this.fetchDeliveryResults(transactions)).andThen((deliveryResults) => {
+        const combinedDeliveries = Result.combine(deliveryResults);
+        if (combinedDeliveries.isErr()) {
+          return errAsync(combinedDeliveries.error);
+        }
+
+        const items = transactions.map((transaction, index) =>
+          this.toHistoryItem(transaction, productNamesById.get(transaction.productId), combinedDeliveries.value[index]),
+        );
+        return okAsync(items);
       }),
     );
   }
 
   /**
-   * A deleted/unknown product must never fail the whole purchase history —
-   * degrades to `undefined` instead of propagating `NotFoundError`.
+   * One `findById` call per UNIQUE product id (never one per transaction).
+   * A deleted/unknown product degrades to `undefined` in the map — never
+   * fails the whole purchase history over one missing product.
    */
-  private lookupProductName(productId: string): AppResultAsync<string | undefined> {
-    return this.products
-      .findById(productId)
-      .map((product) => product.name)
-      .orElse(() => okAsync(undefined));
+  private async fetchProductNamesById(transactions: Transaction[]): Promise<Map<string, string | undefined>> {
+    const ids = uniqueProductIds(transactions);
+    const entries = await Promise.all(
+      ids.map(async (productId): Promise<[string, string | undefined]> => {
+        const result = await this.products.findById(productId);
+        return [productId, result.isOk() ? result.value.name : undefined];
+      }),
+    );
+    return new Map(entries);
+  }
+
+  /**
+   * Bounded-concurrency fan-out (`DELIVERY_LOOKUP_CONCURRENCY`) — unlike
+   * product lookups, a real DB error here is NOT swallowed; it propagates
+   * via `Result.combine` in `buildHistoryItems`.
+   */
+  private fetchDeliveryResults(
+    transactions: Transaction[],
+  ): Promise<Array<Result<Delivery | null, DomainError>>> {
+    return withConcurrencyLimit(transactions, DELIVERY_LOOKUP_CONCURRENCY, (transaction) =>
+      this.deliveries.findByTransactionId(transaction.id),
+    );
+  }
+
+  private toHistoryItem(
+    transaction: Transaction,
+    productName: string | undefined,
+    delivery: Delivery | null,
+  ): TransactionHistoryItem {
+    return {
+      transactionId: transaction.id,
+      productId: transaction.productId,
+      productName,
+      amount: transaction.totalAmount.valueInCents,
+      status: transaction.status,
+      createdAt: transaction.createdAt,
+      delivery: delivery
+        ? {
+            address: delivery.address,
+            city: delivery.city,
+            region: delivery.region,
+            postalCode: delivery.postalCode,
+            status: delivery.status,
+          }
+        : undefined,
+    };
   }
 }
