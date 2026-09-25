@@ -1,11 +1,14 @@
 import {
+  authorizedHeaders,
   createTransaction,
   fetchPaymentAcceptance,
   fetchProducts,
   fetchTransaction,
+  loginUser,
+  registerUser,
 } from './backendClient';
 import { BackendApiError } from './types';
-import type { CreateTransactionInput } from './types';
+import type { CreateTransactionInput, LoginInput, RegisterInput } from './types';
 
 function jsonResponse(body: unknown, init: { ok: boolean; status: number; statusText?: string }) {
   return {
@@ -252,6 +255,83 @@ describe('backendClient', () => {
         status: 502,
         message: 'Bad Gateway',
       });
+    });
+  });
+
+  describe('registerUser', () => {
+    const input: RegisterInput = { fullName: 'Jane Doe', email: 'jane@example.com', password: 'hunter22' };
+
+    it('POSTs to /auth/register and returns the created userId', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse({ userId: 'u1' }, { ok: true, status: 201 }));
+
+      const result = await registerUser(input);
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        `${API_URL}/auth/register`,
+        expect.objectContaining({ method: 'POST', body: JSON.stringify(input) }),
+      );
+      expect(result).toEqual({ userId: 'u1' });
+    });
+
+    it('throws BackendApiError with status 409 on a duplicate email', async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({ statusCode: 409, error: 'Conflict', message: 'Email already registered' }, { ok: false, status: 409 }),
+      );
+
+      await expect(registerUser(input)).rejects.toMatchObject({ status: 409, message: 'Email already registered' });
+    });
+
+    it('throws BackendApiError with status 429 when the throttle limit is reached', async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({ statusCode: 429, error: 'TooManyRequests', message: 'Too many requests' }, { ok: false, status: 429 }),
+      );
+
+      await expect(registerUser(input)).rejects.toMatchObject({ status: 429 });
+    });
+  });
+
+  describe('loginUser', () => {
+    const input: LoginInput = { email: 'jane@example.com', password: 'hunter22' };
+
+    it('POSTs to /auth/login and returns the access token payload', async () => {
+      const loginResult = {
+        accessToken: 'jwt.token.value',
+        expiresIn: 3600,
+        userId: 'u1',
+        email: 'jane@example.com',
+        fullName: 'Jane Doe',
+      };
+      fetchMock.mockResolvedValueOnce(jsonResponse(loginResult, { ok: true, status: 200 }));
+
+      const result = await loginUser(input);
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        `${API_URL}/auth/login`,
+        expect.objectContaining({ method: 'POST', body: JSON.stringify(input) }),
+      );
+      expect(result).toEqual(loginResult);
+    });
+
+    it('throws BackendApiError with status 401 on bad credentials, without leaking which field was wrong', async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({ statusCode: 401, error: 'Unauthorized', message: 'Invalid credentials' }, { ok: false, status: 401 }),
+      );
+
+      await expect(loginUser(input)).rejects.toMatchObject({ status: 401, message: 'Invalid credentials' });
+    });
+
+    it('throws BackendApiError with status 429 when the throttle limit is reached', async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({ statusCode: 429, error: 'TooManyRequests', message: 'Too many requests' }, { ok: false, status: 429 }),
+      );
+
+      await expect(loginUser(input)).rejects.toMatchObject({ status: 429 });
+    });
+  });
+
+  describe('authorizedHeaders', () => {
+    it('returns a Bearer Authorization header for the given token', () => {
+      expect(authorizedHeaders('jwt.token.value')).toEqual({ Authorization: 'Bearer jwt.token.value' });
     });
   });
 

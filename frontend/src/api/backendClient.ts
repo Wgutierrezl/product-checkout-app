@@ -2,8 +2,12 @@ import { getEnv } from '../config/env';
 import {
   BackendApiError,
   type CreateTransactionInput,
+  type LoginInput,
+  type LoginResult,
   type PaymentAcceptance,
   type Product,
+  type RegisterInput,
+  type RegisterResult,
   type Transaction,
 } from './types';
 
@@ -101,4 +105,27 @@ export function createTransaction(input: CreateTransactionInput): Promise<Transa
 
 export function fetchTransaction(id: string, options?: { signal?: AbortSignal }): Promise<Transaction> {
   return request<Transaction>(`/transactions/${id}`, { method: 'GET', signal: options?.signal });
+}
+
+export function registerUser(input: RegisterInput): Promise<RegisterResult> {
+  return request<RegisterResult>('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function loginUser(input: LoginInput): Promise<LoginResult> {
+  return request<LoginResult>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+/**
+ * Merges an `Authorization: Bearer <token>` header for any authenticated
+ * endpoint (e.g. the future `GET /me`). Kept as a small, independently
+ * testable helper rather than baked into every call site.
+ */
+export function authorizedHeaders(token: string): HeadersInit {
+  return { Authorization: `Bearer ${token}` };
 }

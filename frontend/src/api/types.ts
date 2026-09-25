@@ -113,3 +113,41 @@ export class GatewayTokenizeError extends Error {
     this.name = 'GatewayTokenizeError';
   }
 }
+
+export interface RegisterInput {
+  fullName: string;
+  email: string;
+  password: string;
+}
+
+/**
+ * ASSUMPTION (spec only guarantees "201 with userId, no password/hash in
+ * response"): the backend returns just the new user's id. If the backend
+ * agent's actual response shape differs, adjust here — this is the single
+ * point of contact for the register response shape.
+ */
+export interface RegisterResult {
+  userId: string;
+}
+
+export interface LoginInput {
+  email: string;
+  password: string;
+}
+
+/**
+ * ASSUMPTION (spec only guarantees "200 with a JWT access token and its
+ * declared expiry (~1h)"): `accessToken`/`expiresIn` (seconds) cover the
+ * spec's explicit contract. `userId`/`email`/`fullName` are ALSO assumed
+ * to be included so the header account menu can render a name/email
+ * without the frontend decoding the JWT payload itself — flagged for
+ * reconciliation with the backend agent's actual `auth.controller.ts`
+ * response DTO.
+ */
+export interface LoginResult {
+  accessToken: string;
+  expiresIn: number;
+  userId: string;
+  email: string;
+  fullName: string;
+}
