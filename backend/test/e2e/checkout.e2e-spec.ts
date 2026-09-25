@@ -273,6 +273,23 @@ describe('Checkout E2E', () => {
       expect(customerResponse.body.phone).not.toBe(body.customer.phone);
       expect(customerResponse.body.phone.endsWith(body.customer.phone.slice(-4))).toBe(true);
     });
+
+    it('replays the original APPROVED transaction (201, not 409) after it bought the last unit', async () => {
+      const body = buildCreateTransactionBody(PRODUCT_B_ID, PRODUCT_B_STOCK, APPROVED_CARD_TOKEN);
+
+      const createResponse = await request(server).post('/transactions').send(body).expect(201);
+      const transactionId = createResponse.body.id as string;
+      const approved = await pollUntilApproved(server, transactionId);
+      const productAfter = await request(server).get(`/products/${PRODUCT_B_ID}`).expect(200);
+      expect(productAfter.body.stock).toBe(0);
+
+      // The client timed out on the first attempt and retries with the same key.
+      const callsBefore = fakeGateway.createCardTransactionCalls;
+      const replay = await request(server).post('/transactions').send(body).expect(201);
+
+      expect(replay.body).toEqual(approved);
+      expect(fakeGateway.createCardTransactionCalls).toBe(callsBefore);
+    });
   });
 
   describe('POST /transactions — declined path', () => {

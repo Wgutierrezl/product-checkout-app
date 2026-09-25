@@ -268,8 +268,8 @@ directly against this repository:
 
 | Package | Statements | Branches | Functions | Lines | Suites / Tests |
 |---|---|---|---|---|---|
-| `backend` (unit) | 100% | 100% | 100% | 100% | 49 suites / 409 tests |
-| `backend` (e2e) | — | — | — | — | 1 suite / 24 tests (DynamoDB Local) |
+| `backend` (unit) | 100% | 100% | 100% | 100% | 49 suites / 412 tests |
+| `backend` (e2e) | — | — | — | — | 1 suite / 25 tests (DynamoDB Local) |
 | `frontend` | 99.5% | 98.2% | 100% | 99.46% | 53 suites / 578 tests |
 | `infra` | 100% | 100% | 100% | 100% | 6 suites / 38 tests |
 

@@ -8,7 +8,7 @@ import { Product } from '../../products/domain/product.entity';
 import { PRODUCT_REPOSITORY_PORT, ProductRepositoryPort } from '../../products/domain/product.repository.port';
 import { Money } from '../../products/domain/value-objects/money.vo';
 import { Quantity } from '../../products/domain/value-objects/quantity.vo';
-import { DomainError, InsufficientStockError, PaymentGatewayError } from '../../shared/errors/domain-error';
+import { DomainError, InsufficientStockError, NotFoundError, PaymentGatewayError } from '../../shared/errors/domain-error';
 import { buildIntegritySignature } from '../../shared/payment-gateway/domain/integrity-signature';
 import { PAYMENT_GATEWAY_PORT, PaymentGatewayPort } from '../../shared/payment-gateway/domain/payment-gateway.port';
 import { CreateCardTransactionInput, GatewayTransactionResult } from '../../shared/payment-gateway/domain/payment-gateway.types';
@@ -69,7 +69,8 @@ interface PendingState extends PricedProduct {
 }
 
 /**
- * ROP pipeline (per design.md): validate quantity -> load product (404) ->
+ * ROP pipeline (per design.md): return the existing transaction on an
+ * idempotent replay; otherwise validate quantity -> load product (404) ->
  * check stock (409) -> compute server-side total -> upsert customer by
  * email -> persist a PENDING transaction with a unique reference -> build
  * the integrity signature -> call the gateway -> settle the result.
@@ -115,7 +116,33 @@ export class CreateTransactionUseCase {
     @Inject(INTEGRITY_SECRET) private readonly integritySecret: string,
   ) {}
 
+  /**
+   * Idempotent replay FIRST: when a transaction with this idempotencyKey
+   * already exists (e.g. the client timed out and retried), return it as-is
+   * before ANY product, stock or amount validation and without calling the
+   * gateway — otherwise a retry of a request that bought the last unit would
+   * get a 409 even though the buyer was charged. The replay body is not
+   * compared with the stored one: a different productId/quantity under the
+   * same key still gets the original transaction back.
+   *
+   * This lookup is only an ordering fix and a shortcut; the conditional
+   * write in `persistPending` remains the real guard for two concurrent
+   * first requests (both miss the lookup, only one row and one charge win).
+   */
   execute(command: CreateTransactionCommand): AppResultAsync<TransactionWithDelivery> {
+    return this.findExisting(command.idempotencyKey)
+      .andThen((existing) => (existing ? okAsync(existing) : this.createAndCharge(command)))
+      .andThen((transaction) => attachDeliveryIfApproved(this.deliveries, transaction));
+  }
+
+  private findExisting(idempotencyKey: string): AppResultAsync<Transaction | null> {
+    return this.transactions
+      .findById(idempotencyKey)
+      .map((transaction): Transaction | null => transaction)
+      .orElse((error) => (error instanceof NotFoundError ? okAsync(null) : errAsync(error)));
+  }
+
+  private createAndCharge(command: CreateTransactionCommand): AppResultAsync<Transaction> {
     return Quantity.create(command.quantity)
       .asyncAndThen((quantity) =>
         this.products.findById(command.productId).map((product) => ({ command, quantity, product })),
@@ -131,13 +158,12 @@ export class CreateTransactionUseCase {
       )
       .andThen((state) => this.persistPending(state))
       .andThen(({ transaction, wasCreated }) =>
-        // Idempotent replay: a transaction with this idempotencyKey already
-        // exists (e.g. the frontend retried after a network timeout on its
-        // first attempt). Return it as-is — the gateway must NEVER be
-        // charged twice for the same checkout attempt.
+        // Concurrent first requests with the same idempotencyKey: both missed
+        // `findExisting`, and the conditional write let only one of them
+        // create the row. The loser returns it as-is — the gateway must NEVER
+        // be charged twice for the same checkout attempt.
         wasCreated ? this.chargeGateway(transaction, command) : okAsync(transaction),
-      )
-      .andThen((transaction) => attachDeliveryIfApproved(this.deliveries, transaction));
+      );
   }
 
   private ensureStock(product: Product, quantity: Quantity): AppResult<void> {
