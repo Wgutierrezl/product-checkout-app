@@ -2,8 +2,8 @@ import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Req, UseGu
 import { ApiBadGatewayResponse, ApiBadRequestResponse, ApiBearerAuth, ApiConflictResponse, ApiCreatedResponse, ApiNotFoundResponse, ApiOkResponse, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import { SkipThrottle, Throttle } from '@nestjs/throttler';
 
-import { OptionalJwtAuthGuard } from '../../accounts/infrastructure/guards/optional-jwt-auth.guard';
-import { RequestWithUserId } from '../../accounts/infrastructure/guards/jwt-auth.guard';
+import { RequestWithUserId } from '../../auth/infrastructure/guards/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from '../../auth/infrastructure/guards/optional-jwt-auth.guard';
 import { CreateTransactionUseCase } from '../application/create-transaction.use-case';
 import { GetTransactionUseCase } from '../application/get-transaction.use-case';
 import { HandleWebhookUseCase } from '../application/handle-webhook.use-case';

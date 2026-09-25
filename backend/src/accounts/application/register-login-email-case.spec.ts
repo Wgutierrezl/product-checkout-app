@@ -1,5 +1,5 @@
+import { TokenPort } from '../../auth/domain/ports/token.port';
 import { PasswordHasherPort } from '../domain/ports/password-hasher.port';
-import { TokenPort } from '../domain/ports/token.port';
 import { FakeUserRepository } from '../test/user.fixtures';
 import { LoginUseCase } from './login.use-case';
 import { RegisterUseCase } from './register.use-case';

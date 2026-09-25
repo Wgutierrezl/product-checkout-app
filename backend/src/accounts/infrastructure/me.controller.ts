@@ -1,11 +1,11 @@
 import { Body, Controller, Get, Put, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags, ApiUnauthorizedResponse } from '@nestjs/swagger';
 
+import { JwtAuthGuard, RequestWithUserId } from '../../auth/infrastructure/guards/jwt-auth.guard';
 import { GetMeUseCase } from '../application/get-me.use-case';
 import { ListMyTransactionsUseCase } from '../application/list-my-transactions.use-case';
 import { UpdatePreferencesUseCase } from '../application/update-preferences.use-case';
 import { MeResponseDto, TransactionHistoryItemDto, UpdatePreferencesDto } from './dto/me.dto';
-import { JwtAuthGuard, RequestWithUserId } from './guards/jwt-auth.guard';
 
 /**
  * Both routes require a valid `Authorization: Bearer <jwt>` — unlike

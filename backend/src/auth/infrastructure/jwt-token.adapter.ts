@@ -12,7 +12,7 @@ export const ACCOUNTS_JWT_EXPIRES_IN_SECONDS = 3600;
 /**
  * Thin `jsonwebtoken` wrapper, mirrors `SystemClockAdapter`'s single-purpose
  * adapter style. HS256 + a 1h expiry, no refresh token — the secret is
- * injected (see `accounts.module.ts`), sourced from `AppConfig` (itself
+ * injected (see `auth.module.ts`), sourced from `AppConfig` (itself
  * populated from SSM in production, `.env` locally — see `ssm-bootstrap.ts`).
  */
 @Injectable()

@@ -2,14 +2,14 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 
+import { TOKEN_PORT, TokenPort } from '../../auth/domain/ports/token.port';
+import { JwtAuthGuard } from '../../auth/infrastructure/guards/jwt-auth.guard';
 import { NotFoundError, UnauthorizedError } from '../../shared/errors/domain-error';
 import { err, errAsync, ok, okAsync } from '../../shared/result/result.types';
 import { GetMeUseCase } from '../application/get-me.use-case';
 import { ListMyTransactionsUseCase } from '../application/list-my-transactions.use-case';
 import { UpdatePreferencesUseCase } from '../application/update-preferences.use-case';
-import { TOKEN_PORT, TokenPort } from '../domain/ports/token.port';
 import { buildUser } from '../test/user.fixtures';
-import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { MeController } from './me.controller';
 
 function buildController(overrides: {

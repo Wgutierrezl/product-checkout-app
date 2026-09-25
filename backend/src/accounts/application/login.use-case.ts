@@ -1,12 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ResultAsync } from 'neverthrow';
 
+import { TOKEN_PORT, TokenPort } from '../../auth/domain/ports/token.port';
 import { UnauthorizedError } from '../../shared/errors/domain-error';
 import { AppResultAsync, errAsync, okAsync } from '../../shared/result/result.types';
 import { User } from '../domain/user.entity';
 import { normalizeEmail } from '../domain/normalize-email';
 import { PASSWORD_HASHER_PORT, PasswordHasherPort } from '../domain/ports/password-hasher.port';
-import { TOKEN_PORT, TokenPort } from '../domain/ports/token.port';
 import { USER_REPOSITORY_PORT, UserRepositoryPort } from '../domain/user.repository.port';
 
 export interface LoginCommand {

@@ -1,7 +1,7 @@
-import { forwardRef, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-import { AccountsModule } from '../accounts/accounts.module';
+import { AuthModule } from '../auth/auth.module';
 import { CustomersModule } from '../customers/customers.module';
 import { DeliveriesModule } from '../deliveries/deliveries.module';
 import { ProductsModule } from '../products/products.module';
@@ -20,14 +20,16 @@ import { TransactionsController } from './infrastructure/transactions.controller
  * three export their port token). `DYNAMO_DOCUMENT_CLIENT`/
  * `PAYMENT_GATEWAY_PORT`/`CLOCK_PORT`/`ID_GENERATOR_PORT` are all global
  * (DynamoModule/PaymentGatewayModule/SharedKernelModule on AppModule), so
- * they don't need to be imported here. `AccountsModule` (PR6) is imported
- * for `OptionalJwtAuthGuard`/`TOKEN_PORT`, applied on `POST /transactions`
- * only — guest checkout is completely unaffected. `forwardRef` is required
- * both ways: `AccountsModule` also imports `TransactionsModule` (for
- * `TRANSACTION_REPOSITORY_PORT`, needed by `GET /me/transactions`'s join).
+ * they don't need to be imported here. `AuthModule` (PR6) is imported for
+ * `OptionalJwtAuthGuard`/`TOKEN_PORT`, applied on `POST /transactions` only
+ * — guest checkout is completely unaffected. `AuthModule` depends only on
+ * config, never on `AccountsModule` or this module, so this is a plain
+ * import (no `forwardRef`) — `TransactionsModule` never imports
+ * `AccountsModule` directly (that cycle used to exist; `AccountsModule` now
+ * reaches this module's `TRANSACTION_REPOSITORY_PORT` one-directionally).
  */
 @Module({
-  imports: [ProductsModule, CustomersModule, DeliveriesModule, forwardRef(() => AccountsModule)],
+  imports: [ProductsModule, CustomersModule, DeliveriesModule, AuthModule],
   controllers: [TransactionsController],
   providers: [
     CreateTransactionUseCase,

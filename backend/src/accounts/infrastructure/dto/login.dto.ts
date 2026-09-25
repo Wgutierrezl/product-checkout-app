@@ -1,8 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsEmail, IsNotEmpty, IsString } from 'class-validator';
 
+import { ACCOUNTS_JWT_EXPIRES_IN_SECONDS } from '../../../auth/infrastructure/jwt-token.adapter';
 import { User } from '../../domain/user.entity';
-import { ACCOUNTS_JWT_EXPIRES_IN_SECONDS } from '../jwt-token.adapter';
 
 export class LoginDto {
   @ApiProperty({ example: 'jane.doe@example.com' })

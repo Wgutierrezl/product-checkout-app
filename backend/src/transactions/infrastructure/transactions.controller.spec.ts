@@ -5,9 +5,9 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
 
-import { OptionalJwtAuthGuard } from '../../accounts/infrastructure/guards/optional-jwt-auth.guard';
-import { TOKEN_PORT } from '../../accounts/domain/ports/token.port';
-import { JwtTokenAdapter } from '../../accounts/infrastructure/jwt-token.adapter';
+import { TOKEN_PORT } from '../../auth/domain/ports/token.port';
+import { OptionalJwtAuthGuard } from '../../auth/infrastructure/guards/optional-jwt-auth.guard';
+import { JwtTokenAdapter } from '../../auth/infrastructure/jwt-token.adapter';
 import { buildDelivery } from '../../deliveries/test/delivery.fixtures';
 import { NotFoundError, ValidationError } from '../../shared/errors/domain-error';
 import { errAsync, okAsync } from '../../shared/result/result.types';
