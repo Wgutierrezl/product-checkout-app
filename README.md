@@ -1,9 +1,42 @@
 # Product Checkout App
 
+[![CI](https://github.com/Wgutierrezl/product-checkout-app/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/Wgutierrezl/product-checkout-app/actions/workflows/ci.yml)
+[![Deploy](https://github.com/Wgutierrezl/product-checkout-app/actions/workflows/deploy.yml/badge.svg?branch=main)](https://github.com/Wgutierrezl/product-checkout-app/actions/workflows/deploy.yml)
+[![Backend coverage](https://img.shields.io/badge/backend%20coverage-100%25-brightgreen)](#testing--coverage)
+[![Frontend coverage](https://img.shields.io/badge/frontend%20coverage-99.6%25-brightgreen)](#testing--coverage)
+[![Mozilla Observatory](https://img.shields.io/badge/Mozilla%20Observatory-A%2B-brightgreen?logo=mozilla)](https://developer.mozilla.org/en-US/observatory/analyze?host=d17j4b8e1cjsp0.cloudfront.net)
+
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
+![React](https://img.shields.io/badge/React-20232A?logo=react&logoColor=61DAFB)
+![Redux Toolkit](https://img.shields.io/badge/Redux%20Toolkit-764ABC?logo=redux&logoColor=white)
+![NestJS](https://img.shields.io/badge/NestJS-E0234E?logo=nestjs&logoColor=white)
+![AWS](https://img.shields.io/badge/AWS-Lambda%20%C2%B7%20DynamoDB%20%C2%B7%20CloudFront-FF9900)
+![AWS CDK](https://img.shields.io/badge/AWS%20CDK-TypeScript-FF9900)
+
+<p align="center">
+  <img src="docs/screenshots/checkout-flow.gif" width="320" alt="Full mobile checkout: catalog, card and delivery form filled with the approved test card, summary, processing, payment approved, back to the store with the stock updated"><br>
+  <sub>Live checkout on a phone (sandbox card)</sub>
+</p>
+
 A mobile-first single-page checkout: pick a product, pay by credit card through a payment
 gateway (sandbox), and follow the payment to its final status. Five steps: **product page →
 credit card & delivery info → summary → final status → product page (stock updated)**. Guest
 checkout — no accounts — and the progress survives a page refresh.
+
+> [!TIP]
+> **Try it in 30 seconds**
+>
+> 1. Open the live app: **https://d17j4b8e1cjsp0.cloudfront.net**
+> 2. Pay with a sandbox test card — any future expiry, CVC `123`:
+>
+>    | Card | Result |
+>    |---|---|
+>    | `4242 4242 4242 4242` | Approved |
+>    | `4111 1111 1111 1111` | Declined |
+>
+> 3. Browse the API in [Swagger UI](https://z40rykuvgf.execute-api.us-east-1.amazonaws.com/docs).
+>
+> The payment modal has **Use** buttons that fill in each test card for you.
 
 Monorepo, three packages:
 
@@ -159,30 +192,43 @@ Captured from the live production app (store "Lumila").
 
 ## Architecture
 
+> Diagrams render as SVG on GitHub: use the expand / fullscreen button on each one to zoom in.
+
 ```mermaid
 flowchart TB
     Browser(("Browser"))
-    Gateway["Payment gateway (sandbox)"]
+    Gateway["Payment gateway"]
 
     subgraph AWS
-        CF["CloudFront distribution<br/>(HTTPS, security headers, CSP)"]
-        S3["S3 bucket<br/>(private, OAC-only)"]
-        HttpApi["API Gateway<br/>HTTP API"]
-        Lambda["Lambda — NestJS API<br/>(hexagonal)"]
-        DDB[("DynamoDB<br/>4 tables")]
-        SSM["SSM Parameter Store<br/>(SecureString secrets)"]
+        CF["CloudFront"]
+        S3["S3"]
+        HttpApi["HTTP API"]
+        Lambda["Lambda<br/>NestJS"]
+        DDB[("DynamoDB")]
+        SSM["SSM"]
     end
 
-    Browser -->|HTTPS, loads SPA| CF
-    CF -->|origin, OAC| S3
-    Browser -->|"tokenize card (public key)"| Gateway
-    Browser -->|HTTPS + CSP connect-src| HttpApi
+    Browser -->|1 SPA| CF
+    CF -->|OAC| S3
+    Browser -->|2 tokenize| Gateway
+    Browser -->|3 API calls| HttpApi
     HttpApi --> Lambda
-    Lambda -->|create/settle transaction| Gateway
-    Lambda -->|read/write, TransactWriteItems| DDB
-    Lambda -->|"GetParameters + kms:Decrypt at cold start"| SSM
-    Gateway -.->|webhook: transaction status| HttpApi
+    Lambda -->|charge / status| Gateway
+    Lambda -->|read / write| DDB
+    Lambda -->|secrets| SSM
+    Gateway -.->|webhook| HttpApi
 ```
+
+| Node / edge | Detail |
+|---|---|
+| **1 SPA** | Browser loads the SPA over HTTPS from CloudFront (security headers, CSP) |
+| **CloudFront → S3** | Private bucket, reachable only through Origin Access Control (OAC) |
+| **2 tokenize** | Card tokenized in the browser with the gateway's public key |
+| **3 API calls** | HTTPS to API Gateway (HTTP API), allowed by CSP `connect-src` |
+| **Lambda** | NestJS API, hexagonal; creates and settles transactions against the gateway (sandbox) |
+| **DynamoDB** | 4 tables; settlement uses `TransactWriteItems` |
+| **SSM** | Parameter Store `SecureString` secrets, `GetParameters` + `kms:Decrypt` at cold start |
+| **webhook** | Gateway reports the transaction status (dotted: optional path) |
 
 - **Frontend** — React 18 SPA (Vite), Redux Toolkit as the Flux store, a step machine
   (`PRODUCT → DETAILS → SUMMARY → RESULT`) instead of a router, and a persistence
@@ -202,48 +248,80 @@ flowchart TB
 
 ## Checkout flow
 
-The payment sequence, covering tokenization, idempotency, and the three ways a transaction
-gets settled:
+The payment sequence in two parts: **paying** (tokenization, idempotency, the charge) and
+**settling** (the three ways a transaction reaches its final status).
+
+**1. Pay**
 
 ```mermaid
+%%{init: {"sequence": {"actorMargin": 20, "width": 110, "mirrorActors": false}}}%%
 sequenceDiagram
-    participant U as Buyer
-    participant SPA as Browser (SPA)
-    participant GW as Payment gateway (sandbox)
-    participant API as Backend API
+    autonumber
+    actor U as Buyer
+    participant SPA as Browser
+    participant GW as Gateway
+    participant API
     participant DB as DynamoDB
 
-    U->>SPA: Fill card details, click "Continue"
-    SPA->>GW: Tokenize card (public key only — PAN/CVC never sent to our backend)
-    GW-->>SPA: Card token (single-use, sessionStorage on SUMMARY only)
+    U->>SPA: Continue
+    SPA->>GW: Tokenize card
+    GW-->>SPA: Card token
+    Note over SPA: token in sessionStorage<br/>(SUMMARY only)
     SPA->>API: GET /payment-acceptance
-    API->>GW: Fetch acceptance tokens (server-side proxy)
-    GW-->>API: Fresh acceptance tokens
-    API-->>SPA: Acceptance tokens
-    U->>SPA: Confirm order, click "Pay"
-    SPA->>API: POST /transactions (idempotencyKey = transaction id)
-    API->>DB: Look up idempotencyKey (a replay returns the original here, before any validation)
-    API->>API: Recompute price server-side, check stock
-    API->>DB: Persist PENDING transaction (reference)
-    API->>API: Build integrity signature (server-side secret)
-    API->>GW: Create card transaction (signed, server-computed amount)
-    alt Synchronous result (APPROVED / DECLINED)
+    API->>GW: Acceptance tokens
+    GW-->>API: Tokens
+    API-->>SPA: Tokens
+    U->>SPA: Pay
+    SPA->>API: POST /transactions
+    API->>DB: Look up idempotencyKey
+    Note over API,DB: A replay returns here,<br/>before any validation
+    API->>API: Price + stock check
+    API->>DB: Put PENDING
+    API->>API: Sign request
+    API->>GW: Charge
+    alt APPROVED / DECLINED
         GW-->>API: Result
-        API->>DB: Settle (TransactWriteItems: status + stock decrement + delivery)
-    else Ambiguous failure (timeout / network / 5xx)
-        API->>DB: Leave PENDING (no gateway id yet)
+        API->>DB: Settle (atomic)
+    else Timeout / network / 5xx
+        API->>DB: Stay PENDING
     end
-    API-->>SPA: 201, transaction (PENDING or final)
-    SPA->>API: GET /transactions/:id (poll while PENDING)
-    par Webhook (if reachable)
-        GW--)API: POST /transactions/webhook (checksum-verified)
-        API->>DB: Settle (idempotent, same TransactWriteItems path)
-    and Lazy poll
-        API->>GW: GET transaction status (only if stale)
-        API->>DB: Settle (idempotent, same TransactWriteItems path)
-    end
-    SPA-->>U: Final status (APPROVED / DECLINED / ERROR)
+    API-->>SPA: 201 transaction
 ```
+
+| Step | Detail |
+|---|---|
+| 1–3 | "Continue" tokenizes the card in the browser with the public key only: PAN and CVC never reach our backend. The single-use token lives in `sessionStorage` while on SUMMARY only |
+| 4–7 | The backend proxies the gateway's acceptance tokens server-side |
+| 9 | `idempotencyKey` = the transaction id (client-generated UUID) |
+| 10 | Idempotency lookup first: a replay returns the original transaction before any validation |
+| 11–14 | Price recomputed server-side, stock checked, `PENDING` row persisted with its `reference`, integrity signature built with a server-side secret, then the charge with the server-computed amount |
+| 15–17 | A synchronous result settles at once; an ambiguous failure (timeout / network / 5xx) leaves it `PENDING` (no gateway id yet) |
+
+**2. Settle**
+
+```mermaid
+%%{init: {"sequence": {"actorMargin": 20, "width": 110, "mirrorActors": false}}}%%
+sequenceDiagram
+    participant SPA as Browser
+    participant API
+    participant GW as Gateway
+    participant DB as DynamoDB
+
+    SPA->>API: GET /transactions/:id
+    Note over SPA,API: polled while PENDING
+    par Webhook (if reachable)
+        GW--)API: POST /transactions/webhook
+        API->>DB: Settle (atomic)
+    and Lazy poll
+        API->>GW: Get status (if stale)
+        API->>DB: Settle (atomic)
+    end
+    API-->>SPA: Final status
+```
+
+**Settle (atomic)** is the same use case on every path: one DynamoDB `TransactWriteItems` writing
+status + stock decrement + delivery, idempotent. The webhook is checksum-verified. The final status
+is `APPROVED`, `DECLINED` or `ERROR`.
 
 The sandbox is a shared account where our webhook URL can't be registered, so in practice the
 lazy poll is what settles transactions; the webhook endpoint is implemented and tested for a
@@ -298,6 +376,11 @@ erDiagram
   }
 ```
 
+Each table is keyed by its own id; `Transactions` doubles the id as the idempotency key.
+
+<details>
+<summary>Keys, GSIs and access pattern per table</summary>
+
 | Table | Partition key | GSIs | Purpose |
 |---|---|---|---|
 | `Products` | `productId` | — | Direct get; catalog listing via `Scan` |
@@ -305,10 +388,18 @@ erDiagram
 | `Transactions` | `transactionId` (= the idempotency key) | `ReferenceIndex` (`reference`), `GatewayTxIndex` (`gatewayTransactionId`) | Idempotency through the partition key; webhook lookup by gateway id, falling back to reference |
 | `Deliveries` | `deliveryId` | `TransactionIdIndex` (`transactionId`) | Embed a delivery on `GET /transactions/:id` |
 
+</details>
+
 ## API endpoints
 
 Full interactive documentation (request/response schemas, examples) is at `<api>/docs`; the raw
 OpenAPI document is at `<api>/docs-json` and imports directly into Postman.
+
+Everything is a `GET` except `POST /transactions` (create a checkout) and
+`POST /transactions/webhook` (called by the gateway); `GET /transactions/:id` is the poll.
+
+<details>
+<summary>All 9 endpoints</summary>
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -321,6 +412,8 @@ OpenAPI document is at `<api>/docs-json` and imports directly into Postman.
 | `POST` | `/transactions/webhook` | Gateway webhook — checksum-verified |
 | `GET` | `/customers/:id` | Customer detail (partially masked — no auth layer) |
 | `GET` | `/deliveries/:id` | Delivery detail (partially masked — no auth layer) |
+
+</details>
 
 ## Security
 
@@ -423,6 +516,11 @@ and only needs to run once per AWS account/region.
 
 ## Project structure
 
+Three packages (`backend/`, `frontend/`, `infra/`) plus the two GitHub Actions workflows.
+
+<details>
+<summary>Directory tree</summary>
+
 ```
 .
 ├── backend/    NestJS API — hexagonal architecture (domain/application/infrastructure per module)
@@ -436,6 +534,8 @@ and only needs to run once per AWS account/region.
 └── .github/
     └── workflows/  ci.yml (PR checks) and deploy.yml (OIDC deploy on push to main)
 ```
+
+</details>
 
 ## Development process
 
