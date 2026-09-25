@@ -312,7 +312,7 @@ export class DynamoTransactionRepository implements TransactionRepositoryPort {
   }
 
   /**
-   * Atomic 3-item `TransactWriteItems` per design's settlement snippet:
+   * Atomic 3-item `TransactWriteItems`, so settlement is all-or-nothing:
    * transition the transaction to APPROVED (conditioned on still PENDING),
    * decrement the product's stock (conditioned on sufficient stock), and
    * create the delivery (conditioned on not already existing). On

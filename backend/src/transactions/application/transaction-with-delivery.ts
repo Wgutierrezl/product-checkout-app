@@ -10,8 +10,9 @@ export interface TransactionWithDelivery {
 
 /**
  * Shared by `CreateTransactionUseCase` and `GetTransactionUseCase` (both
- * respond with an embedded delivery once a transaction is APPROVED, per
- * spec) — never looks up a delivery for a non-APPROVED transaction.
+ * respond with an embedded delivery once a transaction is APPROVED) — never
+ * looks up a delivery for a non-APPROVED transaction, since only settlement
+ * to APPROVED creates one.
  */
 export function attachDeliveryIfApproved(
   deliveries: DeliveryRepositoryPort,

@@ -16,7 +16,7 @@ import {
  *   reports DECLINED (no polling needed, mirrors a business rejection).
  * - Any other token (see `APPROVED_CARD_TOKEN`) -> the gateway CALL succeeds
  *   but synchronously reports PENDING (mirrors the real sandbox's observed
- *   behavior — see `sdd/backend-core/apply-progress`), then resolves to
+ *   behavior, which returns PENDING first), then resolves to
  *   APPROVED on the FIRST poll (`getTransaction`/`getTransactionByReference`)
  *   so the test's lazy-poll loop exercises the real polling code path.
  */

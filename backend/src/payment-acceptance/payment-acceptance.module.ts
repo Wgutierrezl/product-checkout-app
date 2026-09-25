@@ -4,7 +4,7 @@ import { GetPaymentAcceptanceUseCase } from './application/get-payment-acceptanc
 import { PaymentAcceptanceController } from './infrastructure/payment-acceptance.controller';
 
 /**
- * `CLOCK_PORT` is provided globally by `SharedKernelModule` (see batch 5) —
+ * `CLOCK_PORT` is provided globally by `SharedKernelModule` —
  * no local registration needed here anymore.
  */
 @Module({

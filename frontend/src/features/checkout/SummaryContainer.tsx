@@ -45,7 +45,8 @@ function isGatewayRejection(error: BackendApiError): boolean {
  * context behind a sliding-up summary sheet). Fetches payment-acceptance
  * links once on mount (for the checkbox permalinks) and AGAIN, always
  * fresh, immediately before every Pay attempt — acceptance tokens are
- * never reused across attempts (spec: Acceptance Token Freshness).
+ * never reused across attempts, so a stale or already-used token is never
+ * sent with a payment.
  */
 export function SummaryContainer() {
   const dispatch = useAppDispatch();

@@ -110,7 +110,7 @@ function extractGatewayErrorMessage(body: unknown, isSandbox: boolean): string |
  * Tokenizes a card DIRECTLY against the payment gateway's public
  * tokenization endpoint, authenticated with the PUBLIC key only — this is
  * the only client allowed to touch raw PAN/CVC, and the backend never sees
- * them (see design Amendment: tokenize at Continue).
+ * them. It runs when the buyer presses Continue on the payment form.
  */
 export async function tokenizeCard(input: TokenizeCardInput): Promise<TokenizeCardResult> {
   const { paymentGatewayUrl, paymentGatewayPublicKey, isSandbox } = getEnv();
