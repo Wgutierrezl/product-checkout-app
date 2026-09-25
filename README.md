@@ -376,6 +376,11 @@ erDiagram
   }
 ```
 
+Each table is keyed by its own id; `Transactions` doubles the id as the idempotency key.
+
+<details>
+<summary>Keys, GSIs and access pattern per table</summary>
+
 | Table | Partition key | GSIs | Purpose |
 |---|---|---|---|
 | `Products` | `productId` | — | Direct get; catalog listing via `Scan` |
@@ -383,10 +388,18 @@ erDiagram
 | `Transactions` | `transactionId` (= the idempotency key) | `ReferenceIndex` (`reference`), `GatewayTxIndex` (`gatewayTransactionId`) | Idempotency through the partition key; webhook lookup by gateway id, falling back to reference |
 | `Deliveries` | `deliveryId` | `TransactionIdIndex` (`transactionId`) | Embed a delivery on `GET /transactions/:id` |
 
+</details>
+
 ## API endpoints
 
 Full interactive documentation (request/response schemas, examples) is at `<api>/docs`; the raw
 OpenAPI document is at `<api>/docs-json` and imports directly into Postman.
+
+Everything is a `GET` except `POST /transactions` (create a checkout) and
+`POST /transactions/webhook` (called by the gateway); `GET /transactions/:id` is the poll.
+
+<details>
+<summary>All 9 endpoints</summary>
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -399,6 +412,8 @@ OpenAPI document is at `<api>/docs-json` and imports directly into Postman.
 | `POST` | `/transactions/webhook` | Gateway webhook — checksum-verified |
 | `GET` | `/customers/:id` | Customer detail (partially masked — no auth layer) |
 | `GET` | `/deliveries/:id` | Delivery detail (partially masked — no auth layer) |
+
+</details>
 
 ## Security
 
@@ -501,6 +516,11 @@ and only needs to run once per AWS account/region.
 
 ## Project structure
 
+Three packages (`backend/`, `frontend/`, `infra/`) plus the two GitHub Actions workflows.
+
+<details>
+<summary>Directory tree</summary>
+
 ```
 .
 ├── backend/    NestJS API — hexagonal architecture (domain/application/infrastructure per module)
@@ -514,6 +534,8 @@ and only needs to run once per AWS account/region.
 └── .github/
     └── workflows/  ci.yml (PR checks) and deploy.yml (OIDC deploy on push to main)
 ```
+
+</details>
 
 ## Development process
 
