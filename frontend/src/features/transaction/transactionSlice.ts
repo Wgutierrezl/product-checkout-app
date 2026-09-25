@@ -1,5 +1,6 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import type { TransactionStatus } from '../../api/types';
+import { otherTabStateAdopted } from '../checkout/checkoutSlice';
 
 export interface TransactionAmounts {
   productAmount: number;
@@ -49,6 +50,19 @@ const transactionSlice = createSlice({
       state.error = action.payload;
     },
     transactionCleared: () => initialTransactionState,
+  },
+  extraReducers: (builder) => {
+    builder.addCase(otherTabStateAdopted, (state, action) => {
+      const shared = action.payload.transaction;
+      if (shared.id !== state.id) {
+        state.amounts = null;
+        state.reference = null;
+        state.error = null;
+      }
+      state.id = shared.id;
+      state.status = shared.status;
+      state.pollStartedAt = shared.pollStartedAt;
+    });
   },
 });
 

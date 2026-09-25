@@ -1,6 +1,12 @@
 import type { Middleware } from '@reduxjs/toolkit';
 import type { CustomerInput, DeliveryInput, TransactionStatus } from '../../api/types';
-import type { CardSummary, CheckoutState, PaymentFormDraft } from '../../features/checkout/checkoutSlice';
+import type {
+  CardSummary,
+  CheckoutState,
+  PaymentFormDraft,
+  SharedCheckoutFields,
+  SharedTransactionFields,
+} from '../../features/checkout/checkoutSlice';
 import type { TransactionState } from '../../features/transaction/transactionSlice';
 import type { CheckoutStep } from '../../domain/checkout/stepMachine';
 import { findCountryByIso2 } from '../../domain/phone/countries';
@@ -38,19 +44,8 @@ const PHONE_NATIONAL_SHAPE = /^\d{0,15}$/;
 const MAX_DRAFT_TEXT_LENGTH = 500;
 const DRAFT_TEXT_FIELDS = ['cardHolder', 'fullName', 'email', 'address', 'city', 'region', 'postalCode'] as const;
 
-type PersistedCheckout = Pick<
-  CheckoutState,
-  | 'step'
-  | 'productId'
-  | 'quantity'
-  | 'customer'
-  | 'delivery'
-  | 'installments'
-  | 'idempotencyKey'
-  | 'submitAttempted'
-  | 'formDraft'
->;
-type PersistedTransaction = Pick<TransactionState, 'id' | 'status' | 'pollStartedAt'>;
+type PersistedCheckout = SharedCheckoutFields;
+type PersistedTransaction = SharedTransactionFields;
 type RehydratedCheckout = PersistedCheckout & Pick<CheckoutState, 'cardToken' | 'cardSummary'>;
 
 interface PersistedCardSession {
@@ -340,6 +335,36 @@ function readCardSession(): PersistedCardSession | null {
 }
 
 /**
+ * Parses, migrates and deeply validates a raw localStorage payload, with no
+ * side effects on storage. Returns ONLY whitelisted fields, rebuilt one by
+ * one, or `undefined` when the payload cannot be trusted. Also used to read
+ * what another tab just wrote (see `useCrossTabCheckoutSync`).
+ */
+export function parsePersistedState(
+  raw: string,
+): { checkout: PersistedCheckout; transaction: PersistedTransaction } | undefined {
+  const parsed = migrate(safeParse(raw));
+  if (!isPersistedState(parsed) || parsed.version !== PERSISTED_VERSION) {
+    return undefined;
+  }
+  const { checkout, transaction } = parsed;
+  return {
+    checkout: {
+      step: checkout.step,
+      productId: checkout.productId,
+      quantity: checkout.quantity,
+      customer: checkout.customer,
+      delivery: checkout.delivery,
+      installments: checkout.installments,
+      idempotencyKey: checkout.idempotencyKey,
+      submitAttempted: checkout.submitAttempted,
+      formDraft: pickFormDraft(checkout.formDraft),
+    },
+    transaction: { id: transaction.id, status: transaction.status, pollStartedAt: transaction.pollStartedAt },
+  };
+}
+
+/**
  * Reads and validates the persisted state on boot. Discards (and wipes) it
  * on any parse failure, shape/range mismatch on ANY field, or version
  * mismatch. Only whitelisted fields are ever returned, so anything else
@@ -356,8 +381,8 @@ export function loadPersistedState():
   | { checkout: RehydratedCheckout; transaction: PersistedTransaction }
   | undefined {
   const raw = safeGetItem(STORAGE_KEY);
-  const parsed = raw ? migrate(safeParse(raw)) : undefined;
-  if (!isPersistedState(parsed) || parsed.version !== PERSISTED_VERSION) {
+  const parsed = raw ? parsePersistedState(raw) : undefined;
+  if (!parsed) {
     if (raw) {
       safeRemoveItem(STORAGE_KEY);
     }
@@ -378,25 +403,13 @@ export function loadPersistedState():
   }
 
   const checkout: RehydratedCheckout = {
+    ...persisted,
     step: persisted.step === 'SUMMARY' && !canResumeSummary ? 'DETAILS' : persisted.step,
-    productId: persisted.productId,
-    quantity: persisted.quantity,
-    customer: persisted.customer,
-    delivery: persisted.delivery,
-    installments: persisted.installments,
-    idempotencyKey: persisted.idempotencyKey,
-    submitAttempted: persisted.submitAttempted,
-    formDraft: pickFormDraft(persisted.formDraft),
     cardToken: canResumeSummary ? cardSession.cardToken : null,
     cardSummary: canResumeSummary ? pickCardSummary(cardSession.cardSummary) : null,
   };
-  const transaction: PersistedTransaction = {
-    id: parsed.transaction.id,
-    status: parsed.transaction.status,
-    pollStartedAt: parsed.transaction.pollStartedAt,
-  };
 
-  return { checkout, transaction };
+  return { checkout, transaction: parsed.transaction };
 }
 
 /** Wipes all persisted checkout/transaction state (final status + "Back to store", or explicit reset). */

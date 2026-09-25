@@ -1,8 +1,8 @@
-import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
+import { createAction, createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import { canEnterStep, type CheckoutStep, type StepPrerequisites } from '../../domain/checkout/stepMachine';
 import { generateIdempotencyKey } from '../../domain/checkout/idempotencyKey';
 import type { CardBrand } from '../../domain/card/brand';
-import type { CustomerInput, DeliveryInput } from '../../api/types';
+import type { CustomerInput, DeliveryInput, TransactionStatus } from '../../api/types';
 
 export type SubmitStatus = 'idle' | 'tokenizing' | 'fetchingAcceptance' | 'submitting' | 'failed';
 
@@ -85,6 +85,41 @@ export interface CheckoutState {
    */
   draftRestored: boolean;
 }
+
+/** The checkout fields every tab shares through localStorage. */
+export type SharedCheckoutFields = Pick<
+  CheckoutState,
+  | 'step'
+  | 'productId'
+  | 'quantity'
+  | 'customer'
+  | 'delivery'
+  | 'installments'
+  | 'idempotencyKey'
+  | 'submitAttempted'
+  | 'formDraft'
+>;
+
+export interface SharedTransactionFields {
+  id: string | null;
+  status: TransactionStatus | null;
+  pollStartedAt: number | null;
+}
+
+export const OTHER_TAB_MESSAGE = 'This checkout continued in another tab.';
+
+/**
+ * Another tab holding the SAME card token (a duplicated tab) started paying
+ * or moved on from SUMMARY under the same idempotency key. This tab drops
+ * its token and adopts that tab's shared state, so it never pays a second
+ * time and its own localStorage writes never erase the other tab's
+ * in-flight marker or transaction. Handled by both the checkout and the
+ * transaction slices.
+ */
+export const otherTabStateAdopted = createAction<{
+  checkout: SharedCheckoutFields;
+  transaction: SharedTransactionFields;
+}>('checkout/otherTabStateAdopted');
 
 export const initialCheckoutState: CheckoutState = {
   step: 'PRODUCT',
@@ -214,6 +249,23 @@ const checkoutSlice = createSlice({
       state.draftRestored = false;
     },
     checkoutReset: () => initialCheckoutState,
+  },
+  extraReducers: (builder) => {
+    builder.addCase(otherTabStateAdopted, (state, action) => {
+      const shared = action.payload.checkout;
+      // Without the token this tab cannot sit on SUMMARY.
+      const step = shared.step === 'SUMMARY' ? 'DETAILS' : shared.step;
+      return {
+        ...state,
+        ...shared,
+        step,
+        cardToken: null,
+        cardSummary: null,
+        submitStatus: 'idle',
+        submitError: step === 'DETAILS' ? OTHER_TAB_MESSAGE : null,
+        draftRestored: false,
+      };
+    });
   },
 });
 
