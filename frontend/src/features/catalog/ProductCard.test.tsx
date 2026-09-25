@@ -101,6 +101,29 @@ describe('ProductCard', () => {
     expect(quantityOutput).toHaveAttribute('aria-live', 'polite');
   });
 
+  it('offers responsive srcSet candidates and grid-matched sizes for an Unsplash image, keeping src as the fallback', () => {
+    const imageUrl = 'https://images.unsplash.com/photo-1?w=600&fm=webp';
+    render(<ProductCard product={{ ...PRODUCT, imageUrl }} onBuy={jest.fn()} />);
+
+    const image = screen.getByRole('img', { name: PRODUCT.name });
+    expect(image).toHaveAttribute('src', imageUrl);
+    expect(image).toHaveAttribute(
+      'srcset',
+      expect.stringContaining('https://images.unsplash.com/photo-1?w=320&fm=webp 320w'),
+    );
+    expect(image.getAttribute('srcset')).toContain('?w=960&fm=webp 960w');
+    expect(image).toHaveAttribute('sizes', expect.stringContaining('(min-width: 1400px) 286px'));
+  });
+
+  it('renders src only (no srcSet or sizes) for an image outside the Unsplash host', () => {
+    render(<ProductCard product={PRODUCT} onBuy={jest.fn()} />);
+
+    const image = screen.getByRole('img', { name: PRODUCT.name });
+    expect(image).toHaveAttribute('src', PRODUCT.imageUrl);
+    expect(image).not.toHaveAttribute('srcset');
+    expect(image).not.toHaveAttribute('sizes');
+  });
+
   it('uses eager loading and high fetch priority when marked as the priority (LCP) image', () => {
     render(<ProductCard product={PRODUCT} onBuy={jest.fn()} priority />);
 

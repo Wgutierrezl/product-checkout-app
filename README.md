@@ -117,12 +117,12 @@ the gaps are listed in [Known limitations and next steps](#known-limitations-and
 | GitHub link with an updated README | This README plus one per package | — |
 | Deployed app connected to the backend | CloudFront SPA calling the HTTP API | [Live links](#live-links) |
 | [5] README completed | Setup, architecture, data model, API, coverage, this map | This document |
-| [5] Images render fast, nothing out of bounds | **Partial.** Explicit `width`/`height` and a 1:1 `aspect-ratio` (no layout shift), WebP, lazy loading below the fold, the first desktop row eager with `fetchpriority="high"` on the first image, clamped text. Images are hotlinked at one size with no `srcset` | [`ProductCard.tsx`](./frontend/src/features/catalog/ProductCard.tsx) |
+| [5] Images render fast, nothing out of bounds | Responsive `srcset` (320/480/600/640/960 px WebP) with `sizes` matched to the grid columns, a preconnect to the image host, explicit `width`/`height` and a 1:1 `aspect-ratio` (no layout shift), lazy loading below the fold, the first desktop row eager with `fetchpriority="high"` on the first image, clamped text. Images are still hotlinked from Unsplash, not served from our CDN | [`ProductCard.tsx`](./frontend/src/features/catalog/ProductCard.tsx) |
 | [20] Full credit-card checkout onboarding | The five steps work end to end on the live app with the sandbox test cards | [Checkout flow](#checkout-flow) |
 | [20] API working correctly | 25 e2e tests against the real `AppModule` and DynamoDB Local, plus the unit suite | [backend § End-to-end tests](./backend/README.md#end-to-end-tests) |
 | [30] >80% unit coverage, backend and frontend | Backend 100%, frontend >98% on every metric | [Testing & coverage](#testing--coverage) |
 | [20] App and API deployed on a cloud provider | Three CDK stacks (`DataStack`, `WebStack`, `ApiStack`) deployed by GitHub Actions over OIDC on every push to `main` | [Deployment & CI/CD](#deployment--cicd), [infra § Stacks](./infra/README.md#stacks) |
-| [Bonus 5] OWASP, HTTPS, security headers | HTTPS only, HSTS, strict CSP, `helmet()`; Mozilla Observatory **A+** (12/12). **Partial:** CSP `connect-src` is a regional wildcard and there is no `Permissions-Policy` | [Security](#security) |
+| [Bonus 5] OWASP, HTTPS, security headers | HTTPS only, HSTS, strict CSP, `Permissions-Policy` (camera, microphone, geolocation, payment, usb off), `helmet()`; Mozilla Observatory **A+** (12/12). **Partial:** CSP `connect-src` is a regional wildcard | [Security](#security) |
 | [Bonus 5] Responsive, works across browsers | **Partial.** Checked manually in Chromium, Firefox and Safari on an iPhone, down to iPhone SE 375×667; no automated cross-browser run | [frontend § Responsive design](./frontend/README.md#responsive-design) |
 | [Bonus 10] CSS skills | CSS Modules and design tokens, no framework; grid/flexbox, bottom sheet under 768px, `dvh` with a `vh` fallback, `prefers-reduced-motion` | [frontend § Responsive design](./frontend/README.md#responsive-design) |
 | [Bonus 10] Clean code | Strict TypeScript, pure domain functions, container/presentational split, ports with in-memory fakes in tests | [frontend § Architecture](./frontend/README.md#architecture), [backend § Architecture](./backend/README.md#architecture) |
@@ -334,7 +334,7 @@ place (mapped loosely to OWASP concerns):
 | Broken access control | Least-privilege IAM: the Lambda can only read/write the 4 checkout tables (+ `TransactWriteItems`) and `ssm:GetParameters` on exactly the 3 gateway secrets, with `kms:Decrypt` limited to calls made through SSM |
 | Credential exposure in CI/CD | Deploys authenticate via GitHub OIDC (`aws-actions/configure-aws-credentials`) — no long-lived AWS keys stored anywhere |
 | Transport security | HTTPS everywhere: CloudFront redirects HTTP→HTTPS; the API is only ever called over HTTPS |
-| Security misconfiguration | CloudFront response-headers policy (HSTS, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`) and a strict Content-Security-Policy; `helmet()` on the API |
+| Security misconfiguration | CloudFront response-headers policy (HSTS, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy` denying camera, microphone, geolocation, payment and usb) and a strict Content-Security-Policy; `helmet()` on the API |
 | Cross-origin abuse | CORS allowlist (`CORS_ALLOWED_ORIGINS`) — only the deployed SPA origin (and `localhost` in dev) may call the API |
 | Denial of service | Per-route rate limiting (`@nestjs/throttler`); `/health` and the webhook are explicitly exempt so gateway retries and health checks are never throttled away |
 | Injection / mass assignment | Global `ValidationPipe` with `whitelist` + `forbidNonWhitelisted` + `transform` — any unknown field on a request body is rejected, never silently dropped or passed through |
@@ -354,8 +354,8 @@ on `develop` (`npm test -- --coverage` in each package; `npm run test:e2e` for t
 |---|---|---|---|---|---|
 | `backend` (unit) | 100% | 100% | 100% | 100% | 49 suites / 412 tests |
 | `backend` (e2e) | — | — | — | — | 1 suite / 25 tests (DynamoDB Local) |
-| `frontend` | 99.57% | 98.43% | 100% | 99.54% | 54 suites / 704 tests |
-| `infra` | 100% | 100% | 100% | 100% | 6 suites / 39 tests |
+| `frontend` | 99.58% | 98.44% | 100% | 99.55% | 55 suites / 713 tests |
+| `infra` | 100% | 100% | 100% | 100% | 6 suites / 40 tests |
 
 - **Backend e2e** runs against a real `AppModule` and DynamoDB Local, with a deterministic
   fake gateway adapter (no network) — covers the full happy path, declined path, insufficient
@@ -458,12 +458,11 @@ Consciously left out of this scope, each with the reason or the next step:
   Next: align both on the same status code.
 - **A replay with a different body under the same key returns the original silently.** Safe (no
   second charge), but a mismatched body could get a 409/422 instead.
-- **Product images are hotlinked from Unsplash at a single size (600px WebP).** Next: `srcset` /
-  `sizes` and serve them from our own CloudFront distribution.
+- **Product images are hotlinked from Unsplash**, not served from our CDN. Next: copy them to
+  our own CloudFront distribution.
 - **Google Fonts is render-blocking.** Next: self-host the two font families.
 - **The CSP `connect-src` allows any `execute-api` host in the region** (to avoid a circular
   stack dependency, see [infra § Stacks](./infra/README.md#stacks)). Next: pin it to the API id.
-- **No `Permissions-Policy` header.** Next: add it to the CloudFront response-headers policy.
 - **The e2e suite is not run in CI**, because it needs a DynamoDB Local service container. Next:
   add that service to `ci.yml` and run `npm run test:e2e`.
 - **WebKit is not automated in CI.** Safari was checked manually on an iPhone; there is no
