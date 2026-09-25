@@ -84,15 +84,23 @@ mocked `fetch`. The CI gate is 80% (`jest.config.ts`); current numbers:
 
 ### End-to-end tests
 
+The suite drops and recreates every table, so it runs against its **own** DynamoDB Local,
+never the dev one from `docker compose up` (port 8000):
+
 ```bash
-docker compose up -d          # DynamoDB Local must be running
+docker run -d --rm -p 8001:8000 --name checkout-dynamodb-e2e amazon/dynamodb-local
 npm run test:e2e
+docker stop checkout-dynamodb-e2e   # --rm removes it; in-memory data goes with it
 ```
+
+It connects to `E2E_DYNAMO_ENDPOINT` (default `http://localhost:8001`) and ignores the app's
+`DYNAMO_ENDPOINT`. It refuses to start, before touching any table, if that endpoint uses port
+8000 (`test/e2e/support/e2e-dynamo-endpoint.ts`).
 
 Uses a **separate Jest config** (`test/jest-e2e.json`, its own `npm run test:e2e` script — never
 part of the unit coverage gate) and `supertest` against the real `AppModule`, with:
 
-- **Real DynamoDB Local**: all 4 tables are dropped and recreated at the start of every run
+- **Real DynamoDB Local** (a dedicated instance, see above): all 4 tables are dropped and recreated at the start of every run
   (`test/e2e/support/dynamo-e2e.support.ts`), then seeded with 2 fixed test products — no shared
   state with `npm run seed`'s catalog, no cross-run pollution.
 - **A deterministic, no-network fake gateway** (`test/e2e/support/fake-payment-gateway.adapter.ts`)

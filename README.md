@@ -289,6 +289,9 @@ Run any package's suite yourself: `npm test -- --coverage` in `backend/`, `front
 1. **Backend** — `docker compose up -d` (DynamoDB Local), copy `.env.example` to `.env`,
    `npm install && npm run seed && npm run start:dev`. Full details:
    [backend/README.md § Running locally](./backend/README.md#running-locally).
+   The e2e suite (`npm run test:e2e`) drops its tables, so it needs a separate DynamoDB Local on
+   port 8001: `docker run -d --rm -p 8001:8000 --name checkout-dynamodb-e2e amazon/dynamodb-local`
+   (see [backend/README.md § End-to-end tests](./backend/README.md#end-to-end-tests)).
 2. **Frontend** — copy `.env.example` to `.env.local`, fill in the three `VITE_*` variables,
    `npm install && npm run dev` (`http://localhost:5173`). Full details:
    [frontend/README.md § Running locally](./frontend/README.md#running-locally).

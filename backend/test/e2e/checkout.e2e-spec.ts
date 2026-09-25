@@ -1,7 +1,10 @@
 // Env vars MUST be set before `AppModule` (and its `ConfigModule.forRoot`)
 // is ever imported/instantiated — `configuration()` reads `process.env` at
 // each Nest module build, so this only works because these assignments run
-// before the imports below are evaluated.
+// before the imports below are evaluated. `resolveE2eDynamoEndpoint` is the
+// one exception: it has no imports of its own, so it is safe to load first.
+import { resolveE2eDynamoEndpoint } from './support/e2e-dynamo-endpoint';
+
 process.env.NODE_ENV = 'test';
 process.env.PAYMENT_GATEWAY_URL = 'https://gateway.e2e.test';
 process.env.PAYMENT_GATEWAY_PUBLIC_KEY = 'pub_test_e2e';
@@ -10,7 +13,9 @@ process.env.PAYMENT_GATEWAY_INTEGRITY_SECRET = 'integrity_secret_e2e';
 process.env.PAYMENT_GATEWAY_EVENTS_SECRET = 'events_secret_e2e';
 process.env.CORS_ALLOWED_ORIGINS = 'https://allowed.e2e.test';
 process.env.AWS_REGION = 'us-east-1';
-process.env.DYNAMO_ENDPOINT = 'http://localhost:8000';
+// A dedicated DynamoDB Local (E2E_DYNAMO_ENDPOINT, default :8001), never the
+// dev one on :8000 — the suite drops and recreates every table.
+process.env.DYNAMO_ENDPOINT = resolveE2eDynamoEndpoint(process.env);
 // DynamoDB Local never checks these against a real account, but it DOES
 // reject an Access Key ID that isn't shaped like a real AWS key (20
 // uppercase alphanumeric chars) with `UnrecognizedClientException` — these
