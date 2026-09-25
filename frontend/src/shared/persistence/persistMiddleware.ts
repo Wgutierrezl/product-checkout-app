@@ -49,6 +49,15 @@ export interface PersistableState {
   transaction: TransactionState;
 }
 
+/**
+ * Deliberately excludes `auth`. The optional-auth JWT lives ONLY in
+ * `sessionStorage`, written by the separate `authPersistMiddleware` (see
+ * `authPersistMiddleware.ts`) — this module's `PersistableState` (and the
+ * `toPersist` object built below) must never gain an `auth` field, or the
+ * token would leak into `localStorage`. See `store.authTokenIsolation.test.ts`
+ * for the end-to-end regression guarding this.
+ */
+
 // ---------------------------------------------------------------------------
 // Safe storage access — `localStorage` can throw in the wild (quota exceeded
 // in normal browsing, or any access at all denied in some private-browsing

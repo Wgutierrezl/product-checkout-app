@@ -1,13 +1,17 @@
 import { configureStore } from '@reduxjs/toolkit';
 import { catalogReducer } from '../features/catalog/catalogSlice';
+import { authReducer, initialAuthState, type AuthState } from '../features/auth/authSlice';
 import { checkoutReducer, initialCheckoutState } from '../features/checkout/checkoutSlice';
 import { initialTransactionState, transactionReducer } from '../features/transaction/transactionSlice';
+import { authPersistMiddleware } from '../shared/persistence/authPersistMiddleware';
 import { loadPersistedState, persistMiddleware } from '../shared/persistence/persistMiddleware';
+import { loadAuthSession } from '../shared/persistence/sessionAuthStorage';
 
 const rootReducer = {
   catalog: catalogReducer,
   checkout: checkoutReducer,
   transaction: transactionReducer,
+  auth: authReducer,
 };
 
 /**
@@ -18,15 +22,32 @@ const rootReducer = {
  * `submitStatus`, `amounts`, ...) must be re-merged with the slice's own
  * defaults here, or it would rehydrate as `undefined`.
  */
+/**
+ * The auth session is rehydrated from `sessionStorage` (see
+ * `sessionAuthStorage.ts`) — NEVER from `loadPersistedState()`, which only
+ * ever reads `localStorage`'s checkout/transaction whitelist. This keeps
+ * the JWT access token out of `localStorage` entirely, by construction.
+ */
+function buildAuthPreloadedState(): AuthState {
+  const session = loadAuthSession();
+  if (!session) {
+    return initialAuthState;
+  }
+  return { status: 'authenticated', ...session };
+}
+
 function buildPreloadedState() {
   const persisted = loadPersistedState();
+  const auth = buildAuthPreloadedState();
+
   if (!persisted) {
-    return undefined;
+    return { auth };
   }
 
   return {
     checkout: { ...initialCheckoutState, ...persisted.checkout },
     transaction: { ...initialTransactionState, ...persisted.transaction },
+    auth,
   };
 }
 
@@ -34,7 +55,7 @@ export function createAppStore() {
   return configureStore({
     reducer: rootReducer,
     preloadedState: buildPreloadedState(),
-    middleware: (getDefaultMiddleware) => getDefaultMiddleware().concat(persistMiddleware),
+    middleware: (getDefaultMiddleware) => getDefaultMiddleware().concat(persistMiddleware, authPersistMiddleware),
   });
 }
 
