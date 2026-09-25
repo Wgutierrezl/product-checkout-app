@@ -354,7 +354,7 @@ on `develop` (`npm test -- --coverage` in each package; `npm run test:e2e` for t
 |---|---|---|---|---|---|
 | `backend` (unit) | 100% | 100% | 100% | 100% | 49 suites / 412 tests |
 | `backend` (e2e) | — | — | — | — | 1 suite / 25 tests (DynamoDB Local) |
-| `frontend` | 99.57% | 98.43% | 100% | 99.54% | 54 suites / 703 tests |
+| `frontend` | 99.57% | 98.43% | 100% | 99.54% | 54 suites / 704 tests |
 | `infra` | 100% | 100% | 100% | 100% | 6 suites / 39 tests |
 
 - **Backend e2e** runs against a real `AppModule` and DynamoDB Local, with a deterministic
