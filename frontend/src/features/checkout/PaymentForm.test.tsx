@@ -670,12 +670,40 @@ describe('PaymentForm', () => {
       expect(onDraftChange).toHaveBeenCalledWith(expect.objectContaining({ region: 'Cundinamarca' }));
     });
 
-    it('shows a polite notice near the card fields when data was restored and the card is empty', () => {
+    it('shows a status notice near the card fields when data was restored and the card is empty', () => {
       renderForm({ initialDraft: DRAFT, showRestoredNotice: true });
 
       const notice = screen.getByRole('status');
       expect(notice).toHaveTextContent(RESTORED_NOTICE);
-      expect(notice).toHaveAttribute('aria-live', 'polite');
+      // role="status" already implies a polite live region.
+      expect(notice).not.toHaveAttribute('aria-live');
+    });
+
+    it('describes the card number field with the notice, so it is read when the buyer reaches the card', () => {
+      renderForm({ initialDraft: DRAFT, showRestoredNotice: true });
+
+      expect(screen.getByLabelText(/card number/i)).toHaveAccessibleDescription(RESTORED_NOTICE);
+    });
+
+    it('keeps a card number error in the description alongside the notice', async () => {
+      const user = userEvent.setup();
+      renderForm({ initialDraft: DRAFT, showRestoredNotice: true });
+      const cardNumber = screen.getByLabelText(/card number/i);
+
+      await user.click(cardNumber);
+      await user.tab();
+
+      expect(cardNumber).toHaveAccessibleDescription(`Card number is required ${RESTORED_NOTICE}`);
+    });
+
+    it('drops the notice from the card number description once it is dismissed', async () => {
+      const user = userEvent.setup();
+      renderForm({ initialDraft: DRAFT, showRestoredNotice: true });
+      const cardNumber = screen.getByLabelText(/card number/i);
+
+      await user.type(cardNumber, '4');
+
+      expect(cardNumber).not.toHaveAccessibleDescription(expect.stringContaining('never stored'));
     });
 
     it('does not show the notice when nothing was restored', () => {

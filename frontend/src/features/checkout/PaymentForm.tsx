@@ -27,6 +27,7 @@ import styles from './PaymentForm.module.css';
 /** How long the buyer must pause typing before the draft is reported. */
 export const DRAFT_SAVE_DEBOUNCE_MS = 400;
 
+const RESTORED_CARD_NOTICE_ID = 'card-reentry-notice';
 const RESTORED_CARD_NOTICE =
   'For your security, card details are never stored on this device. Please re-enter them.';
 
@@ -390,7 +391,7 @@ export function PaymentForm({
       <section>
         <h3 className={styles.sectionTitle}>Card</h3>
         {showCardReentryNotice && (
-          <p className={styles.notice} role="status" aria-live="polite">
+          <p id={RESTORED_CARD_NOTICE_ID} className={styles.notice} role="status">
             {RESTORED_CARD_NOTICE}
           </p>
         )}
@@ -400,6 +401,13 @@ export function PaymentForm({
               <div className={styles.cardNumberRow}>
                 <input
                   {...aria}
+                  // A status region mounted already holding its text may not
+                  // be announced, so the notice also describes this field.
+                  aria-describedby={
+                    [aria['aria-describedby'], showCardReentryNotice ? RESTORED_CARD_NOTICE_ID : undefined]
+                      .filter(Boolean)
+                      .join(' ') || undefined
+                  }
                   ref={(el) => {
                     fieldRefs.current.cardNumber = el ?? undefined;
                   }}
