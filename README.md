@@ -31,6 +31,7 @@ Each package README is the source of truth for its own internals; this document 
 - [Key decisions](#key-decisions)
 - [Project structure](#project-structure)
 - [Development process](#development-process)
+- [Known limitations and next steps](#known-limitations-and-next-steps)
 
 ## Live links
 
@@ -440,3 +441,29 @@ before any code, with AI assistance directing implementation rather than freehan
 Strict TDD (RED → GREEN → REFACTOR) throughout, one feature branch and PR per change, and
 adversarial review passes (a fresh reviewer, blind to the author's reasoning, checks the diff
 before merge) ahead of every merge into `develop`.
+
+## Known limitations and next steps
+
+Consciously left out of this scope, each with the reason or the next step:
+
+- **Three error body shapes.** Domain errors use `{ statusCode, error, message, path, timestamp }`
+  (`DomainErrorFilter`), validation errors use Nest's default `{ statusCode, message[], error }`,
+  and a 429 uses the throttler's `{ statusCode, message }`. Next: one global filter emitting an
+  `ErrorResponseDto`, with the error schemas and the 429 documented in Swagger.
+- **A definite gateway rejection answers 502, but its replay answers 201 `ERROR`.** The first
+  call propagates the 4xx as `PaymentGatewayError`; a replay returns the stored `ERROR` row.
+  Next: align both on the same status code.
+- **A replay with a different body under the same key returns the original silently.** Safe (no
+  second charge), but a mismatched body could get a 409/422 instead.
+- **Product images are hotlinked from Unsplash at a single size (600px WebP).** Next: `srcset` /
+  `sizes` and serve them from our own CloudFront distribution.
+- **Google Fonts is render-blocking.** Next: self-host the two font families.
+- **The CSP `connect-src` allows any `execute-api` host in the region** (to avoid a circular
+  stack dependency, see [infra § Stacks](./infra/README.md#stacks)). Next: pin it to the API id.
+- **No `Permissions-Policy` header.** Next: add it to the CloudFront response-headers policy.
+- **The e2e suite is not run in CI**, because it needs a DynamoDB Local service container. Next:
+  add that service to `ci.yml` and run `npm run test:e2e`.
+- **WebKit is not automated in CI.** Safari was checked manually on an iPhone; there is no
+  browser-automation suite yet.
+- **GitHub Actions are pinned to tags, not commit SHAs** — see
+  [infra § Hardening Next Steps](./infra/README.md#hardening-next-steps).
