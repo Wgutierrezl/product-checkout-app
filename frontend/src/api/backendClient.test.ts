@@ -71,6 +71,35 @@ describe('backendClient', () => {
     });
   });
 
+  describe('request headers (CORS preflight)', () => {
+    function sentHeaderNames(): string[] {
+      const init = fetchMock.mock.calls[0][1] as RequestInit;
+      return Object.keys(init.headers ?? {}).map((name) => name.toLowerCase());
+    }
+
+    it.each([
+      ['fetchProducts', () => fetchProducts()],
+      ['fetchPaymentAcceptance', () => fetchPaymentAcceptance()],
+      ['fetchTransaction', () => fetchTransaction('tx-1')],
+    ])('%s sends no Content-Type, so the body-less GET stays a CORS simple request', async (_name, call) => {
+      fetchMock.mockResolvedValueOnce(jsonResponse({}, { ok: true, status: 200 }));
+
+      await call();
+
+      expect(sentHeaderNames()).not.toContain('content-type');
+    });
+
+    it('createTransaction sends Content-Type: application/json with its JSON body', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse({}, { ok: true, status: 201 }));
+
+      await createTransaction({} as CreateTransactionInput);
+
+      const init = fetchMock.mock.calls[0][1] as RequestInit;
+      expect(init.headers).toEqual(expect.objectContaining({ 'Content-Type': 'application/json' }));
+      expect(typeof init.body).toBe('string');
+    });
+  });
+
   describe('fetchProducts', () => {
     it('GETs /products and returns the parsed array', async () => {
       const products = [

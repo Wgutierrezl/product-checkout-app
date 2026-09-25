@@ -11,7 +11,9 @@ export function applyGlobalConfig(app: INestApplication): void {
   const cors = configService.getOrThrow<AppConfig['cors']>('cors');
 
   app.use(helmet());
-  app.enableCors({ origin: cors.allowedOrigins });
+  // maxAge lets browsers cache a preflight for 10 minutes instead of
+  // repeating it before every non-simple request (e.g. each status poll).
+  app.enableCors({ origin: cors.allowedOrigins, maxAge: 600 });
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

@@ -324,6 +324,17 @@ describe('Checkout E2E', () => {
       expect(disallowed.headers['access-control-allow-origin']).toBeUndefined();
     });
 
+    it('lets browsers cache an allowed CORS preflight for 10 minutes', async () => {
+      const response = await request(server)
+        .options('/transactions')
+        .set('Origin', 'https://allowed.e2e.test')
+        .set('Access-Control-Request-Method', 'POST')
+        .set('Access-Control-Request-Headers', 'content-type')
+        .expect(204);
+      expect(response.headers['access-control-allow-origin']).toBe('https://allowed.e2e.test');
+      expect(response.headers['access-control-max-age']).toBe('600');
+    });
+
     it('never leaks a stack trace in an error response body', async () => {
       const response = await request(server).get('/products/not-a-uuid').expect(400);
       expect(response.body).not.toHaveProperty('stack');
