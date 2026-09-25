@@ -1,7 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
+import { DELIVERY_STATUSES, DeliveryStatus } from '../../../deliveries/domain/delivery.entity';
+import { TRANSACTION_STATUSES, TransactionStatus } from '../../../transactions/domain/transaction-status.vo';
 import { User, UserPreferences } from '../../domain/user.entity';
+import { TransactionHistoryItem } from '../../application/list-my-transactions.use-case';
 
 /**
  * Mirrors `CreateTransactionCustomerDto`/`CreateTransactionDeliveryDto`'s
@@ -89,6 +92,58 @@ export class MeResponseDto {
     dto.email = user.email;
     dto.fullName = user.fullName;
     dto.preferences = user.preferences ? UserPreferencesDto.fromDomain(user.preferences) : undefined;
+    return dto;
+  }
+}
+
+export class TransactionHistoryDeliveryDto {
+  @ApiProperty({ example: 'Cra 7 # 71-21', description: 'Full, unmasked address — the caller is the owner.' })
+  address!: string;
+
+  @ApiProperty({ example: 'Bogota' })
+  city!: string;
+
+  @ApiProperty({ example: 'Cundinamarca' })
+  region!: string;
+
+  @ApiPropertyOptional({ example: '110231' })
+  postalCode?: string;
+
+  @ApiProperty({ example: 'CREATED', enum: [...DELIVERY_STATUSES] })
+  status!: DeliveryStatus;
+}
+
+export class TransactionHistoryItemDto {
+  @ApiProperty({ example: 'a689d0fb-a89f-4a4c-a166-acd36c592ae4' })
+  transactionId!: string;
+
+  @ApiProperty({ example: 'e1a6b6b0-6c9e-4a3a-9c1a-6f6f2b6b1a10' })
+  productId!: string;
+
+  @ApiPropertyOptional({ example: 'Wireless Headphones', description: 'Absent if the product no longer exists.' })
+  productName?: string;
+
+  @ApiProperty({ example: 1_350_000, description: 'Total charged, in integer cents.' })
+  amount!: number;
+
+  @ApiProperty({ example: 'APPROVED', enum: [...TRANSACTION_STATUSES] })
+  status!: TransactionStatus;
+
+  @ApiProperty({ example: '2026-09-23T00:00:00.000Z' })
+  createdAt!: string;
+
+  @ApiPropertyOptional({ type: TransactionHistoryDeliveryDto, description: 'Present only once APPROVED.' })
+  delivery?: TransactionHistoryDeliveryDto;
+
+  static fromDomain(item: TransactionHistoryItem): TransactionHistoryItemDto {
+    const dto = new TransactionHistoryItemDto();
+    dto.transactionId = item.transactionId;
+    dto.productId = item.productId;
+    dto.productName = item.productName;
+    dto.amount = item.amount;
+    dto.status = item.status;
+    dto.createdAt = item.createdAt;
+    dto.delivery = item.delivery;
     return dto;
   }
 }

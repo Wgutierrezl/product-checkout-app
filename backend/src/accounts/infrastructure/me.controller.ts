@@ -2,8 +2,9 @@ import { Body, Controller, Get, Put, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags, ApiUnauthorizedResponse } from '@nestjs/swagger';
 
 import { GetMeUseCase } from '../application/get-me.use-case';
+import { ListMyTransactionsUseCase } from '../application/list-my-transactions.use-case';
 import { UpdatePreferencesUseCase } from '../application/update-preferences.use-case';
-import { MeResponseDto, UpdatePreferencesDto } from './dto/me.dto';
+import { MeResponseDto, TransactionHistoryItemDto, UpdatePreferencesDto } from './dto/me.dto';
 import { JwtAuthGuard, RequestWithUserId } from './guards/jwt-auth.guard';
 
 /**
@@ -20,6 +21,7 @@ export class MeController {
   constructor(
     private readonly getMeUseCase: GetMeUseCase,
     private readonly updatePreferencesUseCase: UpdatePreferencesUseCase,
+    private readonly listMyTransactionsUseCase: ListMyTransactionsUseCase,
   ) {}
 
   @Get()
@@ -62,6 +64,25 @@ export class MeController {
 
     return result.match(
       (user) => MeResponseDto.fromDomain(user),
+      (error) => {
+        throw error;
+      },
+    );
+  }
+
+  @Get('transactions')
+  @ApiOperation({
+    summary:
+      "List the authenticated user's own purchase history (newest first, capped at the latest 50), " +
+      'joined with each product name and — once APPROVED — the full, unmasked delivery.',
+  })
+  @ApiOkResponse({ type: [TransactionHistoryItemDto] })
+  @ApiUnauthorizedResponse({ description: 'Missing, expired, or tampered Bearer token' })
+  async getMyTransactions(@Req() request: RequestWithUserId): Promise<TransactionHistoryItemDto[]> {
+    const result = await this.listMyTransactionsUseCase.execute(request.userId!);
+
+    return result.match(
+      (items) => items.map((item) => TransactionHistoryItemDto.fromDomain(item)),
       (error) => {
         throw error;
       },

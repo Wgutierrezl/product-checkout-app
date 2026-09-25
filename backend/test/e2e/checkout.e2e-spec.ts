@@ -46,6 +46,7 @@ import {
 import {
   cleanAndSeedTables,
   findCustomerIdByEmail,
+  getRawTransactionItem,
   PRODUCT_A_ID,
   PRODUCT_A_STOCK,
   PRODUCT_B_ID,
@@ -579,5 +580,105 @@ describe('Accounts E2E (register -> login)', () => {
         .expect(400);
       expect(response.body).not.toHaveProperty('stack');
     });
+  });
+});
+
+describe('POST /transactions — optional userId write-through, GET /me/transactions (PR6)', () => {
+  let historyApp: INestApplication;
+  let historyServer: ReturnType<INestApplication['getHttpServer']>;
+  let accessToken: string;
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(PAYMENT_GATEWAY_PORT)
+      .useValue(new FakePaymentGatewayAdapter())
+      .compile();
+
+    historyApp = moduleRef.createNestApplication();
+    applyGlobalConfig(historyApp);
+    await historyApp.init();
+    historyServer = historyApp.getHttpServer();
+
+    const body = { fullName: 'E2E History Buyer', email: `e2e-history-${randomUUID()}@example.test`, password: 'correct-horse-battery-staple' };
+    await request(historyServer).post('/auth/register').send(body).expect(201);
+    const loginResponse = await request(historyServer)
+      .post('/auth/login')
+      .send({ email: body.email, password: body.password })
+      .expect(200);
+    accessToken = loginResponse.body.accessToken;
+  }, 30_000);
+
+  afterAll(async () => {
+    await historyApp?.close();
+  });
+
+  it('guest checkout (no Authorization header) writes NO userId attribute — approval-baseline regression, byte-identical', async () => {
+    const body = buildCreateTransactionBody(PRODUCT_A_ID, 1, APPROVED_CARD_TOKEN);
+
+    const response = await request(historyServer).post('/transactions').send(body).expect(201);
+
+    const rawItem = await getRawTransactionItem(response.body.id);
+    expect(rawItem).toBeDefined();
+    expect(Object.keys(rawItem ?? {})).not.toContain('userId');
+  });
+
+  it('an INVALID Bearer token proceeds as guest — never 401, and still writes no userId', async () => {
+    const body = buildCreateTransactionBody(PRODUCT_A_ID, 1, APPROVED_CARD_TOKEN);
+
+    const response = await request(historyServer)
+      .post('/transactions')
+      .set('Authorization', 'Bearer not-a-real-token')
+      .send(body)
+      .expect(201);
+
+    const rawItem = await getRawTransactionItem(response.body.id);
+    expect(Object.keys(rawItem ?? {})).not.toContain('userId');
+  });
+
+  it('a VALID Bearer token writes the userId attribute, and the purchase shows up in GET /me/transactions', async () => {
+    const body = buildCreateTransactionBody(PRODUCT_A_ID, 1, APPROVED_CARD_TOKEN);
+
+    const createResponse = await request(historyServer)
+      .post('/transactions')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send(body)
+      .expect(201);
+    const transactionId = createResponse.body.id as string;
+
+    const rawItem = await getRawTransactionItem(transactionId);
+    expect(rawItem?.userId).toEqual(expect.any(String));
+
+    const approved = await pollUntilApproved(historyServer, transactionId);
+    expect(approved.status).toBe('APPROVED');
+
+    const history = await request(historyServer)
+      .get('/me/transactions')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+
+    const entry = (history.body as Array<Record<string, unknown>>).find((item) => item.transactionId === transactionId);
+    expect(entry).toBeDefined();
+    expect(entry).toMatchObject({
+      transactionId,
+      productId: PRODUCT_A_ID,
+      status: 'APPROVED',
+      amount: expect.any(Number),
+      createdAt: expect.any(String),
+    });
+    expect((entry as Record<string, unknown>).productName).toEqual(expect.any(String));
+    const delivery = (entry as Record<string, { address?: string }>).delivery as { address?: string } | undefined;
+    expect(delivery?.address).toBe(body.delivery.address);
+  });
+
+  it('never returns another user\'s or a guest\'s transactions in GET /me/transactions', async () => {
+    const response = await request(historyServer)
+      .get('/me/transactions')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+
+    for (const item of response.body as Array<{ transactionId: string }>) {
+      const rawItem = await getRawTransactionItem(item.transactionId);
+      expect(rawItem?.userId).toEqual(expect.any(String));
+    }
   });
 });

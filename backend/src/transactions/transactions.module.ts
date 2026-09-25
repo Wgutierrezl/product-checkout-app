@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { AccountsModule } from '../accounts/accounts.module';
@@ -22,10 +22,12 @@ import { TransactionsController } from './infrastructure/transactions.controller
  * (DynamoModule/PaymentGatewayModule/SharedKernelModule on AppModule), so
  * they don't need to be imported here. `AccountsModule` (PR6) is imported
  * for `OptionalJwtAuthGuard`/`TOKEN_PORT`, applied on `POST /transactions`
- * only — guest checkout is completely unaffected.
+ * only — guest checkout is completely unaffected. `forwardRef` is required
+ * both ways: `AccountsModule` also imports `TransactionsModule` (for
+ * `TRANSACTION_REPOSITORY_PORT`, needed by `GET /me/transactions`'s join).
  */
 @Module({
-  imports: [ProductsModule, CustomersModule, DeliveriesModule, AccountsModule],
+  imports: [ProductsModule, CustomersModule, DeliveriesModule, forwardRef(() => AccountsModule)],
   controllers: [TransactionsController],
   providers: [
     CreateTransactionUseCase,

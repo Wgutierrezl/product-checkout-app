@@ -1,8 +1,12 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+import { DeliveriesModule } from '../deliveries/deliveries.module';
+import { ProductsModule } from '../products/products.module';
 import type { AppConfig } from '../shared/config/configuration';
+import { TransactionsModule } from '../transactions/transactions.module';
 import { GetMeUseCase } from './application/get-me.use-case';
+import { ListMyTransactionsUseCase } from './application/list-my-transactions.use-case';
 import { LoginUseCase } from './application/login.use-case';
 import { RegisterUseCase } from './application/register.use-case';
 import { UpdatePreferencesUseCase } from './application/update-preferences.use-case';
@@ -21,14 +25,23 @@ import { MeController } from './infrastructure/me.controller';
  * `DYNAMO_DOCUMENT_CLIENT`/`CLOCK_PORT`/`ID_GENERATOR_PORT` are all global
  * (`DynamoModule`/`SharedKernelModule` on `AppModule`), so they don't need to
  * be imported here — same pattern as `TransactionsModule`.
+ *
+ * `TransactionsModule` is imported with `forwardRef` (PR6): it imports
+ * `AccountsModule` back for `OptionalJwtAuthGuard`/`TOKEN_PORT` on
+ * `POST /transactions`, so this is a deliberate, minimal bidirectional
+ * module dependency (NestJS's documented pattern for exactly this shape),
+ * not an accidental cycle. `ProductsModule`/`DeliveriesModule` have no such
+ * back-reference and are imported plainly.
  */
 @Module({
+  imports: [ProductsModule, DeliveriesModule, forwardRef(() => TransactionsModule)],
   controllers: [AuthController, MeController],
   providers: [
     RegisterUseCase,
     LoginUseCase,
     GetMeUseCase,
     UpdatePreferencesUseCase,
+    ListMyTransactionsUseCase,
     JwtAuthGuard,
     OptionalJwtAuthGuard,
     { provide: USER_REPOSITORY_PORT, useClass: DynamoUserRepository },
