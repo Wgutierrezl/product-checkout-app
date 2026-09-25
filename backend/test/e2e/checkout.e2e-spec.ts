@@ -208,6 +208,24 @@ describe('Checkout E2E', () => {
       expect(response.body).not.toHaveProperty('stack');
     });
 
+    it.each([
+      ['customer', 'missing', undefined],
+      ['customer', 'null', null],
+      ['delivery', 'missing', undefined],
+      ['delivery', 'null', null],
+    ])('rejects a body whose %s object is %s with 400, not 500', async (field, _case, value) => {
+      const body: Record<string, unknown> = { ...buildCreateTransactionBody(PRODUCT_A_ID, 1, APPROVED_CARD_TOKEN) };
+      if (value === undefined) {
+        delete body[field];
+      } else {
+        body[field] = value;
+      }
+      const callsBefore = fakeGateway.createCardTransactionCalls;
+      const response = await request(server).post('/transactions').send(body).expect(400);
+      expect(response.body).not.toHaveProperty('stack');
+      expect(fakeGateway.createCardTransactionCalls).toBe(callsBefore);
+    });
+
     it('rejects insufficient stock with 409 and makes no gateway call', async () => {
       const callsBefore = fakeGateway.createCardTransactionCalls;
       await request(server)
@@ -275,6 +293,15 @@ describe('Checkout E2E', () => {
     it('rejects an invalid checksum with 400 and applies no side effects', async () => {
       const payload = buildWebhookPayload({ gatewayTransactionId: 'gw-unknown-bad-checksum', status: 'APPROVED' });
       payload.signature.checksum = '0'.repeat(64);
+
+      const response = await request(server).post('/transactions/webhook').send(payload).expect(400);
+      expect(response.body).not.toHaveProperty('stack');
+    });
+    it('rejects a payload without a signature object with 400, not 500', async () => {
+      const { signature: _signature, ...payload } = buildWebhookPayload({
+        gatewayTransactionId: 'gw-unknown-no-signature',
+        status: 'APPROVED',
+      });
 
       const response = await request(server).post('/transactions/webhook').send(payload).expect(400);
       expect(response.body).not.toHaveProperty('stack');

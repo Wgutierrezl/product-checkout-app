@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsArray, IsInt, IsObject, IsString, ValidateNested } from 'class-validator';
+import { IsArray, IsDefined, IsInt, IsObject, IsString, ValidateNested } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 import { WebhookEventPayload, WebhookSignature } from '../../../shared/payment-gateway/domain/webhook-checksum';
@@ -37,6 +37,9 @@ export class WebhookEventDto implements WebhookEventPayload {
   environment!: string;
 
   @ApiProperty({ type: WebhookSignatureDto })
+  // Without `@IsDefined()`, `@ValidateNested()` skips a missing signature.
+  @IsDefined()
+  @IsObject()
   @ValidateNested()
   @Type(() => WebhookSignatureDto)
   signature!: WebhookSignatureDto;

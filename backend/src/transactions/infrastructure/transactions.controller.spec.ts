@@ -227,6 +227,23 @@ describe('TransactionsController', () => {
         .expect(400);
     });
 
+    it.each([
+      ['customer', 'missing', undefined],
+      ['customer', 'null', null],
+      ['customer', 'a primitive', 'jane.doe@example.com'],
+      ['delivery', 'missing', undefined],
+      ['delivery', 'null', null],
+      ['delivery', 'a primitive', 'Cra 1 # 2-3'],
+    ])('rejects a POST body whose nested %s object is %s with 400', async (field, _case, value) => {
+      const body: Record<string, unknown> = { ...validCreateBody() };
+      if (value === undefined) {
+        delete body[field];
+      } else {
+        body[field] = value;
+      }
+      await request(app.getHttpServer()).post('/transactions').send(body).expect(400);
+    });
+
     it('rejects installments outside the 1-36 range with 400', async () => {
       await request(app.getHttpServer())
         .post('/transactions')
@@ -273,6 +290,20 @@ describe('TransactionsController', () => {
 
     it('accepts a well-formed webhook payload and preserves the arbitrary nested data object', async () => {
       await request(app.getHttpServer()).post('/transactions/webhook').send(signedWebhookPayload()).expect(200);
+    });
+
+    it.each([
+      ['missing', undefined],
+      ['null', null],
+      ['a primitive', 'e303adc5'],
+    ])('rejects a webhook payload whose signature object is %s with 400', async (_case, value) => {
+      const payload: Record<string, unknown> = { ...signedWebhookPayload() };
+      if (value === undefined) {
+        delete payload.signature;
+      } else {
+        payload.signature = value;
+      }
+      await request(app.getHttpServer()).post('/transactions/webhook').send(payload).expect(400);
     });
 
     it('rejects a webhook payload missing required top-level fields with 400', async () => {
