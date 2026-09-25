@@ -12,6 +12,10 @@ import { GatewayTokenizeError } from '../../api/types';
 
 jest.mock('../../api/paymentGatewayClient');
 
+// Several tests type a whole payment form through user-event, which can
+// exceed Jest's 5 s default when the full suite runs on a busy machine.
+jest.setTimeout(15_000);
+
 const mockedTokenizeCard = paymentGatewayClient.tokenizeCard as jest.MockedFunction<
   typeof paymentGatewayClient.tokenizeCard
 >;
