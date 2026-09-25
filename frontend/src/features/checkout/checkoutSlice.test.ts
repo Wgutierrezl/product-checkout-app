@@ -372,6 +372,37 @@ describe('checkoutSlice', () => {
       expect(store.getState().checkout.formDraft).toBeNull();
     });
 
+    it('drops the draft (personal data) once a submitted payment reaches RESULT', () => {
+      const store = buildStore();
+      store.dispatch(productSelected({ productId: 'p1', quantity: 1 }));
+      store.dispatch(customerAndDeliverySet({ customer: CUSTOMER, delivery: DELIVERY }));
+      store.dispatch(formDraftSaved(DRAFT));
+      store.dispatch(cardTokenized({ cardToken: 'tok_test_card', cardSummary: CARD_SUMMARY }));
+
+      store.dispatch(stepChangeRequested('RESULT'));
+
+      expect(store.getState().checkout.step).toBe('RESULT');
+      expect(store.getState().checkout.formDraft).toBeNull();
+    });
+
+    it('keeps the draft when a RESULT transition is refused', () => {
+      const store = buildStore();
+      store.dispatch(formDraftSaved(DRAFT));
+
+      store.dispatch(stepChangeRequested('RESULT'));
+
+      expect(store.getState().checkout.formDraft).toEqual(DRAFT);
+    });
+
+    it('drops the draft when a resumed payment forces RESULT', () => {
+      const store = buildStore();
+      store.dispatch(formDraftSaved(DRAFT));
+
+      store.dispatch(stepForced('RESULT'));
+
+      expect(store.getState().checkout.formDraft).toBeNull();
+    });
+
     it('turns off the restored flag once a card is tokenized again this session', () => {
       const store = configureStore({
         reducer: { checkout: checkoutReducer },

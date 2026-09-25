@@ -347,6 +347,29 @@ describe('persistMiddleware', () => {
       expect(loadPersistedState()?.checkout.formDraft).toEqual(DRAFT);
     });
 
+    it('never rehydrates a draft next to a RESULT step (left by an older version)', () => {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          version: 4,
+          checkout: {
+            step: 'RESULT',
+            productId: 'p1',
+            quantity: 1,
+            customer: CUSTOMER,
+            delivery: DELIVERY,
+            installments: 1,
+            idempotencyKey: 'c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e7f',
+            submitAttempted: false,
+            formDraft: DRAFT,
+          },
+          transaction: { id: 't1', status: 'APPROVED', pollStartedAt: 1 },
+        }),
+      );
+
+      expect(loadPersistedState()?.checkout.formDraft).toBeNull();
+    });
+
     it('never rehydrates card fields planted inside the form draft', () => {
       const store = buildStore();
       store.dispatch(productSelected({ productId: 'p1', quantity: 1 }));

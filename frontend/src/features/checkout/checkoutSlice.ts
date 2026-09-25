@@ -154,6 +154,19 @@ function prerequisitesFrom(state: CheckoutState): StepPrerequisites {
   };
 }
 
+/**
+ * RESULT is only ever reached after a payment was submitted, so the form
+ * draft (personal data typed for this attempt) has served its purpose and
+ * is dropped there rather than kept until "Back to store".
+ */
+function enterStep(state: CheckoutState, step: CheckoutStep): void {
+  state.step = step;
+  if (step === 'RESULT') {
+    state.formDraft = null;
+    state.draftRestored = false;
+  }
+}
+
 const checkoutSlice = createSlice({
   name: 'checkout',
   initialState: initialCheckoutState,
@@ -164,7 +177,7 @@ const checkoutSlice = createSlice({
     },
     stepChangeRequested: (state, action: PayloadAction<CheckoutStep>) => {
       if (canEnterStep(action.payload, prerequisitesFrom(state))) {
-        state.step = action.payload;
+        enterStep(state, action.payload);
       }
     },
     /**
@@ -176,7 +189,7 @@ const checkoutSlice = createSlice({
      * hatch — every other transition should go through `stepChangeRequested`.
      */
     stepForced: (state, action: PayloadAction<CheckoutStep>) => {
-      state.step = action.payload;
+      enterStep(state, action.payload);
     },
     customerAndDeliverySet: (
       state,

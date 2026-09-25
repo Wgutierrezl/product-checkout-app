@@ -358,7 +358,8 @@ export function parsePersistedState(
       installments: checkout.installments,
       idempotencyKey: checkout.idempotencyKey,
       submitAttempted: checkout.submitAttempted,
-      formDraft: pickFormDraft(checkout.formDraft),
+      // RESULT means a payment was submitted: no draft belongs next to it.
+      formDraft: checkout.step === 'RESULT' ? null : pickFormDraft(checkout.formDraft),
     },
     transaction: { id: transaction.id, status: transaction.status, pollStartedAt: transaction.pollStartedAt },
   };
